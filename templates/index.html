@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SyncMeta</title>
+  <style>
+    :root {
+      --black: #000000;
+      --zinc-950: #0a0a0b;
+      --zinc-900: #18181b;
+      --zinc-800: #27272a;
+      --zinc-700: #3f3f46;
+      --zinc-600: #52525b;
+      --zinc-500: #71717a;
+      --zinc-400: #a1a1aa;
+      --zinc-300: #d4d4d8;
+      --zinc-100: #f4f4f5;
+      --white: #ffffff;
+      --accent: #7c6df7;
+      --accent-dim: #6c5ce7;
+      --green: #34d399;
+      --red: #f87171;
+      --orange: #fbbf24;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: var(--black);
+      color: var(--zinc-300);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Navbar ────────────────────────── */
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(0,0,0,0.80);
+      backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px);
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      padding: 0 24px;
+    }
+    .nav-inner {
+      max-width: 1100px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 56px;
+    }
+    .nav-logo {
+      font-size: 18px; font-weight: 700; color: var(--zinc-100);
+      letter-spacing: -0.5px; text-decoration: none;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .nav-logo svg { width: 22px; height: 22px; }
+    .nav-links { display: flex; gap: 0; }
+    .nav-link {
+      padding: 16px 16px; font-size: 14px; font-weight: 500;
+      color: var(--zinc-400); text-decoration: none; cursor: pointer;
+      border-bottom: 2px solid transparent; transition: all 0.15s;
+      background: none; border-top: none; border-left: none; border-right: none;
+    }
+    .nav-link:hover { color: var(--white); }
+    .nav-link.active { color: var(--white); font-weight: 700; border-bottom-color: var(--white); }
+
+    /* ── Layout ────────────────────────── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Hero / Landing ───────────────── */
+    .hero {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center;
+      min-height: calc(100vh - 56px); padding: 60px 20px;
+      position: relative; overflow: hidden;
+    }
+    .hero::before {
+      content: ''; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 600px 400px at 50% 40%, rgba(124,109,247,0.06) 0%, transparent 70%),
+        radial-gradient(ellipse 800px 300px at 30% 60%, rgba(124,109,247,0.03) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-card {
+      position: relative;
+      background: rgba(10,10,11,0.6);
+      border: 1px solid var(--zinc-800);
+      border-radius: 16px;
+      padding: 56px 48px 48px;
+      max-width: 620px; width: 100%;
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 14px; font-weight: 600; color: var(--accent);
+      margin-bottom: 24px; letter-spacing: -0.3px;
+    }
+    .hero-badge svg { width: 20px; height: 20px; }
+    .hero h1 {
+      font-size: 40px; font-weight: 800; color: var(--white);
+      line-height: 1.15; letter-spacing: -1.5px; margin-bottom: 16px;
+    }
+    .hero p {
+      font-size: 16px; color: var(--zinc-400); line-height: 1.6;
+      max-width: 460px; margin: 0 auto 32px;
+    }
+    .hero-services {
+      display: flex; gap: 12px; justify-content: center; margin-bottom: 36px;
+      flex-wrap: wrap;
+    }
+    .service-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 22px; border-radius: 8px;
+      background: var(--zinc-950);
+      border: 1px solid var(--zinc-800);
+      color: var(--zinc-100); font-size: 14px; font-weight: 600;
+      transition: border-color 0.2s;
+    }
+    .service-pill:hover { border-color: var(--zinc-600); }
+    .service-pill img, .service-pill svg { width: 20px; height: 20px; border-radius: 4px; }
+    .hero-cta {
+      display: inline-flex; padding: 12px 36px; border-radius: 50px;
+      background: linear-gradient(135deg, var(--accent-dim), #a78bfa);
+      color: var(--white); font-size: 15px; font-weight: 600;
+      border: none; cursor: pointer; transition: opacity 0.2s;
+      text-decoration: none; letter-spacing: -0.2px;
+    }
+    .hero-cta:hover { opacity: 0.9; }
+
+    .hero-footer {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      display: flex; justify-content: center; gap: 24px;
+      padding: 20px; font-size: 13px; color: var(--zinc-600);
+    }
+    .hero-footer a { color: var(--zinc-500); text-decoration: none; }
+    .hero-footer a:hover { color: var(--zinc-300); }
+
+    /* ── App section (hidden until Get Started) ─ */
+    .app-section { display: none; padding: 32px 0 64px; }
+    .app-section.active { display: block; }
+
+    /* ── Cards ─────────────────────────── */
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px; margin-bottom: 24px;
+    }
+    .card {
+      background: var(--zinc-950); border: 1px solid var(--zinc-900);
+      border-radius: 8px; padding: 18px; transition: border-color 0.2s;
+    }
+    .card:hover { border-color: var(--zinc-700); }
+    .card-label {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      color: var(--zinc-500); margin-bottom: 6px; font-weight: 600;
+    }
+    .card-value { font-size: 22px; font-weight: 700; color: var(--zinc-100); }
+    .card-sub { font-size: 12px; color: var(--zinc-500); margin-top: 4px; }
+
+    /* ── Panels ────────────────────────── */
+    .panel {
+      background: var(--zinc-950); border: 1px solid var(--zinc-900);
+      border-radius: 8px; overflow: hidden; margin-bottom: 20px;
+      transition: border-color 0.2s;
+    }
+    .panel:hover { border-color: var(--zinc-800); }
+    .panel-header {
+      padding: 14px 18px; border-bottom: 1px solid var(--zinc-900);
+      font-size: 14px; font-weight: 700; color: var(--zinc-100);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+
+    /* ── Tables ────────────────────────── */
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th {
+      text-align: left; padding: 10px 18px; color: var(--zinc-500); font-weight: 600;
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+      border-bottom: 1px solid var(--zinc-900);
+    }
+    td { padding: 11px 18px; border-bottom: 1px solid rgba(39,39,46,0.3); color: var(--zinc-300); }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(24,24,27,0.5); }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+    .c-green { color: var(--green); }
+    .c-orange { color: var(--orange); }
+    .c-red { color: var(--red); }
+    .c-dim { color: var(--zinc-600); }
+
+    /* ── Forms ─────────────────────────── */
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-section {
+      background: var(--zinc-950); border: 1px solid var(--zinc-900);
+      border-radius: 8px; padding: 20px; transition: border-color 0.2s;
+    }
+    .form-section:hover { border-color: var(--zinc-800); }
+    .form-section.full { grid-column: 1 / -1; }
+    .form-section h3 {
+      font-size: 15px; font-weight: 700; color: var(--zinc-100); margin-bottom: 4px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .form-section .desc { font-size: 12px; color: var(--zinc-500); margin-bottom: 16px; }
+    .form-row { margin-bottom: 14px; }
+    .form-row:last-child { margin-bottom: 0; }
+    .form-row label {
+      display: block; font-size: 11px; font-weight: 600;
+      color: var(--zinc-500); margin-bottom: 5px;
+      text-transform: uppercase; letter-spacing: 0.4px;
+    }
+    .form-row input[type="text"], .form-row input[type="password"] {
+      width: 100%; padding: 9px 12px; border-radius: 6px;
+      border: 1px solid var(--zinc-800); background: var(--zinc-900);
+      color: var(--zinc-100); font-size: 13px; font-family: inherit;
+      transition: border-color 0.15s;
+    }
+    .form-row input:focus { outline: none; border-color: var(--zinc-600); }
+    .form-row input::placeholder { color: var(--zinc-600); }
+    .form-row .hint { font-size: 11px; color: var(--zinc-600); margin-top: 4px; }
+    .form-row .hint a { color: var(--zinc-400); text-decoration: none; }
+    .form-row .hint a:hover { color: var(--white); }
+
+    /* ── Toggle ────────────────────────── */
+    .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .toggle-row:last-child { margin-bottom: 0; }
+    .toggle-row > label:last-child {
+      margin-bottom: 0; text-transform: none; font-size: 13px; color: var(--zinc-300);
+      font-weight: 400; letter-spacing: 0;
+    }
+    .toggle { position: relative; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle .slider {
+      position: absolute; inset: 0; background: var(--zinc-800);
+      border: 1px solid var(--zinc-700); border-radius: 10px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .toggle .slider::before {
+      content: ''; position: absolute; width: 14px; height: 14px;
+      left: 2px; top: 2px; background: var(--zinc-500);
+      border-radius: 50%; transition: all 0.2s;
+    }
+    .toggle input:checked + .slider { background: var(--accent-dim); border-color: var(--accent); }
+    .toggle input:checked + .slider::before { transform: translateX(16px); background: var(--white); }
+
+    /* ── Buttons (app) ─────────────────── */
+    .btn {
+      padding: 9px 18px; border-radius: 6px; border: 1px solid var(--zinc-800);
+      background: var(--zinc-900); color: var(--zinc-300); font-size: 13px; font-weight: 500;
+      cursor: pointer; transition: all 0.15s; display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn:hover { border-color: var(--zinc-600); color: var(--zinc-100); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--accent-dim); border-color: var(--accent-dim); color: var(--white); font-weight: 600;
+    }
+    .btn-primary:hover { background: var(--accent); }
+    .btn-sm { padding: 6px 12px; font-size: 12px; }
+    .btn-ghost { background: transparent; border-color: transparent; color: var(--zinc-400); }
+    .btn-ghost:hover { color: var(--red); }
+
+    /* ── Status dots ───────────────────── */
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot-ok { background: var(--green); }
+    .dot-off { background: var(--zinc-700); }
+
+    /* ── Misc ──────────────────────────── */
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--zinc-800); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .empty { text-align: center; padding: 40px 20px; color: var(--zinc-600); font-size: 13px; }
+
+    .history-item {
+      padding: 12px 18px; border-bottom: 1px solid rgba(39,39,46,0.3);
+      font-size: 13px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .history-item:last-child { border-bottom: none; }
+    .history-item:hover { background: rgba(24,24,27,0.5); }
+    .history-time { color: var(--zinc-500); font-size: 12px; }
+    .history-stats { display: flex; gap: 14px; font-variant-numeric: tabular-nums; }
+
+    .toast {
+      position: fixed; bottom: 24px; right: 24px; padding: 12px 20px;
+      border-radius: 8px; font-size: 13px;
+      background: rgba(10,10,11,0.9); border: 1px solid var(--zinc-800);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      opacity: 0; transform: translateY(10px); transition: all 0.3s; z-index: 100;
+      color: var(--zinc-300);
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.error { border-color: rgba(248,113,113,0.3); color: var(--red); }
+    .toast.success { border-color: rgba(52,211,153,0.3); color: var(--green); }
+
+    .save-flash { font-size: 12px; color: var(--green); opacity: 0; transition: opacity 0.3s; margin-left: 8px; }
+    .save-flash.show { opacity: 1; }
+
+    .actions-bar {
+      margin-top: 16px; display: flex; gap: 10px; align-items: center;
+    }
+
+    @media (max-width: 700px) {
+      .hero h1 { font-size: 28px; }
+      .hero-card { padding: 36px 24px 32px; }
+      .hero-services { gap: 8px; }
+      .service-pill { padding: 8px 16px; font-size: 13px; }
+      .form-grid { grid-template-columns: 1fr; }
+      .cards { grid-template-columns: 1fr 1fr; }
+      th, td { padding: 8px 12px; }
+      .nav-inner { padding: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══ Navbar ══ -->
+<nav>
+  <div class="nav-inner">
+    <a class="nav-logo" href="#" onclick="showLanding(); return false;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M17 14v3a2 2 0 01-2 2h-1"/><path d="M14 17h6"/></svg>
+      SyncMeta
+    </a>
+    <div class="nav-links" id="nav-links">
+      <button class="nav-link" data-nav="dashboard" style="display:none">Dashboard</button>
+      <button class="nav-link" data-nav="settings" style="display:none">Settings</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ══ Hero / Landing ══ -->
+<div class="hero" id="hero">
+  <div class="hero-card">
+    <div class="hero-badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M17 14v3a2 2 0 01-2 2h-1"/><path d="M14 17h6"/></svg>
+      SyncMeta
+    </div>
+    <h1>Sync Your World.<br>Seamlessly.</h1>
+    <p>Effortlessly synchronize your watchlist from SIMKL or AniList to PublicMetaDB. Keep your collection updated across all platforms with a single tool.</p>
+    <div class="hero-services">
+      <div class="service-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>
+        SIMKL
+      </div>
+      <div class="service-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        AniList
+      </div>
+      <div class="service-pill">
+        <svg viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        PublicMetaDB
+      </div>
+    </div>
+    <button class="hero-cta" onclick="enterApp()">Get Started</button>
+  </div>
+</div>
+
+<!-- ══ App ══ -->
+<div class="page">
+  <div class="app-section" id="app">
+
+    <!-- Dashboard -->
+    <div id="view-dashboard" style="display:none">
+      <div class="cards" id="cards"></div>
+      <div class="panel">
+        <div class="panel-header">
+          <span>Latest Sync Results</span>
+          <span id="results-time" class="history-time"></span>
+        </div>
+        <div id="results-body"><div class="empty">No sync results yet. Configure credentials in Settings, then click Sync Now.</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-header">Sync History</div>
+        <div id="history-body"><div class="empty">No history yet.</div></div>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div id="view-settings" style="display:none">
+      <div class="form-grid">
+
+        <div class="form-section">
+          <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
+          <p class="desc">Syncs Series, Movies, and Anime (when AniList is off).</p>
+          <div class="form-row">
+            <label>Client ID</label>
+            <input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off">
+            <div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID</div>
+          </div>
+          <div class="form-row">
+            <label>Client Secret</label>
+            <input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off">
+          </div>
+          <div class="form-row">
+            <label>Access Token</label>
+            <input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--zinc-600);font-weight:400;margin-left:auto">Optional</span></h3>
+          <p class="desc">When set, anime syncs from AniList instead of SIMKL.</p>
+          <div class="form-row">
+            <label>Username</label>
+            <input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off">
+            <div class="hint">Leave empty to sync anime from SIMKL</div>
+          </div>
+          <div class="form-row">
+            <label>Access Token</label>
+            <input type="password" id="anilist-access-token" placeholder="Only for private lists" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
+          <p class="desc">Destination for your synced lists.</p>
+          <div class="form-row">
+            <label>API Key</label>
+            <input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off">
+            <div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key</a></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h3>Options</h3>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label>
+            <label>Remove items no longer in source</label>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-shows" checked><span class="slider"></span></label>
+            <label>Sync Series</label>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-movies" checked><span class="slider"></span></label>
+            <label>Sync Movies</label>
+          </div>
+          <div class="toggle-row">
+            <label class="toggle"><input type="checkbox" id="opt-anime" checked><span class="slider"></span></label>
+            <label>Sync Anime</label>
+          </div>
+        </div>
+
+      </div>
+      <div class="actions-bar">
+        <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearSettings()">Clear Credentials</button>
+        <span class="save-flash" id="save-flash">Saved</span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  // ── Session ──────────────────────────────────────────
+  function getSessionId() {
+    let id = localStorage.getItem('sync_session_id');
+    if (!id) { id = crypto.randomUUID(); localStorage.setItem('sync_session_id', id); }
+    return id;
+  }
+
+  // ── Landing / App transition ─────────────────────────
+  function enterApp() {
+    document.getElementById('hero').style.display = 'none';
+    document.getElementById('app').classList.add('active');
+    document.querySelectorAll('.nav-link').forEach(l => l.style.display = '');
+    localStorage.setItem('entered', '1');
+    switchView('settings');
+  }
+
+  function showLanding() {
+    document.getElementById('hero').style.display = '';
+    document.getElementById('app').classList.remove('active');
+    document.querySelectorAll('.nav-link').forEach(l => l.style.display = 'none');
+    localStorage.removeItem('entered');
+  }
+
+  // ── Views ────────────────────────────────────────────
+  function switchView(name) {
+    document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.nav === name));
+    document.getElementById('view-dashboard').style.display = name === 'dashboard' ? 'block' : 'none';
+    document.getElementById('view-settings').style.display = name === 'settings' ? 'block' : 'none';
+  }
+
+  document.querySelectorAll('.nav-link').forEach(l => {
+    l.addEventListener('click', () => switchView(l.dataset.nav));
+  });
+
+  // ── Credential storage (localStorage only) ──────────
+  const CREDS_KEY = 'sync_credentials';
+  function loadCreds() { try { return JSON.parse(localStorage.getItem(CREDS_KEY)||'{}'); } catch { return {}; } }
+  function saveCreds(c) { localStorage.setItem(CREDS_KEY, JSON.stringify(c)); }
+
+  function gatherCreds() {
+    return {
+      simkl: {
+        client_id: el('simkl-client-id').value.trim(),
+        client_secret: el('simkl-client-secret').value.trim(),
+        access_token: el('simkl-access-token').value.trim(),
+      },
+      anilist: {
+        username: el('anilist-username').value.trim(),
+        access_token: el('anilist-access-token').value.trim(),
+      },
+      pmdb: { api_key: el('pmdb-api-key').value.trim() },
+    };
+  }
+
+  function gatherOptions() {
+    const types = [];
+    if (el('opt-shows').checked) types.push('shows');
+    if (el('opt-movies').checked) types.push('movies');
+    if (el('opt-anime').checked) types.push('anime');
+    return { remove_missing: el('opt-remove-missing').checked, media_types: types };
+  }
+
+  function populateForm(creds, opts) {
+    const s = creds.simkl||{}, a = creds.anilist||{}, p = creds.pmdb||{};
+    el('simkl-client-id').value = s.client_id||'';
+    el('simkl-client-secret').value = s.client_secret||'';
+    el('simkl-access-token').value = s.access_token||'';
+    el('anilist-username').value = a.username||'';
+    el('anilist-access-token').value = a.access_token||'';
+    el('pmdb-api-key').value = p.api_key||'';
+    if (opts) {
+      el('opt-remove-missing').checked = !!opts.remove_missing;
+      const mt = opts.media_types||['shows','movies','anime'];
+      el('opt-shows').checked = mt.includes('shows');
+      el('opt-movies').checked = mt.includes('movies');
+      el('opt-anime').checked = mt.includes('anime');
+    }
+    updateDots();
+  }
+
+  function saveSettings() {
+    saveCreds(gatherCreds());
+    localStorage.setItem('sync_options', JSON.stringify(gatherOptions()));
+    updateDots();
+    const f = el('save-flash'); f.classList.add('show'); setTimeout(() => f.classList.remove('show'), 2000);
+  }
+
+  function clearSettings() {
+    if (!confirm('Remove all saved credentials from this browser?')) return;
+    localStorage.removeItem(CREDS_KEY); localStorage.removeItem('sync_options');
+    populateForm({}, null); showToast('Credentials cleared');
+  }
+
+  function updateDots() {
+    const c = gatherCreds();
+    setDot('dot-simkl', !!(c.simkl.client_id && c.simkl.access_token));
+    setDot('dot-anilist', !!c.anilist.username);
+    setDot('dot-pmdb', !!c.pmdb.api_key);
+  }
+  function setDot(id, ok) { el(id).className = 'dot ' + (ok ? 'dot-ok' : 'dot-off'); }
+
+  // ── Polling ──────────────────────────────────────────
+  let polling = null;
+  async function fetchStatus() {
+    try {
+      const r = await fetch('/api/status?session_id=' + encodeURIComponent(getSessionId()));
+      renderDashboard(await r.json());
+    } catch {}
+  }
+
+  function renderDashboard(data) {
+    const results = data.last_results||[];
+    const t = results.reduce((a,r)=>{
+      a.fetched+=r.items_fetched; a.resolved+=r.items_resolved;
+      a.added+=r.items_added; a.removed+=r.items_removed;
+      a.unresolved+=r.items_skipped_unresolved; a.errors+=r.error_count||0;
+      return a;
+    },{fetched:0,resolved:0,added:0,removed:0,unresolved:0,errors:0});
+
+    el('cards').innerHTML = `
+      <div class="card"><div class="card-label">Last Sync</div><div class="card-value">${data.last_sync?timeAgo(data.last_sync):'Never'}</div><div class="card-sub">${data.sync_running?'<span class="spinner"></span> Running...':(data.sync_error?'<span style="color:var(--red)">Error</span>':'Idle')}</div></div>
+      <div class="card"><div class="card-label">Items Fetched</div><div class="card-value">${t.fetched}</div><div class="card-sub">${t.resolved} resolved</div></div>
+      <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:var(--green)">${t.added}</div><div class="card-sub">${t.removed} removed</div></div>
+      <div class="card"><div class="card-label">Issues</div><div class="card-value" style="color:${t.unresolved+t.errors>0?'var(--orange)':'var(--zinc-600)'}">${t.unresolved+t.errors}</div><div class="card-sub">${t.unresolved} unresolved, ${t.errors} errors</div></div>
+    `;
+
+    el('results-time').textContent = data.last_sync ? new Date(data.last_sync).toLocaleString() : '';
+    if (!results.length) {
+      el('results-body').innerHTML = '<div class="empty">No sync results yet. Configure credentials in Settings, then click Sync Now.</div>';
+    } else {
+      el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th></tr></thead><tbody>${results.map(r=>`<tr><td>${esc(r.list_name)}</td><td class="num">${r.items_fetched}</td><td class="num">${r.items_resolved}</td><td class="num ${r.items_added>0?'c-green':'c-dim'}">${r.items_added}</td><td class="num ${r.items_removed>0?'c-orange':'c-dim'}">${r.items_removed}</td><td class="num c-dim">${r.items_skipped_duplicate}</td><td class="num ${r.items_skipped_unresolved>0?'c-orange':'c-dim'}">${r.items_skipped_unresolved}</td><td class="num ${(r.error_count||0)>0?'c-red':'c-dim'}">${r.error_count||0}</td></tr>`).join('')}</tbody></table>`;
+    }
+
+    const hist = data.history||[];
+    if (!hist.length) {
+      el('history-body').innerHTML = '<div class="empty">No history yet.</div>';
+    } else {
+      el('history-body').innerHTML = hist.map(h=>{
+        const s = h.results.reduce((a,r)=>{a.added+=r.items_added;a.removed+=r.items_removed;a.errors+=r.error_count||0;return a;},{added:0,removed:0,errors:0});
+        return `<div class="history-item"><span class="history-time">${new Date(h.timestamp).toLocaleString()}</span><div class="history-stats"><span class="c-green">+${s.added}</span><span class="c-orange">-${s.removed}</span>${s.errors>0?`<span class="c-red">${s.errors} err</span>`:''}</div></div>`;
+      }).join('');
+    }
+
+    el('btn-sync').disabled = data.sync_running;
+    el('btn-dry').disabled = data.sync_running;
+    el('sync-label').textContent = data.sync_running ? 'Syncing...' : 'Sync Now';
+    if (data.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
+    else if (!data.sync_running && polling) { clearInterval(polling); polling = null; }
+  }
+
+  // ── Sync trigger ─────────────────────────────────────
+  async function triggerSync(dryRun) {
+    saveSettings();
+    const creds = gatherCreds(), opts = gatherOptions();
+    if (!creds.pmdb.api_key) { showToast('PublicMetaDB API key required. Go to Settings.', true); return; }
+    if (!(creds.simkl.client_id && creds.simkl.access_token) && !creds.anilist.username) {
+      showToast('Configure SIMKL or AniList in Settings first.', true); return;
+    }
+    try {
+      const res = await fetch('/api/sync', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ session_id: getSessionId(), credentials: creds, options: {...opts, dry_run: dryRun} }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        showToast(dryRun ? 'Dry run started' : 'Sync started', false, true);
+        polling = setInterval(fetchStatus, 2000); fetchStatus();
+        switchView('dashboard');
+      } else { showToast(d.error || 'Sync failed', true); }
+    } catch { showToast('Network error', true); }
+  }
+
+  // ── Helpers ──────────────────────────────────────────
+  function el(id) { return document.getElementById(id); }
+  function showToast(msg, isErr=false, isOk=false) {
+    const t = el('toast'); t.textContent = msg;
+    t.className = 'toast show' + (isErr?' error':'') + (isOk?' success':'');
+    setTimeout(()=> t.className='toast', 3500);
+  }
+  function timeAgo(iso) {
+    const d = (Date.now()-new Date(iso).getTime())/1000;
+    if(d<60) return 'Just now'; if(d<3600) return Math.floor(d/60)+'m ago';
+    if(d<86400) return Math.floor(d/3600)+'h ago'; return Math.floor(d/86400)+'d ago';
+  }
+  function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+  // ── Init ─────────────────────────────────────────────
+  populateForm(loadCreds(), (()=>{ try{return JSON.parse(localStorage.getItem('sync_options'));}catch{return null;} })());
+  if (localStorage.getItem('entered')) enterApp();
+  fetchStatus(); setInterval(fetchStatus, 30000);
+  document.querySelectorAll('.form-section input').forEach(i => i.addEventListener('change', updateDots));
+</script>
+</body>
+</html>
