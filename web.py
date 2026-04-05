@@ -1119,7 +1119,12 @@ def api_profile_activity_history_clear():
         logger.exception("Failed to clear PublicMetaDB watch history for profile %s", profile_id[:8])
         return _json_error(str(exc), 500)
 
-    return jsonify({"status": "cleared", "deleted_count": deleted_count})
+    try:
+        profile = _profile_store.reset_history_import_state_by_id(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+
+    return jsonify({"status": "cleared", "deleted_count": deleted_count, "profile": profile})
 
 
 @app.route("/api/profile/sync/stop", methods=["POST"])

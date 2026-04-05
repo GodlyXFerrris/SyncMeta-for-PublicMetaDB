@@ -188,6 +188,29 @@ class ProfileStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.get_private_profile_by_id(created["profile_id"])
 
+    def test_reset_history_import_state_by_id_clears_cursors(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        profile = self.store.get_private_profile_by_id(created["profile_id"])
+        profile["activity_state"] = {
+            "simkl_history_cursor": "2026-04-01T12:00:00Z",
+            "trakt_history_cursor": "2026-04-02T12:00:00Z",
+        }
+        profile["activity_results"] = {
+            "watch_history": {
+                "timestamp": "2026-04-03T12:00:00Z",
+                "row": {"display_name": "Watch History"},
+            }
+        }
+        profile["last_history_sync"] = "2026-04-03T12:00:00Z"
+        self.store._profiles[created["profile_id"]] = profile
+
+        updated = self.store.reset_history_import_state_by_id(created["profile_id"])
+
+        self.assertEqual(updated["activity_state"]["simkl_history_cursor"], "")
+        self.assertEqual(updated["activity_state"]["trakt_history_cursor"], "")
+        self.assertNotIn("watch_history", updated["activity_results"])
+        self.assertIsNone(updated["last_history_sync"])
+
     def test_update_by_id_keeps_saved_secrets_when_fields_are_blank(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
 

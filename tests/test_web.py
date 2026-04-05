@@ -465,12 +465,21 @@ class WebTests(unittest.TestCase):
         })
         self.assertEqual(login_response.status_code, 200)
 
+        private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
+        private_profile["activity_state"] = {
+            "simkl_history_cursor": "2026-04-01T12:00:00Z",
+            "trakt_history_cursor": "2026-04-02T12:00:00Z",
+        }
+        web._profile_store._profiles[profile["profile_id"]] = private_profile
+
         clear_response = self.client.post("/api/profile/activity/history/clear", json={})
         clear_data = clear_response.get_json()
 
         self.assertEqual(clear_response.status_code, 200)
         self.assertEqual(clear_data["status"], "cleared")
         self.assertEqual(clear_data["deleted_count"], 7)
+        self.assertEqual(clear_data["profile"]["activity_state"]["simkl_history_cursor"], "")
+        self.assertEqual(clear_data["profile"]["activity_state"]["trakt_history_cursor"], "")
         mock_clear_watched_history.assert_called_once()
 
     def test_activity_sync_endpoint_starts_history_only_run(self) -> None:

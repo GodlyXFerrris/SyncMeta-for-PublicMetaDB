@@ -978,6 +978,27 @@ class ProfileStore:
             del self._profiles[normalized_id]
             self._save_locked()
 
+    def reset_history_import_state_by_id(self, profile_id: str) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles.get(normalized_id)
+            if not profile:
+                raise KeyError("Profile not found")
+
+            activity_state = _normalize_activity_state(profile.get("activity_state"))
+            activity_state["simkl_history_cursor"] = ""
+            activity_state["trakt_history_cursor"] = ""
+            profile["activity_state"] = activity_state
+
+            activity_results = copy.deepcopy(profile.get("activity_results", {}))
+            if "watch_history" in activity_results:
+                activity_results.pop("watch_history", None)
+            profile["activity_results"] = activity_results
+            profile["last_history_sync"] = None
+            profile["updated_at"] = utc_now_iso()
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
     def _authenticate_locked(self, profile_id: str, password: str) -> dict:
         profile = self._get_profile_locked(profile_id)
         if not password or not check_password_hash(profile["password_hash"], password):

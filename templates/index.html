@@ -2190,7 +2190,11 @@
 
         clearingWatchHistory = false;
         pendingClearWatchHistory = false;
-        if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+        if (result.data.profile) {
+          renderDashboard(result.data.profile);
+        } else if (lastDashboardProfile) {
+          renderDashboard(lastDashboardProfile);
+        }
         const deletedCount = Number(result.data.deleted_count || 0) || 0;
         showToast(
           deletedCount
