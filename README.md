@@ -1,6 +1,6 @@
 # SyncMeta
 
-SyncMeta keeps SIMKL, Trakt, and optionally AniList watchlists and lists synced into private PublicMetaDB lists.
+SyncMeta keeps SIMKL, Trakt, MDBList, and optionally AniList watchlists and lists synced into private PublicMetaDB lists.
 
 It supports:
 
@@ -10,8 +10,11 @@ It supports:
 - Manual sync and dry run
 - CLI usage for one-off or interval-based sync runs
 - SIMKL for shows, movies, and anime
+- SIMKL status pickers for watching, plan to watch, completed, on hold, and dropped
 - Trakt for watchlist, liked lists, and selected public lists
+- MDBList for selected lists from your own account
 - AniList for anime when you want AniList to replace SIMKL anime
+- AniList status pickers for watching, completed, paused, dropped, and planning
 
 ## What It Syncs
 
@@ -28,6 +31,8 @@ By default, SyncMeta creates separate private PublicMetaDB lists for each source
 - `Trakt - Series - Watchlist`
 - `Trakt - Movies - Watchlist`
 - `Trakt List - username - list-name`
+- `MDBList - Movies - list-name`
+- `MDBList - Series - list-name`
 
 Anime behaves like this:
 
@@ -79,6 +84,8 @@ After that, the server keeps syncing in the background based on that profile.
 
 SIMKL access tokens can be obtained directly inside the Settings page through the built-in PIN auth helper.
 
+SIMKL also has per-media status toggles in Settings so you can choose different list states for movies, shows, and anime.
+
 Trakt also has a built-in device auth flow in Settings, plus a tabbed catalog picker:
 
 - `Default` lets you enable your Trakt watchlist
@@ -86,6 +93,10 @@ Trakt also has a built-in device auth flow in Settings, plus a tabbed catalog pi
 - `Discover` searches public Trakt lists and lets you add selected ones
 
 If you prefer the older behavior, you can still choose to sync all liked Trakt lists at once.
+
+MDBList can load your account lists directly in Settings so you can pick exactly which MDBList lists should sync.
+
+AniList has a list picker in Settings with `All`, `Watching`, `Completed`, `Paused`, `Dropped`, and `Planning`.
 
 ## CLI
 
@@ -214,6 +225,7 @@ These mainly matter for CLI use and deployment configuration.
 | `TRAKT_CLIENT_SECRET` | No | Required for Trakt device auth and syncing |
 | `TRAKT_ACCESS_TOKEN` | No | Trakt access token from the web auth flow |
 | `TRAKT_REFRESH_TOKEN` | No | Trakt refresh token |
+| `MDBLIST_API_KEY` | No | MDBList API key for loading and syncing your MDBList lists |
 | `PMDB_API_KEY` | CLI: Yes | PublicMetaDB API key |
 
 ### Sync options

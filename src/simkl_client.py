@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 # Status codes from SIMKL that map to our list names
 SIMKL_STATUS_WATCHING = "watching"
 SIMKL_STATUS_PLAN_TO_WATCH = "plantowatch"
+SIMKL_STATUS_COMPLETED = "completed"
+SIMKL_STATUS_ON_HOLD = "hold"
+SIMKL_STATUS_DROPPED = "dropped"
 
 
 class SimklClient:
@@ -102,11 +105,15 @@ class SimklClient:
 
     def get_watching(self, media_types: list[str] | None = None) -> dict[str, list[dict]]:
         """Fetch items with status 'watching', grouped by media type."""
-        return self._fetch_list(SIMKL_STATUS_WATCHING, media_types)
+        return self.get_status(SIMKL_STATUS_WATCHING, media_types)
 
     def get_plan_to_watch(self, media_types: list[str] | None = None) -> dict[str, list[dict]]:
         """Fetch items with status 'plantowatch', grouped by media type."""
-        return self._fetch_list(SIMKL_STATUS_PLAN_TO_WATCH, media_types)
+        return self.get_status(SIMKL_STATUS_PLAN_TO_WATCH, media_types)
+
+    def get_status(self, status: str, media_types: list[str] | None = None) -> dict[str, list[dict]]:
+        """Fetch items for any SIMKL watchlist status."""
+        return self._fetch_list(status, media_types)
 
     def _fetch_list(self, status: str, media_types: list[str] | None = None) -> dict[str, list[dict]]:
         """Fetch and normalize items for a given status, grouped by SIMKL media type."""

@@ -14,10 +14,31 @@ class ProfileStoreTests(unittest.TestCase):
                 "client_id": "simkl-client",
                 "client_secret": "",
                 "access_token": "simkl-token",
+                "selected_statuses": {
+                    "shows": ["watching", "completed"],
+                    "movies": ["plantowatch"],
+                    "anime": [],
+                },
             },
             "anilist": {
                 "username": "",
                 "access_token": "",
+                "selected_statuses": ["CURRENT", "COMPLETED"],
+            },
+            "mdblist": {
+                "api_key": "mdbl-key",
+                "selected_lists": [{
+                    "id": 11,
+                    "name": "Top Movies",
+                    "slug": "top-movies",
+                    "user_name": "demo",
+                    "description": "desc",
+                    "mediatype": "movie",
+                    "items": 10,
+                    "likes": 5,
+                    "type": "user",
+                    "private": False,
+                }],
             },
             "pmdb": {
                 "api_key": "pm-key",
@@ -41,6 +62,9 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(loaded["profile_id"], created["profile_id"])
         self.assertEqual(loaded["credentials"]["pmdb"]["api_key"], "pm-key")
         self.assertEqual(loaded["options"]["interval_seconds"], 600)
+        self.assertEqual(loaded["credentials"]["simkl"]["selected_statuses"]["shows"], ["watching", "completed"])
+        self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], ["CURRENT", "COMPLETED"])
+        self.assertEqual(loaded["credentials"]["mdblist"]["selected_lists"][0]["id"], 11)
         self.assertIsNotNone(loaded["next_sync_at"])
 
     def test_rejects_interval_below_minimum(self) -> None:

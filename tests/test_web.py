@@ -11,6 +11,16 @@ class WebTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = web.app.test_client()
 
+    def test_index_contains_new_source_sections(self) -> None:
+        response = self.client.get("/")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("SIMKL Lists", html)
+        self.assertIn("AniList Lists", html)
+        self.assertIn("MDBList Lists", html)
+        self.assertIn("dot-mdblist", html)
+
     @patch("web.SimklClient.request_pin")
     def test_simkl_pin_start(self, mock_request_pin) -> None:
         mock_request_pin.return_value = {
@@ -123,6 +133,23 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["query"], "top rated")
         self.assertEqual(data["items"][0]["source"], "discover")
+
+    @patch("web.MdbListClient.get_user_lists")
+    def test_mdblist_lists(self, mock_get_user_lists) -> None:
+        mock_get_user_lists.return_value = [{
+            "id": 7,
+            "name": "Favorites",
+            "mediatype": "movie",
+        }]
+
+        response = self.client.post("/api/mdblist/lists", json={
+            "api_key": "mdb-key",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["id"], 7)
 
 
 if __name__ == "__main__":

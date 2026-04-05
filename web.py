@@ -14,12 +14,14 @@ from flask import Flask, jsonify, render_template, request
 from src.config import (
     AniListConfig,
     AppConfig,
+    MdbListConfig,
     PublicMetaDBConfig,
     SimklConfig,
     SyncConfig,
     TraktConfig,
     validate_config,
 )
+from src.mdblist_client import MdbListClient
 from src.profile_store import ProfileStore, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
 from src.sync_service import SyncService, SyncStats
@@ -62,11 +64,13 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             client_id=credentials["simkl"]["client_id"],
             client_secret=credentials["simkl"]["client_secret"],
             access_token=credentials["simkl"]["access_token"],
+            selected_statuses=credentials["simkl"]["selected_statuses"],
         ),
         anilist=AniListConfig(
             username=anilist_username,
             access_token=credentials["anilist"]["access_token"],
             enabled=bool(anilist_username),
+            selected_statuses=credentials["anilist"]["selected_statuses"],
         ),
         trakt=TraktConfig(
             client_id=credentials["trakt"]["client_id"],
@@ -79,6 +83,11 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             sync_liked_lists=credentials["trakt"]["sync_liked_lists"],
             selected_lists=credentials["trakt"]["selected_lists"],
         ),
+        mdblist=MdbListConfig(
+            api_key=credentials["mdblist"]["api_key"],
+            enabled=bool(credentials["mdblist"]["api_key"] and credentials["mdblist"]["selected_lists"]),
+            selected_lists=credentials["mdblist"]["selected_lists"],
+        ),
         pmdb=PublicMetaDBConfig(api_key=credentials["pmdb"]["api_key"]),
         sync=SyncConfig(
             remove_missing=options["remove_missing"],
@@ -90,12 +99,25 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
 
 def _configured_sources(config: AppConfig) -> list[str]:
     sources = []
-    if config.simkl.client_id and config.simkl.access_token:
+    if (
+        config.simkl.client_id
+        and config.simkl.access_token
+        and any(config.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"])
+    ):
         sources.append("simkl")
-    if config.anilist.enabled:
+    if config.anilist.enabled and config.anilist.selected_statuses:
         sources.append("anilist")
-    if config.trakt.enabled:
+    if (
+        config.trakt.enabled
+        and (
+            config.trakt.sync_watchlist
+            or config.trakt.sync_liked_lists
+            or config.trakt.selected_lists
+        )
+    ):
         sources.append("trakt")
+    if config.mdblist.enabled:
+        sources.append("mdblist")
     return sources
 
 
@@ -111,7 +133,7 @@ def _validate_profile_configuration(credentials: dict, options: dict) -> tuple[A
     config = _config_from_profile(normalized_profile, dry_run=False)
     sources = _configured_sources(config)
     if not sources:
-        return None, ["Configure at least one source (SIMKL, AniList, or Trakt)"]
+        return None, ["Configure at least one source (SIMKL, AniList, Trakt, or MDBList)"]
 
     errors = validate_config(config, sources)
     return config, errors
@@ -351,6 +373,24 @@ def api_trakt_catalogs():
         return _json_error(f"Failed to load Trakt catalogs: {exc}", 400)
 
     return jsonify({"items": items, "query": query})
+
+
+@app.route("/api/mdblist/lists", methods=["POST"])
+def api_mdblist_lists():
+    body = request.get_json(silent=True) or {}
+    api_key = str(body.get("api_key", "")).strip()
+
+    if not api_key:
+        return _json_error("MDBList API key is required", 400)
+
+    try:
+        client = MdbListClient(MdbListConfig(api_key=api_key))
+        items = client.get_user_lists()
+    except Exception as exc:
+        logger.exception("Failed to load MDBList lists")
+        return _json_error(f"Failed to load MDBList lists: {exc}", 400)
+
+    return jsonify({"items": items})
 
 
 @app.route("/api/profile/save", methods=["POST"])

@@ -65,8 +65,27 @@
     .catalog-body{min-width:0}
     .catalog-title{font-size:14px;font-weight:700;color:var(--white)}
     .catalog-meta{font-size:12px;color:var(--z500);margin-top:4px;line-height:1.4}
-    .catalog-note{font-size:12px;color:var(--z500);margin-top:4px}
+    .catalog-note{font-size:12px;color:var(--z500);margin-top:4px;line-height:1.4}
     .status-inline{display:flex;align-items:center;gap:8px}
+    .status-groups{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+    .status-group{padding:14px;border:1px solid var(--z800);border-radius:10px;background:var(--z900)}
+    .status-group-title{font-size:13px;font-weight:700;color:var(--z100);margin-bottom:10px}
+    .pill-row{display:flex;flex-wrap:wrap;gap:8px}
+    .pill-btn{padding:9px 14px;border-radius:999px;border:1px solid var(--z800);background:var(--z950);color:var(--z400);font-size:12px;font-weight:600;cursor:pointer}
+    .pill-btn:hover{border-color:var(--z600);color:var(--z100)}
+    .pill-btn.active{background:rgba(124,109,247,.18);border-color:rgba(124,109,247,.55);color:var(--white)}
+    .pill-btn.positive.active{background:rgba(20,83,45,.28);border-color:rgba(52,211,153,.4)}
+    .status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+    .status-card{display:flex;align-items:center;justify-content:center;gap:10px;min-height:44px;padding:10px 14px;border:1px solid var(--z800);border-radius:8px;background:var(--z950);color:var(--z400);font-size:13px;font-weight:700;cursor:pointer;text-align:center}
+    .status-card:hover{border-color:var(--z600);color:var(--z100)}
+    .status-card.active{border-color:rgba(124,109,247,.55);background:rgba(124,109,247,.18);color:var(--white)}
+    .status-card.wide{grid-column:1 / -1}
+    .status-card-mark{font-size:16px;line-height:1;color:var(--z500)}
+    .status-card.active .status-card-mark{color:var(--white)}
+    .status-list{display:flex;flex-direction:column;gap:8px}
+    .status-list-btn{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:12px 14px;border:1px solid var(--z800);border-radius:8px;background:var(--z950);color:var(--z400);font-size:13px;font-weight:700;cursor:pointer;text-align:left}
+    .status-list-btn:hover{border-color:var(--z600);color:var(--z100)}
+    .status-list-btn.active{border-color:rgba(124,109,247,.55);background:rgba(124,109,247,.18);color:var(--white)}
     @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}}
   </style>
 </head>
@@ -137,6 +156,11 @@
             </div>
           </div>
           <div class="form-section">
+            <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
+            <p class="desc">Destination for your synced lists.</p>
+            <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key</a></div></div>
+          </div>
+          <div class="form-section">
             <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
             <p class="desc">Syncs Series, Movies, and Anime when AniList is off.</p>
             <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID</div></div>
@@ -184,11 +208,29 @@
               <div class="hint">If Trakt does not auto-fill the code, paste this code into the Trakt activation page manually.</div>
             </div>
           </div>
+          <div class="form-section">
+            <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
+            <p class="desc">Load your MDBList account lists and choose which ones should sync into PublicMetaDB.</p>
+            <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> to get your API key</div></div>
+          </div>
+          <div class="form-section full">
+            <h3>SIMKL Lists</h3>
+            <p class="desc">Choose which SIMKL statuses should sync for each media type.</p>
+            <div class="status-groups" id="simkl-status-groups"></div>
+          </div>
+          <div class="form-section full">
+            <h3>AniList Lists</h3>
+            <p class="desc">Choose which AniList anime statuses should sync. If all are off, anime can continue syncing from SIMKL.</p>
+            <div class="status-group">
+              <div class="pill-row" id="anilist-status-list"></div>
+            </div>
+          </div>
           <div class="form-section full">
             <h3>Trakt Catalogs</h3>
             <p class="desc">Choose what should sync from Trakt. Default covers your watchlist, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
+              <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
               <button class="catalog-tab" type="button" data-trakt-tab="my-lists" onclick="switchTraktTab('my-lists')">My Lists</button>
               <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
             </div>
@@ -206,10 +248,17 @@
             </div>
             <div class="catalog-list" id="trakt-catalog-list"></div>
           </div>
-          <div class="form-section">
-            <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
-            <p class="desc">Destination for your synced lists.</p>
-            <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key</a></div></div>
+          <div class="form-section full">
+            <h3>MDBList Lists</h3>
+            <p class="desc">Refresh your MDBList lists, then select the ones you want to sync.</p>
+            <div class="catalog-toolbar">
+              <span class="actions-meta" id="mdblist-status">Enter your MDBList API key, then refresh your lists.</span>
+              <div class="actions-bar" style="margin-top:0">
+                <button class="btn btn-sm" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
+                <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
+              </div>
+            </div>
+            <div class="catalog-list" id="mdblist-list"></div>
           </div>
           <div class="form-section">
             <h3>Options</h3>
@@ -240,14 +289,61 @@
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
     const TRAKT_DEVICE_KEY = 'trakt_device_state';
+    const DEFAULT_SIMKL_STATUSES = {
+      shows: ['watching', 'plantowatch'],
+      movies: ['plantowatch'],
+      anime: ['watching', 'plantowatch'],
+    };
+    const DEFAULT_ANILIST_STATUSES = ['CURRENT', 'PLANNING'];
+    const SIMKL_STATUS_OPTIONS = {
+      movies: [
+        { value: 'plantowatch', label: 'Plan to Watch' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'hold', label: 'On Hold' },
+        { value: 'dropped', label: 'Dropped' },
+      ],
+      shows: [
+        { value: 'watching', label: 'Watching' },
+        { value: 'plantowatch', label: 'Plan to Watch' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'hold', label: 'On Hold' },
+        { value: 'dropped', label: 'Dropped' },
+      ],
+      anime: [
+        { value: 'watching', label: 'Watching' },
+        { value: 'plantowatch', label: 'Plan to Watch' },
+        { value: 'completed', label: 'Completed' },
+        { value: 'hold', label: 'On Hold' },
+        { value: 'dropped', label: 'Dropped' },
+      ],
+    };
+    const ANILIST_STATUS_OPTIONS = [
+      { value: 'CURRENT', label: 'Watching' },
+      { value: 'COMPLETED', label: 'Completed' },
+      { value: 'PAUSED', label: 'Paused' },
+      { value: 'DROPPED', label: 'Dropped' },
+      { value: 'PLANNING', label: 'Planning' },
+    ];
+    const TRAKT_DEFAULT_CATALOGS = [
+      { name: 'Trending Movies', user: 'default', slug: 'trending-movies', source: 'default', catalog_key: 'trending-movies', description: 'Trakt default catalog' },
+      { name: 'Trending Series', user: 'default', slug: 'trending-series', source: 'default', catalog_key: 'trending-series', description: 'Trakt default catalog' },
+      { name: 'Popular Movies', user: 'default', slug: 'popular-movies', source: 'default', catalog_key: 'popular-movies', description: 'Trakt default catalog' },
+      { name: 'Popular Series', user: 'default', slug: 'popular-series', source: 'default', catalog_key: 'popular-series', description: 'Trakt default catalog' },
+      { name: 'Recommended Movies', user: 'default', slug: 'recommended-movies', source: 'default', catalog_key: 'recommended-movies', description: 'Trakt default catalog' },
+      { name: 'Recommended Series', user: 'default', slug: 'recommended-series', source: 'default', catalog_key: 'recommended-series', description: 'Trakt default catalog' },
+    ];
     let polling = null;
     let simklPinPoller = null;
     let traktDevicePoller = null;
+    let simklSelectedStatuses = cloneSimklStatuses(DEFAULT_SIMKL_STATUSES);
+    let anilistSelectedStatuses = DEFAULT_ANILIST_STATUSES.slice();
     let traktCatalogTab = 'default';
     let traktLikedLists = [];
     let traktDiscoverLists = [];
     let traktSelectedLists = [];
     let traktSyncAllLikedLists = false;
+    let mdblistLists = [];
+    let mdblistSelectedLists = [];
 
     function el(id) { return document.getElementById(id); }
 
@@ -312,6 +408,31 @@
       }
     }
 
+    function cloneSimklStatuses(source) {
+      return {
+        shows: Array.isArray(source && source.shows) ? source.shows.slice() : [],
+        movies: Array.isArray(source && source.movies) ? source.movies.slice() : [],
+        anime: Array.isArray(source && source.anime) ? source.anime.slice() : [],
+      };
+    }
+
+    function normalizeSimklSelectedStatuses(value) {
+      const incoming = value && typeof value === 'object' ? value : {};
+      const normalized = cloneSimklStatuses(DEFAULT_SIMKL_STATUSES);
+      Object.keys(normalized).forEach(mediaType => {
+        const allowed = SIMKL_STATUS_OPTIONS[mediaType].map(option => option.value);
+        const raw = Array.isArray(incoming[mediaType]) ? incoming[mediaType] : normalized[mediaType];
+        normalized[mediaType] = raw.filter((status, index) => allowed.includes(status) && raw.indexOf(status) === index);
+      });
+      return normalized;
+    }
+
+    function normalizeAniListSelectedStatuses(value) {
+      const allowed = ANILIST_STATUS_OPTIONS.map(option => option.value);
+      const raw = Array.isArray(value) ? value : DEFAULT_ANILIST_STATUSES;
+      return raw.filter((status, index) => allowed.includes(status) && raw.indexOf(status) === index);
+    }
+
     function normalizeTraktSelectedLists(items) {
       if (!Array.isArray(items)) return [];
       const normalized = [];
@@ -325,6 +446,7 @@
         const key = `${user.toLowerCase()}/${slug.toLowerCase()}`;
         if (seen.has(key)) return;
         seen.add(key);
+        const source = item.source === 'discover' ? 'discover' : (item.source === 'default' ? 'default' : 'liked');
         normalized.push({
           name: name,
           description: String(item.description || '').trim(),
@@ -334,7 +456,37 @@
           item_count: Number(item.item_count || 0) || 0,
           likes: Number(item.likes || 0) || 0,
           share_link: String(item.share_link || '').trim(),
-          source: item.source === 'discover' ? 'discover' : 'liked',
+          source: source,
+          catalog_key: String(item.catalog_key || '').trim(),
+        });
+      });
+      return normalized;
+    }
+
+    function normalizeMdbListSelectedLists(items) {
+      if (!Array.isArray(items)) return [];
+      const normalized = [];
+      const seen = new Set();
+      items.forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const id = Number(item.id || 0);
+        const mediatype = String(item.mediatype || '').trim().toLowerCase();
+        const name = String(item.name || '').trim();
+        if (!id || !name || (mediatype !== 'movie' && mediatype !== 'show')) return;
+        const key = `${id}/${mediatype}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        normalized.push({
+          id: id,
+          name: name,
+          slug: String(item.slug || '').trim(),
+          user_name: String(item.user_name || '').trim(),
+          description: String(item.description || '').trim(),
+          mediatype: mediatype,
+          items: Number(item.items || 0) || 0,
+          likes: Number(item.likes || 0) || 0,
+          type: String(item.type || '').trim(),
+          private: !!item.private,
         });
       });
       return normalized;
@@ -342,6 +494,10 @@
 
     function traktListKey(item) {
       return `${String(item.user || '').toLowerCase()}/${String(item.slug || '').toLowerCase()}`;
+    }
+
+    function mdbListKey(item) {
+      return `${Number(item.id || 0)}/${String(item.mediatype || '').toLowerCase()}`;
     }
 
     function isTraktConnected() {
@@ -354,10 +510,12 @@
           client_id: el('simkl-client-id').value.trim(),
           client_secret: el('simkl-client-secret').value.trim(),
           access_token: el('simkl-access-token').value.trim(),
+          selected_statuses: cloneSimklStatuses(simklSelectedStatuses),
         },
         anilist: {
           username: el('anilist-username').value.trim(),
           access_token: el('anilist-access-token').value.trim(),
+          selected_statuses: anilistSelectedStatuses.slice(),
         },
         trakt: {
           client_id: el('trakt-client-id').value.trim(),
@@ -368,6 +526,10 @@
           sync_watchlist: el('trakt-watchlist-toggle').checked,
           sync_liked_lists: traktSyncAllLikedLists,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
+        },
+        mdblist: {
+          api_key: el('mdblist-api-key').value.trim(),
+          selected_lists: normalizeMdbListSelectedLists(mdblistSelectedLists),
         },
         pmdb: { api_key: el('pmdb-api-key').value.trim() },
       };
@@ -397,6 +559,7 @@
       const simkl = creds && creds.simkl ? creds.simkl : {};
       const anilist = creds && creds.anilist ? creds.anilist : {};
       const trakt = creds && creds.trakt ? creds.trakt : {};
+      const mdblist = creds && creds.mdblist ? creds.mdblist : {};
       const pmdb = creds && creds.pmdb ? creds.pmdb : {};
       const options = opts || {};
       const mediaTypes = options.media_types || ['shows', 'movies', 'anime'];
@@ -406,8 +569,10 @@
       el('simkl-client-id').value = simkl.client_id || '';
       el('simkl-client-secret').value = simkl.client_secret || '';
       el('simkl-access-token').value = simkl.access_token || '';
+      simklSelectedStatuses = normalizeSimklSelectedStatuses(simkl.selected_statuses);
       el('anilist-username').value = anilist.username || '';
       el('anilist-access-token').value = anilist.access_token || '';
+      anilistSelectedStatuses = normalizeAniListSelectedStatuses(anilist.selected_statuses);
       el('trakt-client-id').value = trakt.client_id || '';
       el('trakt-client-secret').value = trakt.client_secret || '';
       el('trakt-access-token').value = trakt.access_token || '';
@@ -417,6 +582,9 @@
       traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
       traktLikedLists = [];
       traktDiscoverLists = [];
+      el('mdblist-api-key').value = mdblist.api_key || '';
+      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblist.selected_lists || []);
+      mdblistLists = [];
       el('pmdb-api-key').value = pmdb.api_key || '';
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
@@ -425,7 +593,10 @@
       el('opt-movies').checked = mediaTypes.indexOf('movies') !== -1;
       el('opt-anime').checked = mediaTypes.indexOf('anime') !== -1;
       updateDots();
+      renderSimklStatuses();
+      renderAniListStatuses();
       renderTraktCatalogs();
+      renderMdbListLists();
       if (!loadSimklPinState()) {
         setSimklAuthCode('');
         setSimklAuthStatus(simkl.access_token ? 'SIMKL access token is already set.' : 'Start PIN auth here if you do not have an access token yet.', false);
@@ -444,14 +615,79 @@
 
     function updateDots() {
       const creds = gatherCreds();
-      setDot('dot-simkl', !!(creds.simkl.client_id && creds.simkl.access_token));
-      setDot('dot-anilist', !!creds.anilist.username);
+      const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
+      setDot('dot-simkl', !!(creds.simkl.client_id && creds.simkl.access_token && simklHasStatuses));
+      setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
       setDot('dot-trakt', !!(creds.trakt.client_id && creds.trakt.access_token && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length)));
+      setDot('dot-mdblist', !!(creds.mdblist.api_key && creds.mdblist.selected_lists.length));
       setDot('dot-pmdb', !!creds.pmdb.api_key);
     }
 
     function setDot(id, ok) {
       el(id).className = 'dot ' + (ok ? 'dot-ok' : 'dot-off');
+    }
+
+    function renderSimklStatuses() {
+      el('simkl-status-groups').innerHTML = Object.keys(SIMKL_STATUS_OPTIONS).map(mediaType => {
+        const buttons = SIMKL_STATUS_OPTIONS[mediaType].map((item, index, items) => {
+          const active = simklSelectedStatuses[mediaType].indexOf(item.value) !== -1;
+          const wide = items.length % 2 === 1 && index === items.length - 1 ? ' wide' : '';
+          return `<button type="button" class="status-card ${active ? 'active' : ''}${wide}" data-simkl-media="${esc(mediaType)}" data-simkl-status="${esc(item.value)}"><span class="status-card-mark">+</span><span>${esc(item.label)}</span></button>`;
+        }).join('');
+        const title = mediaType.charAt(0).toUpperCase() + mediaType.slice(1);
+        return `<div class="status-group"><div class="status-group-title">${esc(title)}</div><div class="status-grid">${buttons}</div></div>`;
+      }).join('');
+
+      document.querySelectorAll('[data-simkl-status]').forEach(node => {
+        node.addEventListener('click', () => toggleSimklStatus(node.dataset.simklMedia, node.dataset.simklStatus));
+      });
+    }
+
+    function toggleSimklStatus(mediaType, status) {
+      const next = cloneSimklStatuses(simklSelectedStatuses);
+      const values = next[mediaType] || [];
+      const index = values.indexOf(status);
+      if (index >= 0) values.splice(index, 1);
+      else values.push(status);
+      simklSelectedStatuses = next;
+      renderSimklStatuses();
+      updateDots();
+      saveDraft();
+    }
+
+    function renderAniListStatuses() {
+      const allActive = ANILIST_STATUS_OPTIONS.every(item => anilistSelectedStatuses.indexOf(item.value) !== -1);
+      const buttons = [`<button type="button" class="status-list-btn ${allActive ? 'active' : ''}" id="anilist-select-all"><span>All</span><span>${allActive ? 'On' : 'Off'}</span></button>`]
+        .concat(ANILIST_STATUS_OPTIONS.map(item => {
+          const active = anilistSelectedStatuses.indexOf(item.value) !== -1;
+          return `<button type="button" class="status-list-btn ${active ? 'active' : ''}" data-anilist-status="${esc(item.value)}"><span>${esc(item.label)}</span><span>${active ? 'On' : 'Off'}</span></button>`;
+        }))
+        .join('');
+
+      el('anilist-status-list').className = 'status-list';
+      el('anilist-status-list').innerHTML = buttons;
+      el('anilist-select-all').addEventListener('click', selectAllAniListStatuses);
+      document.querySelectorAll('[data-anilist-status]').forEach(node => {
+        node.addEventListener('click', () => toggleAniListStatus(node.dataset.anilistStatus));
+      });
+    }
+
+    function selectAllAniListStatuses() {
+      anilistSelectedStatuses = ANILIST_STATUS_OPTIONS.map(item => item.value);
+      renderAniListStatuses();
+      updateDots();
+      saveDraft();
+    }
+
+    function toggleAniListStatus(status) {
+      const next = anilistSelectedStatuses.slice();
+      const index = next.indexOf(status);
+      if (index >= 0) next.splice(index, 1);
+      else next.push(status);
+      anilistSelectedStatuses = normalizeAniListSelectedStatuses(next);
+      renderAniListStatuses();
+      updateDots();
+      saveDraft();
     }
 
     function enterApp(defaultView) {
@@ -590,14 +826,13 @@
 
     function toggleTraktWatchlist() {
       el('trakt-watchlist-toggle').checked = !el('trakt-watchlist-toggle').checked;
-      traktSyncAllLikedLists = false;
       renderTraktCatalogs();
       updateDots();
       saveDraft();
     }
 
     function findTraktListByKey(key) {
-      const items = traktLikedLists.concat(traktDiscoverLists).concat(traktSelectedLists);
+      const items = TRAKT_DEFAULT_CATALOGS.concat(traktLikedLists).concat(traktDiscoverLists).concat(traktSelectedLists);
       for (const item of items) {
         if (traktListKey(item) === key) return item;
       }
@@ -619,7 +854,7 @@
         selected.push(item);
       }
       traktSelectedLists = normalizeTraktSelectedLists(selected);
-      traktSyncAllLikedLists = false;
+      if (traktCatalogTab === 'my-lists') traktSyncAllLikedLists = false;
       renderTraktCatalogs();
       updateDots();
       saveDraft();
@@ -641,6 +876,9 @@
     function selectAllVisibleTraktLists() {
       if (traktCatalogTab === 'default') {
         el('trakt-watchlist-toggle').checked = true;
+        traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(TRAKT_DEFAULT_CATALOGS));
+      } else if (traktCatalogTab === 'enabled') {
+        return;
       } else {
         const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(visible));
@@ -654,6 +892,7 @@
     }
 
     function traktCatalogMeta(item) {
+      if (item.source === 'default') return 'Trakt';
       const parts = [`Trakt by ${item.user}`];
       if (item.item_count) parts.push(`${item.item_count} items`);
       if (item.likes) parts.push(`${item.likes} likes`);
@@ -668,9 +907,10 @@
       el('trakt-discover-search').classList.toggle('hidden', traktCatalogTab !== 'discover');
       el('btn-trakt-refresh').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
       el('btn-trakt-sync-all').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
-      el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable' : 'Select All';
+      el('btn-trakt-select-all').classList.toggle('hidden', traktCatalogTab === 'enabled');
+      el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable All' : 'Select All';
 
-      const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0);
+      const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0) + (traktSyncAllLikedLists ? 1 : 0);
       if (!isTraktConnected()) {
         setTraktCatalogStatus('Connect Trakt to load liked lists and search public lists.', false);
       } else if (traktSyncAllLikedLists) {
@@ -683,19 +923,58 @@
 
       let rows = '';
       if (traktCatalogTab === 'default') {
-        const selected = el('trakt-watchlist-toggle').checked;
-        rows = `
-          <div class="catalog-row ${selected ? 'selected' : ''}" data-trakt-watchlist="1">
-            <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
-            <div class="catalog-body">
-              <div class="catalog-title">My Watchlist</div>
-              <div class="catalog-meta">Trakt default catalog</div>
-              <div class="catalog-note">Imports your Trakt movie and show watchlist into PublicMetaDB.</div>
+        const defaultItems = [{
+          name: 'My Watchlist',
+          source: 'watchlist',
+          description: 'Imports your Trakt movie and show watchlist into PublicMetaDB.',
+        }].concat(TRAKT_DEFAULT_CATALOGS);
+        rows = defaultItems.map(item => {
+          const isWatchlist = item.source === 'watchlist';
+          const selected = isWatchlist ? el('trakt-watchlist-toggle').checked : isTraktListSelected(traktListKey(item));
+          const attrs = isWatchlist ? 'data-trakt-watchlist="1"' : `data-trakt-key="${esc(traktListKey(item))}"`;
+          const meta = isWatchlist ? 'Trakt' : traktCatalogMeta(item);
+          return `
+            <div class="catalog-row ${selected ? 'selected' : ''}" ${attrs}>
+              <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
+              <div class="catalog-body">
+                <div class="catalog-title">${esc(item.name)}</div>
+                <div class="catalog-meta">${esc(meta)}</div>
+                <div class="catalog-note">${esc(item.description || 'Trakt default catalog')}</div>
+              </div>
             </div>
-          </div>
-        `;
+          `;
+        }).join('');
+      } else if (traktCatalogTab === 'enabled') {
+        const enabledItems = [];
+        if (el('trakt-watchlist-toggle').checked) {
+          enabledItems.push({ name: 'My Watchlist', meta: 'Trakt', key: null, removable: 'watchlist' });
+        }
+        normalizeTraktSelectedLists(traktSelectedLists).forEach(item => {
+          enabledItems.push({
+            name: item.name,
+            meta: item.source === 'default' ? 'Trakt' : traktCatalogMeta(item),
+            key: traktListKey(item),
+            removable: 'list',
+          });
+        });
+        if (traktSyncAllLikedLists) {
+          enabledItems.push({ name: 'All Liked Lists', meta: 'Trakt', key: null, removable: 'liked-all' });
+        }
+        rows = enabledItems.length
+          ? enabledItems.map(item => `
+            <div class="catalog-row selected" ${item.key ? `data-trakt-key="${esc(item.key)}"` : ''} ${item.removable === 'watchlist' ? 'data-trakt-watchlist="1"' : ''} ${item.removable === 'liked-all' ? 'data-trakt-liked-all="1"' : ''}>
+              <div class="catalog-check">&#10003;</div>
+              <div class="catalog-body">
+                <div class="catalog-title">${esc(item.name)}</div>
+                <div class="catalog-meta">${esc(item.meta)}</div>
+              </div>
+            </div>
+          `).join('')
+          : '<div class="empty">No Trakt sources enabled yet.</div>';
       } else {
-        const items = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const items = traktCatalogTab === 'my-lists'
+          ? normalizeTraktSelectedLists(traktLikedLists.concat(traktSelectedLists.filter(item => item.source === 'liked')))
+          : traktDiscoverLists;
         if (!items.length) {
           const emptyMessage = traktCatalogTab === 'my-lists'
             ? 'No liked Trakt lists loaded yet. Connect Trakt and press Refresh My Lists.'
@@ -704,7 +983,7 @@
         } else {
           rows = items.map(item => {
             const key = traktListKey(item);
-            const selected = isTraktListSelected(key);
+            const selected = traktSyncAllLikedLists && item.source === 'liked' ? true : isTraktListSelected(key);
             return `
               <div class="catalog-row ${selected ? 'selected' : ''}" data-trakt-key="${esc(key)}">
                 <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
@@ -722,6 +1001,14 @@
       el('trakt-catalog-list').innerHTML = rows;
       document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist="1"]').forEach(node => {
         node.addEventListener('click', toggleTraktWatchlist);
+      });
+      document.querySelectorAll('#trakt-catalog-list [data-trakt-liked-all="1"]').forEach(node => {
+        node.addEventListener('click', () => {
+          traktSyncAllLikedLists = false;
+          renderTraktCatalogs();
+          updateDots();
+          saveDraft();
+        });
       });
       document.querySelectorAll('#trakt-catalog-list [data-trakt-key]').forEach(node => {
         node.addEventListener('click', () => toggleTraktListSelection(node.dataset.traktKey));
@@ -743,7 +1030,7 @@
           setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt liked lists.'), true);
           return;
         }
-        traktLikedLists = Array.isArray(result.data.items) ? result.data.items : [];
+        traktLikedLists = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
         renderTraktCatalogs();
         if (!silent) {
           showToast(traktLikedLists.length ? 'Trakt liked lists loaded.' : 'No liked Trakt lists found.', false, true);
@@ -774,10 +1061,119 @@
           setTraktCatalogStatus(formatApiError(result.data, 'Could not search Trakt lists.'), true);
           return;
         }
-        traktDiscoverLists = Array.isArray(result.data.items) ? result.data.items : [];
+        traktDiscoverLists = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
         renderTraktCatalogs();
       } catch {
         setTraktCatalogStatus('Network error while searching Trakt lists.', true);
+      }
+    }
+
+    function setMdbListStatus(message, isError) {
+      const node = el('mdblist-status');
+      node.textContent = message;
+      node.style.color = isError ? 'var(--red)' : '';
+    }
+
+    function findMdbListByKey(key) {
+      const items = mdblistLists.concat(mdblistSelectedLists);
+      for (const item of items) {
+        if (mdbListKey(item) === key) return item;
+      }
+      return null;
+    }
+
+    function isMdbListSelected(key) {
+      return mdblistSelectedLists.some(item => mdbListKey(item) === key);
+    }
+
+    function toggleMdbListSelection(key) {
+      const selected = mdblistSelectedLists.slice();
+      const index = selected.findIndex(item => mdbListKey(item) === key);
+      if (index >= 0) {
+        selected.splice(index, 1);
+      } else {
+        const item = findMdbListByKey(key);
+        if (!item) return;
+        selected.push(item);
+      }
+      mdblistSelectedLists = normalizeMdbListSelectedLists(selected);
+      renderMdbListLists();
+      updateDots();
+      saveDraft();
+    }
+
+    function renderMdbListLists() {
+      if (!el('mdblist-api-key').value.trim()) {
+        setMdbListStatus('Enter your MDBList API key, then refresh your lists.', false);
+      } else if (mdblistSelectedLists.length) {
+        setMdbListStatus(`${mdblistSelectedLists.length} MDBList list${mdblistSelectedLists.length === 1 ? '' : 's'} selected.`, false);
+      } else {
+        setMdbListStatus('Refresh your MDBList lists, then choose what should sync.', false);
+      }
+
+      const items = mdblistLists.length
+        ? normalizeMdbListSelectedLists(mdblistLists.concat(mdblistSelectedLists))
+        : mdblistSelectedLists;
+
+      if (!items.length) {
+        el('mdblist-list').innerHTML = '<div class="empty">No MDBList lists loaded yet.</div>';
+        return;
+      }
+
+      el('mdblist-list').innerHTML = items.map(item => {
+        const key = mdbListKey(item);
+        const selected = isMdbListSelected(key);
+        const meta = [
+          item.mediatype === 'movie' ? 'Movies' : 'Series',
+          item.user_name || '',
+          item.items ? `${item.items} items` : '',
+          item.likes ? `${item.likes} likes` : '',
+        ].filter(Boolean).join(' · ');
+        return `
+          <div class="catalog-row ${selected ? 'selected' : ''}" data-mdblist-key="${esc(key)}">
+            <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
+            <div class="catalog-body">
+              <div class="catalog-title">${esc(item.name)}</div>
+              <div class="catalog-meta">${esc(meta)}</div>
+              ${item.description ? `<div class="catalog-note">${esc(item.description)}</div>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      document.querySelectorAll('[data-mdblist-key]').forEach(node => {
+        node.addEventListener('click', () => toggleMdbListSelection(node.dataset.mdblistKey));
+      });
+    }
+
+    function selectAllVisibleMdbListLists() {
+      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(mdblistLists.length ? mdblistLists : mdblistSelectedLists));
+      renderMdbListLists();
+      updateDots();
+      saveDraft();
+    }
+
+    async function refreshMdbListLists(silent) {
+      const apiKey = el('mdblist-api-key').value.trim();
+      if (!apiKey) {
+        if (!silent) showToast('Enter your MDBList API key first.', true, false);
+        renderMdbListLists();
+        return;
+      }
+      setMdbListStatus('Loading MDBList lists...', false);
+      try {
+        const result = await apiPost('/api/mdblist/lists', { api_key: apiKey });
+        if (!result.ok) {
+          setMdbListStatus(formatApiError(result.data, 'Could not load MDBList lists.'), true);
+          return;
+        }
+        mdblistLists = Array.isArray(result.data.items) ? normalizeMdbListSelectedLists(result.data.items) : [];
+        renderMdbListLists();
+        if (!silent) {
+          showToast(mdblistLists.length ? 'MDBList lists loaded.' : 'No MDBList lists found.', false, true);
+        }
+      } catch {
+        setMdbListStatus('Network error while loading MDBList lists.', true);
       }
     }
 
@@ -1110,7 +1506,7 @@
       if (!results.length) {
         el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';
       } else {
-        el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.list_name || '')}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td></tr>`).join('')}</tbody></table>`;
+        el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td></tr>`).join('')}</tbody></table>`;
       }
 
       if (!history.length) {
@@ -1165,6 +1561,9 @@
         if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
           refreshTraktLists(true);
         }
+        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key) {
+          refreshMdbListLists(true);
+        }
         if (announce) showToast(result.data.created ? 'Profile created.' : 'Profile updated.', false, true);
         return profile;
       } catch {
@@ -1196,6 +1595,9 @@
         saveDraft();
         if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
           refreshTraktLists(true);
+        }
+        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key) {
+          refreshMdbListLists(true);
         }
         if (!silent) showToast('Profile loaded.', false, true);
         return profile;
@@ -1256,12 +1658,22 @@
       localStorage.removeItem(CREDS_KEY);
       localStorage.removeItem(OPTIONS_KEY);
       clearProfileAuth();
-      populateForm({}, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] }, {});
+      populateForm({
+        simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
+        anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
+        trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+        mdblist: { selected_lists: [] },
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] }, {});
       renderEmptyDashboard('Local profile data cleared. Your server-side profile still exists.');
       showToast('Local data cleared.', false, true);
     }
 
-    const draftCreds = loadJson(CREDS_KEY, {});
+    const draftCreds = loadJson(CREDS_KEY, {
+      simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
+      anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
+      trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+      mdblist: { selected_lists: [] },
+    });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] });
     const savedAuth = loadProfileAuth();
     populateForm(draftCreds, draftOptions, savedAuth);
@@ -1269,6 +1681,9 @@
     resumeTraktDeviceState();
     if (draftCreds.trakt && draftCreds.trakt.client_id && draftCreds.trakt.access_token) {
       refreshTraktLists(true);
+    }
+    if (draftCreds.mdblist && draftCreds.mdblist.api_key) {
+      refreshMdbListLists(true);
     }
 
     if (localStorage.getItem(ENTERED_KEY)) enterApp(savedAuth.profile_id ? 'dashboard' : 'settings');

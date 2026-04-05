@@ -11,11 +11,15 @@ from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from .config import ANILIST_DEFAULT_SELECTED_STATUSES, SIMKL_DEFAULT_SELECTED_STATUSES
+
 ALLOWED_MEDIA_TYPES = {"shows", "movies", "anime"}
 DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
 DEFAULT_SYNC_INTERVAL_SECONDS = 1800
 MIN_SYNC_INTERVAL_SECONDS = 300
 MAX_HISTORY_ITEMS = 20
+SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
+ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"}
 
 
 def utc_now() -> datetime:
@@ -40,16 +44,19 @@ def normalize_credentials(credentials: dict | None) -> dict:
     simkl = raw.get("simkl", {})
     anilist = raw.get("anilist", {})
     trakt = raw.get("trakt", {})
+    mdblist = raw.get("mdblist", {})
     pmdb = raw.get("pmdb", {})
     return {
         "simkl": {
             "client_id": str(simkl.get("client_id", "")).strip(),
             "client_secret": str(simkl.get("client_secret", "")).strip(),
             "access_token": str(simkl.get("access_token", "")).strip(),
+            "selected_statuses": _normalize_simkl_selected_statuses(simkl.get("selected_statuses")),
         },
         "anilist": {
             "username": str(anilist.get("username", "")).strip(),
             "access_token": str(anilist.get("access_token", "")).strip(),
+            "selected_statuses": _normalize_anilist_selected_statuses(anilist.get("selected_statuses")),
         },
         "trakt": {
             "client_id": str(trakt.get("client_id", "")).strip(),
@@ -61,10 +68,40 @@ def normalize_credentials(credentials: dict | None) -> dict:
             "sync_liked_lists": bool(trakt.get("sync_liked_lists", True)),
             "selected_lists": _normalize_trakt_selected_lists(trakt.get("selected_lists", [])),
         },
+        "mdblist": {
+            "api_key": str(mdblist.get("api_key", "")).strip(),
+            "selected_lists": _normalize_mdblist_selected_lists(mdblist.get("selected_lists", [])),
+        },
         "pmdb": {
             "api_key": str(pmdb.get("api_key", "")).strip(),
         },
     }
+
+
+def _normalize_simkl_selected_statuses(raw_statuses: dict | None) -> dict[str, list[str]]:
+    incoming = raw_statuses if isinstance(raw_statuses, dict) else {}
+    normalized: dict[str, list[str]] = {}
+    for media_type, defaults in SIMKL_DEFAULT_SELECTED_STATUSES.items():
+        values = incoming.get(media_type, defaults)
+        if not isinstance(values, list):
+            values = defaults
+        deduped: list[str] = []
+        for status in values:
+            candidate = str(status).strip().lower()
+            if candidate in SIMKL_ALLOWED_STATUSES and candidate not in deduped:
+                deduped.append(candidate)
+        normalized[media_type] = deduped
+    return normalized
+
+
+def _normalize_anilist_selected_statuses(raw_statuses: list | None) -> list[str]:
+    values = raw_statuses if isinstance(raw_statuses, list) else ANILIST_DEFAULT_SELECTED_STATUSES
+    normalized: list[str] = []
+    for status in values:
+        candidate = str(status).strip().upper()
+        if candidate in ANILIST_ALLOWED_STATUSES and candidate not in normalized:
+            normalized.append(candidate)
+    return normalized
 
 
 def _normalize_trakt_selected_lists(raw_lists: list | None) -> list[dict]:
@@ -94,7 +131,7 @@ def _normalize_trakt_selected_lists(raw_lists: list | None) -> list[dict]:
         except (TypeError, ValueError):
             item_count = 0
         source = str(item.get("source", "liked")).strip().lower()
-        if source not in {"liked", "discover"}:
+        if source not in {"liked", "discover", "default"}:
             source = "liked"
         selected.append({
             "name": name,
@@ -106,6 +143,51 @@ def _normalize_trakt_selected_lists(raw_lists: list | None) -> list[dict]:
             "likes": likes,
             "share_link": str(item.get("share_link", "")).strip(),
             "source": source,
+            "catalog_key": str(item.get("catalog_key", "")).strip(),
+        })
+    return selected
+
+
+def _normalize_mdblist_selected_lists(raw_lists: list | None) -> list[dict]:
+    if not isinstance(raw_lists, list):
+        return []
+
+    selected: list[dict] = []
+    seen: set[tuple[int, str]] = set()
+    for item in raw_lists:
+        if not isinstance(item, dict):
+            continue
+        try:
+            list_id = int(item.get("id"))
+        except (TypeError, ValueError):
+            continue
+        mediatype = str(item.get("mediatype", "")).strip().lower()
+        name = str(item.get("name", "")).strip()
+        if mediatype not in {"movie", "show"} or not name:
+            continue
+        key = (list_id, mediatype)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            items = int(item.get("items", 0) or 0)
+        except (TypeError, ValueError):
+            items = 0
+        try:
+            likes = int(item.get("likes", 0) or 0)
+        except (TypeError, ValueError):
+            likes = 0
+        selected.append({
+            "id": list_id,
+            "name": name,
+            "slug": str(item.get("slug", "")).strip(),
+            "user_name": str(item.get("user_name", "")).strip(),
+            "description": str(item.get("description", "")).strip(),
+            "mediatype": mediatype,
+            "items": items,
+            "likes": likes,
+            "type": str(item.get("type", "")).strip(),
+            "private": bool(item.get("private", False)),
         })
     return selected
 

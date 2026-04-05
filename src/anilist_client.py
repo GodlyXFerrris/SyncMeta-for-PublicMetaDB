@@ -15,6 +15,9 @@ GRAPHQL_URL = "https://graphql.anilist.co"
 # AniList statuses we care about
 ANILIST_STATUS_WATCHING = "CURRENT"
 ANILIST_STATUS_PLAN_TO_WATCH = "PLANNING"
+ANILIST_STATUS_COMPLETED = "COMPLETED"
+ANILIST_STATUS_PAUSED = "PAUSED"
+ANILIST_STATUS_DROPPED = "DROPPED"
 
 _LIST_QUERY = """
 query ($userName: String, $status: MediaListStatus) {
@@ -127,11 +130,15 @@ class AniListClient:
 
     def get_watching(self) -> list[dict]:
         """Fetch anime with status CURRENT (watching)."""
-        return self._fetch_list(ANILIST_STATUS_WATCHING)
+        return self.get_status(ANILIST_STATUS_WATCHING)
 
     def get_plan_to_watch(self) -> list[dict]:
         """Fetch anime with status PLANNING (plan to watch)."""
-        return self._fetch_list(ANILIST_STATUS_PLAN_TO_WATCH)
+        return self.get_status(ANILIST_STATUS_PLAN_TO_WATCH)
+
+    def get_status(self, status: str) -> list[dict]:
+        """Fetch anime for any supported AniList status."""
+        return self._fetch_list(status)
 
     def _fetch_list(self, status: str) -> list[dict]:
         data = self._query(_LIST_QUERY, {"userName": self._config.username, "status": status})

@@ -59,6 +59,22 @@ class TraktClientTests(unittest.TestCase):
         self.assertEqual(item["user"], "demo")
         self.assertEqual(item["slug"], "anime")
         self.assertEqual(item["source"], "liked")
+        self.assertEqual(item["catalog_key"], "")
+
+    def test_normalize_default_catalog_movie_entry(self) -> None:
+        client = TraktClient(TraktConfig())
+
+        item = client._normalize_catalog_entry({
+            "watchers": 12,
+            "movie": {
+                "title": "Trending Movie",
+                "year": 2025,
+                "ids": {"tmdb": 321, "imdb": "tt321"},
+            },
+        }, "movie")
+
+        self.assertEqual(item["media_type"], "movie")
+        self.assertEqual(item["tmdb_id"], "321")
 
 
 if __name__ == "__main__":

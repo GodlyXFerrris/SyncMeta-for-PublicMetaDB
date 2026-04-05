@@ -12,6 +12,39 @@ from .config import TraktConfig
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_CATALOGS = {
+    "trending-movies": {
+        "name": "Trending Movies",
+        "path": "/movies/trending",
+        "media_kind": "movie",
+    },
+    "trending-series": {
+        "name": "Trending Series",
+        "path": "/shows/trending",
+        "media_kind": "show",
+    },
+    "popular-movies": {
+        "name": "Popular Movies",
+        "path": "/movies/popular",
+        "media_kind": "movie",
+    },
+    "popular-series": {
+        "name": "Popular Series",
+        "path": "/shows/popular",
+        "media_kind": "show",
+    },
+    "recommended-movies": {
+        "name": "Recommended Movies",
+        "path": "/recommendations/movies",
+        "media_kind": "movie",
+    },
+    "recommended-series": {
+        "name": "Recommended Series",
+        "path": "/recommendations/shows",
+        "media_kind": "show",
+    },
+}
+
 
 class TraktClient:
     """Client for the Trakt API."""
@@ -130,6 +163,19 @@ class TraktClient:
                 items.append(normalized)
         return items
 
+    def get_default_catalog(self, catalog_key: str) -> list[dict]:
+        catalog = DEFAULT_CATALOGS.get(catalog_key)
+        if not catalog:
+            return []
+
+        raw = self._get(catalog["path"], params={"limit": 20, "extended": "full"}) or []
+        items = []
+        for entry in raw:
+            normalized = self._normalize_catalog_entry(entry, catalog["media_kind"])
+            if normalized:
+                items.append(normalized)
+        return items
+
     def _normalize_list_metadata(self, entry: dict, source: str) -> dict | None:
         list_data = entry.get("list") if isinstance(entry, dict) and entry.get("list") else entry
         if not isinstance(list_data, dict):
@@ -157,6 +203,37 @@ class TraktClient:
             "likes": int(list_data.get("likes") or 0),
             "share_link": list_data.get("share_link") or "",
             "source": source,
+            "catalog_key": "",
+        }
+
+    @staticmethod
+    def _normalize_catalog_entry(entry: dict, media_kind: str) -> dict | None:
+        media = entry.get(media_kind) if isinstance(entry, dict) and entry.get(media_kind) else entry
+        if not isinstance(media, dict):
+            return None
+
+        ids = media.get("ids", {})
+        if media_kind == "movie":
+            media_type = "movie"
+            trakt_type = "movies"
+        else:
+            media_type = "tv"
+            trakt_type = "shows"
+
+        return {
+            "title": media.get("title", "Unknown"),
+            "year": media.get("year"),
+            "media_type": media_type,
+            "simkl_type": trakt_type,
+            "imdb_id": ids.get("imdb"),
+            "tmdb_id": str(ids["tmdb"]) if ids.get("tmdb") else None,
+            "mal_id": None,
+            "anilist_id": None,
+            "anidb_id": None,
+            "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+            "ids": ids,
+            "status": None,
+            "added_at": entry.get("listed_at"),
         }
 
     @staticmethod
