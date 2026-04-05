@@ -350,7 +350,7 @@ def normalize_profile_options(options: dict | None) -> dict:
 
     return {
         "remove_missing": bool(raw.get("remove_missing", False)),
-        "delete_disabled_lists": False,
+        "delete_disabled_lists": bool(raw.get("delete_disabled_lists", False)),
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
