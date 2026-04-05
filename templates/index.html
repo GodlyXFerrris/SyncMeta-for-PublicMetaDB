@@ -46,6 +46,9 @@
     .empty{text-align:center;padding:40px 20px;color:var(--z600);font-size:13px}.history-item{padding:12px 18px;border-bottom:1px solid rgba(39,39,46,.3);font-size:13px;display:flex;justify-content:space-between;align-items:center}.history-item:last-child{border-bottom:none}.history-time{color:var(--z500);font-size:12px}.history-stats{display:flex;gap:14px;font-variant-numeric:tabular-nums}
     .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.9);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300)}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
     .save-flash{font-size:12px;color:var(--green);opacity:0;transition:opacity .3s;margin-left:8px}.save-flash.show{opacity:1}.actions-bar{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions-meta{font-size:12px;color:var(--z600)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .auth-box{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:var(--z900)}
+    .auth-box.hidden{display:none}
+    .auth-code{font-size:22px;font-weight:700;color:var(--white);letter-spacing:2px;margin:6px 0}
     @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}}
   </style>
 </head>
@@ -124,6 +127,15 @@
             <div class="actions-bar" style="margin-top:0">
               <button class="btn btn-sm" id="btn-simkl-auth" onclick="startSimklAuth()">Get SIMKL Token</button>
               <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if you do not have an access token yet.</span>
+            </div>
+            <div class="auth-box hidden" id="simkl-auth-box">
+              <div class="actions-meta">SIMKL PIN</div>
+              <div class="auth-code mono" id="simkl-auth-code">-----</div>
+              <div class="actions-bar" style="margin-top:8px">
+                <button class="btn btn-sm" type="button" onclick="copySimklCode()">Copy PIN</button>
+                <button class="btn btn-sm" type="button" onclick="openSimklVerification()">Open SIMKL</button>
+              </div>
+              <div class="hint">If SIMKL does not auto-fill the code, paste this PIN into the SIMKL page manually.</div>
             </div>
           </div>
           <div class="form-section">
@@ -273,6 +285,7 @@
       el('opt-anime').checked = mediaTypes.indexOf('anime') !== -1;
       updateDots();
       if (!loadSimklPinState()) {
+        setSimklAuthCode('');
         setSimklAuthStatus(simkl.access_token ? 'SIMKL access token is already set.' : 'Start PIN auth here if you do not have an access token yet.', false);
       }
     }
@@ -384,9 +397,44 @@
       node.style.color = isError ? 'var(--red)' : '';
     }
 
+    function setSimklAuthCode(code) {
+      const box = el('simkl-auth-box');
+      const codeNode = el('simkl-auth-code');
+      if (code) {
+        codeNode.textContent = code;
+        box.classList.remove('hidden');
+      } else {
+        codeNode.textContent = '-----';
+        box.classList.add('hidden');
+      }
+    }
+
     function buildSimklVerifyUrl(baseUrl, userCode) {
       if (baseUrl && baseUrl.endsWith('/')) return baseUrl + encodeURIComponent(userCode);
       return baseUrl;
+    }
+
+    async function copySimklCode() {
+      const state = loadSimklPinState();
+      if (!state || !state.user_code) {
+        showToast('No active SIMKL PIN to copy.', true, false);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(state.user_code);
+        showToast('SIMKL PIN copied.', false, true);
+      } catch {
+        showToast('Could not copy the SIMKL PIN.', true, false);
+      }
+    }
+
+    function openSimklVerification() {
+      const state = loadSimklPinState();
+      if (!state) {
+        showToast('Start SIMKL auth first.', true, false);
+        return;
+      }
+      window.open(buildSimklVerifyUrl(state.verification_url, state.user_code), '_blank', 'noopener');
     }
 
     async function startSimklAuth() {
@@ -415,6 +463,7 @@
           expires_at: Date.now() + ((pin.expires_in || 900) * 1000),
         };
         saveSimklPinState(state);
+        setSimklAuthCode(pin.user_code);
         setSimklAuthStatus(`Approve code ${pin.user_code} on SIMKL. Waiting for confirmation...`, false);
         window.open(buildSimklVerifyUrl(pin.verification_url, pin.user_code), '_blank', 'noopener');
         scheduleSimklPinCheck(1000);
@@ -436,6 +485,7 @@
 
       if (Date.now() >= state.expires_at) {
         clearSimklPinState();
+        setSimklAuthCode('');
         setSimklAuthStatus('SIMKL PIN expired. Start the token flow again.', true);
         return;
       }
@@ -455,6 +505,7 @@
         if (result.data.status === 'approved' && result.data.access_token) {
           el('simkl-access-token').value = result.data.access_token;
           clearSimklPinState();
+          setSimklAuthCode('');
           updateDots();
           saveDraft();
           setSimklAuthStatus('SIMKL access token received and filled in.', false);
@@ -473,14 +524,17 @@
     function resumeSimklPinState() {
       const state = loadSimklPinState();
       if (!state) {
+        setSimklAuthCode('');
         setSimklAuthStatus('Start PIN auth here if you do not have an access token yet.', false);
         return;
       }
       if (Date.now() >= state.expires_at) {
         clearSimklPinState();
+        setSimklAuthCode('');
         setSimklAuthStatus('SIMKL PIN expired. Start the token flow again.', true);
         return;
       }
+      setSimklAuthCode(state.user_code);
       setSimklAuthStatus(`Approve code ${state.user_code} on SIMKL. Waiting for confirmation...`, false);
       scheduleSimklPinCheck(1000);
     }
