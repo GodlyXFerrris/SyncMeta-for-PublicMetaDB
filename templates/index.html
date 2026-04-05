@@ -38,8 +38,8 @@
     .num{text-align:right;font-variant-numeric:tabular-nums}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-dim{color:var(--z600)}
     .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.form-section{padding:20px}.form-section.full{grid-column:1 / -1}.form-section h3{font-size:15px;font-weight:700;color:var(--z100);margin-bottom:4px;display:flex;align-items:center;gap:8px}.desc{font-size:12px;color:var(--z500);margin-bottom:16px}
     .form-row{margin-bottom:14px}.form-row:last-child{margin-bottom:0}.form-row label{display:block;font-size:11px;font-weight:600;color:var(--z500);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
-    .form-row input[type=text],.form-row input[type=password],.form-row input[type=number]{width:100%;padding:9px 12px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z100);font-size:13px;font-family:inherit}
-    .form-row input:focus{outline:none;border-color:var(--z600)} .form-row input::placeholder{color:var(--z600)}
+    .form-row input[type=text],.form-row input[type=password],.form-row input[type=number],.form-row select{width:100%;padding:9px 12px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z100);font-size:13px;font-family:inherit}
+    .form-row input:focus,.form-row select:focus{outline:none;border-color:var(--z600)} .form-row input::placeholder{color:var(--z600)}
     .hint{font-size:11px;color:var(--z600);margin-top:4px}.hint a{color:var(--z400);text-decoration:none}.hint a:hover{color:var(--white)}
     .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}.toggle-row:last-child{margin-bottom:0}.toggle-row>label:last-child{margin-bottom:0;text-transform:none;font-size:13px;color:var(--z300);font-weight:400}
     .toggle{position:relative;width:36px;height:20px;flex-shrink:0}.toggle input{opacity:0;width:0;height:0}.toggle .slider{position:absolute;inset:0;background:var(--z800);border:1px solid var(--z700);border-radius:10px;cursor:pointer}.toggle .slider:before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--z500);border-radius:50%;transition:all .2s}.toggle input:checked + .slider{background:var(--accent2);border-color:var(--accent)}.toggle input:checked + .slider:before{transform:translateX(16px);background:var(--white)}
@@ -236,6 +236,46 @@
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
             <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
+            <div class="form-row" style="margin-top:14px">
+              <label>SIMKL Lists Visibility</label>
+              <select id="opt-simkl-visibility">
+                <option value="private">Private</option>
+                <option value="public">Public</option>
+              </select>
+              <div class="hint">Recommended: private, since these are your personal SIMKL status lists.</div>
+            </div>
+            <div class="form-row">
+              <label>AniList Lists Visibility</label>
+              <select id="opt-anilist-visibility">
+                <option value="private">Private</option>
+                <option value="public">Public</option>
+              </select>
+              <div class="hint">Recommended: private, since these reflect your personal AniList activity.</div>
+            </div>
+            <div class="form-row">
+              <label>Trakt Personal Lists Visibility</label>
+              <select id="opt-trakt-personal-visibility">
+                <option value="private">Private</option>
+                <option value="public">Public</option>
+              </select>
+              <div class="hint">Applies to Trakt watchlist and default personal-style catalogs like recommendations.</div>
+            </div>
+            <div class="form-row">
+              <label>Trakt Public Lists Visibility</label>
+              <select id="opt-trakt-public-visibility">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+              <div class="hint">Applies to liked Trakt lists and Discover/public Trakt lists.</div>
+            </div>
+            <div class="form-row">
+              <label>MDBList Visibility</label>
+              <select id="opt-mdblist-visibility">
+                <option value="public">Public</option>
+                <option value="private">Private</option>
+              </select>
+              <div class="hint">Recommended: public, since MDBList selections are usually shared/public-style catalogs.</div>
+            </div>
           </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
@@ -244,14 +284,14 @@
           </div>
           <div class="form-section full">
             <h3>AniList Lists</h3>
-            <p class="desc">Choose which AniList anime statuses should sync. If all are off, anime can continue syncing from SIMKL.</p>
+            <p class="desc">Choose which AniList anime statuses should sync into PublicMetaDB.</p>
             <div class="status-group">
               <div class="pill-row" id="anilist-status-list"></div>
             </div>
           </div>
           <div class="form-section full">
             <h3>Trakt Catalogs</h3>
-            <p class="desc">Choose what should sync from Trakt. Default covers your watchlist, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
+            <p class="desc">Choose what should sync from Trakt. Default covers your personal watchlist and recommendations, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
               <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
@@ -584,6 +624,11 @@
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
+        simkl_visibility: el('opt-simkl-visibility').value,
+        anilist_visibility: el('opt-anilist-visibility').value,
+        trakt_personal_visibility: el('opt-trakt-personal-visibility').value,
+        trakt_public_visibility: el('opt-trakt-public-visibility').value,
+        mdblist_visibility: el('opt-mdblist-visibility').value,
         media_types: ['shows', 'movies', 'anime'],
       };
     }
@@ -674,6 +719,11 @@
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
+      el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
+      el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
+      el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
+      el('opt-trakt-public-visibility').value = options.trakt_public_visibility || 'public';
+      el('opt-mdblist-visibility').value = options.mdblist_visibility || 'public';
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
@@ -1816,6 +1866,9 @@
     document.querySelectorAll('.form-section input').forEach(input => {
       input.addEventListener('input', () => { updateDots(); saveDraft(); });
       input.addEventListener('change', () => { updateDots(); saveDraft(); });
+    });
+    document.querySelectorAll('.form-section select').forEach(select => {
+      select.addEventListener('change', () => { updateDots(); saveDraft(); });
     });
     el('trakt-discover-query').addEventListener('keydown', event => {
       if (event.key === 'Enter') {

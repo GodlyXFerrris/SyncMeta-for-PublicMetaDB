@@ -22,6 +22,7 @@ MIN_SYNC_INTERVAL_SECONDS = 300
 MAX_HISTORY_ITEMS = 20
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"}
+ALLOWED_VISIBILITIES = {"private", "public"}
 DEFAULT_KEY_FILE_NAME = "profiles.key"
 
 
@@ -324,6 +325,11 @@ def merge_credentials(existing: dict | None, updates: dict | None) -> dict:
     }
 
 
+def _normalize_visibility(value: object, default: str) -> str:
+    candidate = str(value or "").strip().lower()
+    return candidate if candidate in ALLOWED_VISIBILITIES else default
+
+
 def normalize_profile_options(options: dict | None) -> dict:
     raw = options or {}
     interval_raw = raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL_SECONDS)
@@ -354,6 +360,11 @@ def normalize_profile_options(options: dict | None) -> dict:
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
+        "simkl_visibility": _normalize_visibility(raw.get("simkl_visibility"), "private"),
+        "anilist_visibility": _normalize_visibility(raw.get("anilist_visibility"), "private"),
+        "trakt_personal_visibility": _normalize_visibility(raw.get("trakt_personal_visibility"), "private"),
+        "trakt_public_visibility": _normalize_visibility(raw.get("trakt_public_visibility"), "public"),
+        "mdblist_visibility": _normalize_visibility(raw.get("mdblist_visibility"), "public"),
     }
 
 

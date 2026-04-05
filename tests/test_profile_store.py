@@ -50,6 +50,11 @@ class ProfileStoreTests(unittest.TestCase):
             "interval_seconds": 600,
             "remove_missing": False,
             "delete_disabled_lists": False,
+            "simkl_visibility": "private",
+            "anilist_visibility": "private",
+            "trakt_personal_visibility": "private",
+            "trakt_public_visibility": "public",
+            "mdblist_visibility": "public",
             "media_types": ["shows", "movies"],
         }
 
@@ -70,6 +75,8 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
         self.assertEqual(loaded["options"]["interval_seconds"], 600)
         self.assertFalse(loaded["options"]["delete_disabled_lists"])
+        self.assertEqual(loaded["options"]["simkl_visibility"], "private")
+        self.assertEqual(loaded["options"]["trakt_public_visibility"], "public")
         self.assertEqual(loaded["credentials"]["simkl"]["selected_statuses"]["shows"], ["watching", "completed"])
         self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], ["CURRENT", "COMPLETED"])
         self.assertEqual(loaded["credentials"]["mdblist"]["selected_lists"][0]["id"], 11)

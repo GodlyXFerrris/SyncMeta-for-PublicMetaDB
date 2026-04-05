@@ -136,7 +136,16 @@ class SyncService:
                     f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
                     f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
                 )
-                stats.append(self._sync_list(items, name, description, display_name=display_name, source_name="SIMKL"))
+                stats.append(
+                    self._sync_list(
+                        items,
+                        name,
+                        description,
+                        display_name=display_name,
+                        source_name="SIMKL",
+                        is_public=self._config.sync.simkl_visibility == "public",
+                    )
+                )
 
         return stats
 
@@ -156,7 +165,16 @@ class SyncService:
             name = _status_list_name("anime", status_key)
             display_name = _display_status_name("anime", status_key)
             description = f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' anime from AniList"
-            stats.append(self._sync_list(items, name, description, display_name=display_name, source_name="AniList"))
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=display_name,
+                    source_name="AniList",
+                    is_public=self._config.sync.anilist_visibility == "public",
+                )
+            )
 
         return stats
 
@@ -178,7 +196,16 @@ class SyncService:
                 name = _status_list_name(media_type, "watchlist")
                 display_name = _display_status_name(media_type, "watchlist")
                 description = f"Auto-synced Trakt watchlist {_TYPE_LABELS.get(media_type, media_type)}"
-                stats.append(self._sync_list(items, name, description, display_name=display_name, source_name="Trakt"))
+                stats.append(
+                    self._sync_list(
+                        items,
+                        name,
+                        description,
+                        display_name=display_name,
+                        source_name="Trakt",
+                        is_public=self._config.sync.trakt_personal_visibility == "public",
+                    )
+                )
 
         selected_lists = self._dedupe_trakt_lists(self._config.trakt.selected_lists)
         selected_default_lists = [item for item in selected_lists if item.get("source") == "default"]
@@ -193,7 +220,16 @@ class SyncService:
             )
             name = trakt_list["name"]
             description = f"Auto-synced Trakt default catalog '{trakt_list['name']}'"
-            stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name="Trakt"))
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name="Trakt",
+                    is_public=self._config.sync.trakt_personal_visibility == "public",
+                )
+            )
 
         if self._config.trakt.sync_liked_lists:
             self._set_status("Fetching Trakt liked lists")
@@ -201,7 +237,16 @@ class SyncService:
                 items = self._filter_trakt_items(liked_list["items"])
                 name = liked_list["name"]
                 description = f"Auto-synced liked Trakt list '{liked_list['name']}'"
-                stats.append(self._sync_list(items, name, description, display_name=liked_list["name"], source_name=f"Trakt by {liked_list['user']}"))
+                stats.append(
+                    self._sync_list(
+                        items,
+                        name,
+                        description,
+                        display_name=liked_list["name"],
+                        source_name=f"Trakt by {liked_list['user']}",
+                        is_public=self._config.sync.trakt_public_visibility == "public",
+                    )
+                )
         else:
             for trakt_list in selected_liked_lists:
                 self._set_status(f"Fetching Trakt list {trakt_list['name']}")
@@ -210,7 +255,16 @@ class SyncService:
                 )
                 name = trakt_list["name"]
                 description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
-                stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name=f"Trakt by {trakt_list['user']}"))
+                stats.append(
+                    self._sync_list(
+                        items,
+                        name,
+                        description,
+                        display_name=trakt_list["name"],
+                        source_name=f"Trakt by {trakt_list['user']}",
+                        is_public=self._config.sync.trakt_public_visibility == "public",
+                    )
+                )
 
         for trakt_list in selected_public_lists:
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
@@ -219,7 +273,16 @@ class SyncService:
             )
             name = trakt_list["name"]
             description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
-            stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name=f"Trakt by {trakt_list['user']}"))
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name=f"Trakt by {trakt_list['user']}",
+                    is_public=self._config.sync.trakt_public_visibility == "public",
+                )
+            )
 
         return stats
 
@@ -233,7 +296,16 @@ class SyncService:
             media_type = "movies" if mdblist["mediatype"] == "movie" else "shows"
             name = mdblist["name"]
             description = f"Auto-synced MDBList '{mdblist['name']}'"
-            stats.append(self._sync_list(items, name, description, display_name=mdblist["name"], source_name="MDBList"))
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=mdblist["name"],
+                    source_name="MDBList",
+                    is_public=self._config.sync.mdblist_visibility == "public",
+                )
+            )
 
         return stats
 
@@ -301,6 +373,7 @@ class SyncService:
         list_description: str,
         display_name: str | None = None,
         source_name: str | None = None,
+        is_public: bool = False,
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         stats = SyncStats(
@@ -331,7 +404,7 @@ class SyncService:
 
         try:
             self._set_status(f"Preparing PublicMetaDB list {list_name}")
-            pmdb_list = self._pmdb.get_or_create_list(list_name, list_description)
+            pmdb_list = self._pmdb.get_or_create_list(list_name, list_description, is_public=is_public)
             self._register_managed_list(
                 list_name,
                 str(pmdb_list.get("id", "")),

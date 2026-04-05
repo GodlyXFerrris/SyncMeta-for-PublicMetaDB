@@ -136,13 +136,13 @@ class PublicMetaDBClient:
             return resp["item"]
         raise RuntimeError(f"Failed to create list '{name}': {resp}")
 
-    def get_or_create_list(self, name: str, description: str = "") -> dict:
+    def get_or_create_list(self, name: str, description: str = "", is_public: bool = False) -> dict:
         """Find a list by name, or create it if missing."""
         existing = self.find_list_by_name(name)
         if existing:
             logger.debug("Found existing list '%s' (id=%s)", name, existing["id"])
             return existing
-        return self.create_list(name, description)
+        return self.create_list(name, description, is_public=is_public)
 
     def delete_list(self, list_id: str) -> bool:
         """Delete a list by ID. Returns False if it is already gone."""

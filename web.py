@@ -184,6 +184,11 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             delete_disabled_lists=options["delete_disabled_lists"],
             dry_run=dry_run,
             media_types=options["media_types"],
+            simkl_visibility=options["simkl_visibility"],
+            anilist_visibility=options["anilist_visibility"],
+            trakt_personal_visibility=options["trakt_personal_visibility"],
+            trakt_public_visibility=options["trakt_public_visibility"],
+            mdblist_visibility=options["mdblist_visibility"],
         ),
     )
 

@@ -69,6 +69,11 @@ class SyncConfig:
     dry_run: bool = False
     interval_minutes: int = 0
     media_types: list[str] = field(default_factory=lambda: ["shows", "movies", "anime"])
+    simkl_visibility: str = "private"
+    anilist_visibility: str = "private"
+    trakt_personal_visibility: str = "private"
+    trakt_public_visibility: str = "public"
+    mdblist_visibility: str = "public"
 
 
 @dataclass
@@ -207,6 +212,16 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.interval_minutes = sync["interval_minutes"]
     if "media_types" in sync and not os.getenv("SYNC_MEDIA_TYPES"):
         cfg.sync.media_types = sync["media_types"]
+    if "simkl_visibility" in sync:
+        cfg.sync.simkl_visibility = sync["simkl_visibility"]
+    if "anilist_visibility" in sync:
+        cfg.sync.anilist_visibility = sync["anilist_visibility"]
+    if "trakt_personal_visibility" in sync:
+        cfg.sync.trakt_personal_visibility = sync["trakt_personal_visibility"]
+    if "trakt_public_visibility" in sync:
+        cfg.sync.trakt_public_visibility = sync["trakt_public_visibility"]
+    if "mdblist_visibility" in sync:
+        cfg.sync.mdblist_visibility = sync["mdblist_visibility"]
     if "state_file" in data:
         cfg.state_file = data["state_file"]
 
