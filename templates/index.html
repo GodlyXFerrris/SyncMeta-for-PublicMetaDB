@@ -37,8 +37,10 @@
     table{width:100%;border-collapse:collapse;font-size:13px} th{text-align:left;padding:10px 18px;color:var(--z500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--z900)} td{padding:11px 18px;border-bottom:1px solid rgba(39,39,46,.3);color:var(--z300)} tr:last-child td{border-bottom:none}
     .num{text-align:right;font-variant-numeric:tabular-nums}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-dim{color:var(--z600)}.table-actions{text-align:right;white-space:nowrap}
     .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.form-section{padding:20px;align-self:start}.form-section.full{grid-column:1 / -1}.form-section h3{font-size:15px;font-weight:700;color:var(--z100);margin-bottom:4px;display:flex;align-items:center;gap:8px}.desc{font-size:12px;color:var(--z500);margin-bottom:16px}
-    .settings-columns{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+    .settings-columns{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
     .settings-stack{display:flex;flex-direction:column;gap:16px}
+    .settings-stack-left{height:100%}
+    .settings-stack-left .source-card{flex:1;min-height:0}
     .source-card{min-height:292px;display:flex;flex-direction:column;justify-content:flex-start}
     .options-wide{display:flex;flex-direction:column}
     .options-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 20px;align-items:start}
@@ -180,7 +182,7 @@
             </div>
           </div>
           <div class="settings-columns">
-            <div class="settings-stack">
+            <div class="settings-stack settings-stack-left">
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
                 <p class="desc">Destination for your synced lists.</p>
