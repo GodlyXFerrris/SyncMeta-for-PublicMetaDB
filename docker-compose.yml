@@ -7,6 +7,7 @@ services:
     environment:
       PROFILE_STORE_FILE: /app/data/profiles.json
       SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
-      SITE_ACCESS_PASSWORD: ${SITE_ACCESS_PASSWORD:-}
+      # Optional: add SITE_ACCESS_PASSWORD in your own override or env_file
+      # if you want a shared password before the app loads.
     volumes:
       - ./data:/app/data

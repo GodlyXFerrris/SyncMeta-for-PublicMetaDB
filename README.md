@@ -109,9 +109,17 @@ services:
     environment:
       PROFILE_STORE_FILE: /app/data/profiles.json
       SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
-      SITE_ACCESS_PASSWORD: ${SITE_ACCESS_PASSWORD:-}
     volumes:
       - ./data:/app/data
+```
+
+If you want a shared password before the app loads, add this yourself:
+
+```yaml
+    environment:
+      PROFILE_STORE_FILE: /app/data/profiles.json
+      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+      SITE_ACCESS_PASSWORD: ${SITE_ACCESS_PASSWORD:-}
 ```
 
 Stop it:
@@ -142,10 +150,10 @@ You do not need a `.env` file for normal use if users enter everything in the da
 
 Use `.env` only for deployment overrides like:
 
-- `SITE_ACCESS_PASSWORD`
 - `SYNCMETA_MASTER_KEY`
+- `SITE_ACCESS_PASSWORD` if you explicitly want a shared pre-login gate
 - session / throttle tuning
-- optional server-side source prefills
+- optional scheduler disabling
 
 Start from:
 
@@ -225,7 +233,7 @@ Secret fields are overwrite-only. If a field says `Stored securely for this prof
 
 ## Environment Variables
 
-These are mainly useful for Docker deployment and optional server defaults.
+These are mainly useful for Docker deployment. The web UI covers almost everything else.
 
 ### Core app settings
 
@@ -234,7 +242,7 @@ These are mainly useful for Docker deployment and optional server defaults.
 | `PROFILE_STORE_FILE` | Path to the JSON profile store |
 | `SYNCMETA_MASTER_KEY` | Optional Fernet key for encrypted saved credentials |
 | `SYNCMETA_MASTER_KEY_FILE` | Optional key-file path if you do not want the default |
-| `SITE_ACCESS_PASSWORD` | Shared password that gates the whole site |
+| `SITE_ACCESS_PASSWORD` | Optional shared password that gates the whole site before the app loads |
 | `DISABLE_PROFILE_SCHEDULER` | Set to `1` to disable background scheduling |
 | `SYNCMETA_SESSION_TTL_SECONDS` | Session lifetime for signed-in browsers |
 | `SYNCMETA_LOGIN_MAX_ATTEMPTS` | Max login attempts inside the throttle window |
@@ -242,21 +250,7 @@ These are mainly useful for Docker deployment and optional server defaults.
 | `SYNCMETA_ACCESS_MAX_ATTEMPTS` | Max site-access attempts inside the throttle window |
 | `SYNCMETA_ACCESS_WINDOW_SECONDS` | Site-access throttle window |
 
-### Optional source defaults
-
-| Variable | Description |
-|---|---|
-| `SIMKL_CLIENT_ID` | Optional SIMKL client ID default |
-| `SIMKL_CLIENT_SECRET` | Optional SIMKL client secret default |
-| `SIMKL_ACCESS_TOKEN` | Optional SIMKL token default |
-| `ANILIST_USERNAME` | Optional AniList username default |
-| `ANILIST_ACCESS_TOKEN` | Optional AniList token default |
-| `TRAKT_CLIENT_ID` | Optional Trakt client ID default |
-| `TRAKT_CLIENT_SECRET` | Optional Trakt client secret default |
-| `TRAKT_ACCESS_TOKEN` | Optional Trakt access token default |
-| `TRAKT_REFRESH_TOKEN` | Optional Trakt refresh token default |
-| `MDBLIST_API_KEY` | Optional MDBList API key default |
-| `PMDB_API_KEY` | Optional PublicMetaDB API key default |
+Source API keys and tokens can still be injected by environment variables, but the normal web workflow stores them per profile in the dashboard, so they are intentionally omitted from `.env.example`.
 
 ## Project Structure
 
