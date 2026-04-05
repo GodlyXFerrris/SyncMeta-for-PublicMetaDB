@@ -34,11 +34,6 @@ By default, SyncMeta creates separate private PublicMetaDB lists for each source
 - `MDBList - Movies - list-name`
 - `MDBList - Series - list-name`
 
-Anime behaves like this:
-
-- If AniList is not configured, anime syncs from SIMKL.
-- If AniList is configured, AniList replaces SIMKL for anime.
-
 ## How Matching Works
 
 Items are resolved to TMDB IDs in this order:

@@ -20,6 +20,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("AniList Lists", html)
         self.assertIn("MDBList Lists", html)
         self.assertIn("dot-mdblist", html)
+        self.assertIn("https://github.com/Febsho/SyncMeta-for-PublicMetaDB", html)
+        self.assertIn("<h3>Options</h3>", html)
+        self.assertNotIn("Sync Series", html)
+        self.assertNotIn("Sync Movies", html)
+        self.assertNotIn("Sync Anime", html)
 
     @patch("web.SimklClient.request_pin")
     def test_simkl_pin_start(self, mock_request_pin) -> None:

@@ -10,10 +10,13 @@
     body{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:var(--black);color:var(--z300);min-height:100vh;-webkit-font-smoothing:antialiased}
     nav{position:sticky;top:0;z-index:50;background:rgba(0,0,0,.8);backdrop-filter:blur(24px);border-bottom:1px solid rgba(255,255,255,.1);padding:0 24px}
     .nav-inner{max-width:1100px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:56px}
+    .nav-links{display:flex;align-items:center}
     .nav-logo{font-size:18px;font-weight:700;color:var(--z100);letter-spacing:-.5px;text-decoration:none;display:flex;align-items:center;gap:8px}
     .nav-logo svg{width:22px;height:22px}
     .nav-link{padding:16px;font-size:14px;font-weight:500;color:var(--z400);cursor:pointer;background:none;border:none;border-bottom:2px solid transparent}
     .nav-link:hover{color:var(--white)} .nav-link.active{color:var(--white);font-weight:700;border-bottom-color:var(--white)}
+    .nav-external{padding:16px 12px;font-size:14px;font-weight:500;color:var(--z400);text-decoration:none}
+    .nav-external:hover{color:var(--white)}
     .page{max-width:1100px;margin:0 auto;padding:0 24px}
     .hero{display:flex;align-items:center;justify-content:center;text-align:center;min-height:calc(100vh - 56px);padding:60px 20px;position:relative;overflow:hidden}
     .hero:before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 600px 400px at 50% 40%,rgba(124,109,247,.06) 0%,transparent 70%),radial-gradient(ellipse 800px 300px at 30% 60%,rgba(124,109,247,.03) 0%,transparent 70%);pointer-events:none}
@@ -99,6 +102,7 @@
       <div class="nav-links">
         <button class="nav-link" data-nav="dashboard" style="display:none">Dashboard</button>
         <button class="nav-link" data-nav="settings" style="display:none">Settings</button>
+        <a class="nav-external" href="https://github.com/Febsho/SyncMeta-for-PublicMetaDB" target="_blank" rel="noopener">GitHub</a>
       </div>
     </div>
   </nav>
@@ -213,6 +217,13 @@
             <p class="desc">Load your MDBList account lists and choose which ones should sync into PublicMetaDB.</p>
             <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> to get your API key</div></div>
           </div>
+          <div class="form-section">
+            <h3>Options</h3>
+            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
+            <div class="form-row" style="margin-top:14px"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
+            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
+            <div class="hint">Source selections above now decide what gets synced, so you do not need separate global type toggles here anymore.</div>
+          </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
             <p class="desc">Choose which SIMKL statuses should sync for each media type.</p>
@@ -259,15 +270,6 @@
               </div>
             </div>
             <div class="catalog-list" id="mdblist-list"></div>
-          </div>
-          <div class="form-section">
-            <h3>Options</h3>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
-            <div class="form-row" style="margin-top:14px"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-shows" checked><span class="slider"></span></label><label>Sync Series</label></div>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-movies" checked><span class="slider"></span></label><label>Sync Movies</label></div>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-anime" checked><span class="slider"></span></label><label>Sync Anime</label></div>
           </div>
         </div>
         <div class="actions-bar">
@@ -536,16 +538,12 @@
     }
 
     function gatherOptions() {
-      const mediaTypes = [];
-      if (el('opt-shows').checked) mediaTypes.push('shows');
-      if (el('opt-movies').checked) mediaTypes.push('movies');
-      if (el('opt-anime').checked) mediaTypes.push('anime');
       const intervalSeconds = parseInt(el('opt-interval-seconds').value || '1800', 10);
       return {
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
-        media_types: mediaTypes,
+        media_types: ['shows', 'movies', 'anime'],
       };
     }
 
@@ -562,7 +560,6 @@
       const mdblist = creds && creds.mdblist ? creds.mdblist : {};
       const pmdb = creds && creds.pmdb ? creds.pmdb : {};
       const options = opts || {};
-      const mediaTypes = options.media_types || ['shows', 'movies', 'anime'];
 
       el('profile-id').value = profileAuth.profile_id || '';
       el('profile-password').value = profileAuth.password || '';
@@ -589,9 +586,6 @@
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
-      el('opt-shows').checked = mediaTypes.indexOf('shows') !== -1;
-      el('opt-movies').checked = mediaTypes.indexOf('movies') !== -1;
-      el('opt-anime').checked = mediaTypes.indexOf('anime') !== -1;
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
