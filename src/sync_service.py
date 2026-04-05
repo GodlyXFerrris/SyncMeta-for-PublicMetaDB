@@ -176,6 +176,7 @@ class SyncService:
         items = self._trakt.get_watched_history()
         stats.items_fetched = len(items)
         match_full_counts = self._config.sync.trakt_sync_full_watch_counts
+        reconcile_counts = self._config.sync.trakt_reconcile_watched_history
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -184,10 +185,12 @@ class SyncService:
             return stats
 
         existing_counts: dict[str, int] = {}
+        existing_by_key: dict[str, list[dict]] = {}
         for existing_item in existing_items:
             key = self._watched_identity_key(existing_item)
             if key:
                 existing_counts[key] = existing_counts.get(key, 0) + 1
+                existing_by_key.setdefault(key, []).append(existing_item)
 
         source_counts: dict[str, int] = {}
 
@@ -218,9 +221,42 @@ class SyncService:
                     dedupe=not match_full_counts,
                 )
                 existing_counts[key] = current_count + 1
+                existing_by_key.setdefault(key, []).append({
+                    "tmdb_id": item.get("tmdb_id"),
+                    "media_type": item.get("media_type"),
+                    "season": item.get("season"),
+                    "episode": item.get("episode"),
+                    "watched_at": item.get("watched_at"),
+                })
                 stats.items_added += 1
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+
+        if reconcile_counts:
+            desired_by_key: dict[str, int] = {}
+            for key, count in source_counts.items():
+                desired_by_key[key] = count if match_full_counts else 1
+
+            for key, current_items in existing_by_key.items():
+                desired_count = desired_by_key.get(key, 0)
+                current_count = len(current_items)
+                excess = current_count - desired_count
+                if excess <= 0:
+                    continue
+                deletable = [item for item in current_items if str(item.get("id", "")).strip()]
+                deletable.sort(key=lambda item: str(item.get("watched_at", "") or ""), reverse=True)
+                for existing_item in deletable[:excess]:
+                    if self._config.sync.dry_run:
+                        stats.items_removed += 1
+                        continue
+                    try:
+                        self._set_status("Reconciling Trakt watched history with PublicMetaDB")
+                        self._pmdb.delete_watched_entry(str(existing_item["id"]))
+                        stats.items_removed += 1
+                    except Exception as exc:
+                        stats.errors.append(
+                            f"Failed to delete extra watched entry '{key}': {exc}"
+                        )
         return stats
 
     def _sync_trakt_resume_progress(self) -> SyncStats:

@@ -24,6 +24,7 @@ class StubMatcher:
 class StubPMDBClient:
     def __init__(self) -> None:
         self.deleted_lists: list[str] = []
+        self.deleted_watched: list[str] = []
         self.created_lists: list[dict] = []
         self.watched: list[dict] = []
         self.resume_batches: list[list[dict]] = []
@@ -83,6 +84,11 @@ class StubPMDBClient:
                 for item in items
             ]
         }
+
+    def delete_watched_entry(self, watched_id: str) -> bool:
+        self.deleted_watched.append(watched_id)
+        self.watched = [item for item in self.watched if str(item.get("id", "")) != watched_id]
+        return True
 
 
 class StubTraktClient:
@@ -370,6 +376,47 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_resolved, 2)
         self.assertEqual(watched_stats.items_added, 1)
         self.assertEqual(watched_stats.items_skipped_duplicate, 1)
+
+    def test_trakt_watched_history_can_reconcile_extra_pmdb_watches(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+                trakt_reconcile_watched_history=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.watched = [
+            {"id": "w1", "tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-30T12:00:00Z"},
+            {"id": "w2", "tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
+            {"id": "w3", "tmdb_id": 999, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
+        ]
+        service._trakt = StubTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
+
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertEqual(watched_stats.items_removed, 2)
+        self.assertEqual(pmdb.deleted_watched, ["w2", "w3"])
 
 
 if __name__ == "__main__":

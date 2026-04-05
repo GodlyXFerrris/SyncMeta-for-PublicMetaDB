@@ -203,6 +203,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             media_types=options["media_types"],
             trakt_sync_watched_history=options["trakt_sync_watched_history"],
             trakt_sync_full_watch_counts=options["trakt_sync_full_watch_counts"],
+            trakt_reconcile_watched_history=options["trakt_reconcile_watched_history"],
             trakt_sync_resume_progress=options["trakt_sync_resume_progress"],
             simkl_visibility=options["simkl_visibility"],
             anilist_visibility=options["anilist_visibility"],

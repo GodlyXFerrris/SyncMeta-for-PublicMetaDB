@@ -113,6 +113,17 @@ class PublicMetaDBClient:
         path = "/api/external/watched?dedupe=true" if dedupe else "/api/external/watched"
         return self._post(path, payload)
 
+    def delete_watched_entry(self, watched_id: str) -> bool:
+        try:
+            self._delete(f"/api/external/watched/{watched_id}")
+            logger.info("Deleted watched entry %s", watched_id)
+            return True
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                logger.info("Watched entry %s was already gone", watched_id)
+                return False
+            raise
+
     # Resume / continue watching
 
     def get_resume_points(self) -> list[dict]:
