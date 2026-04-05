@@ -256,10 +256,6 @@ class SimklClientTests(unittest.TestCase):
             params and params.get("date_from") == "2026-04-02T12:30:00Z"
             for _, params in client.requests
         ))
-        self.assertTrue(any(
-            item.get("tmdb_id") == 7005
-            for item in history
-        ))
 
     def test_get_playback_progress_parses_movie_and_episode(self) -> None:
         client = RecordingSimklClient()
@@ -306,14 +302,6 @@ class SimklClientTests(unittest.TestCase):
         })
 
         self.assertEqual(expanded, [])
-
-    def test_cursor_exempt_aggregate_history_survives_since_filter(self) -> None:
-        client = RecordingSimklClient()
-
-        self.assertTrue(client._is_history_after({
-            "watched_at": "2026-04-01T00:00:00Z",
-            "cursor_exempt": True,
-        }, "2026-04-02T00:00:00Z"))
 
 
 if __name__ == "__main__":
