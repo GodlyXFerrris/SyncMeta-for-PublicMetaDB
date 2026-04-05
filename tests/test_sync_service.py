@@ -283,6 +283,46 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_removed, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
 
+    def test_trakt_watched_history_skips_already_watched_title_even_with_new_timestamp(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.watched = [
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
+            {"tmdb_id": 902, "media_type": "tv", "season": 1, "episode": 2, "watched_at": "2026-03-31T13:00:00Z"},
+        ]
+        service._trakt = StubTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 2)
+        self.assertEqual(watched_stats.items_resolved, 2)
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(watched_stats.items_skipped_duplicate, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

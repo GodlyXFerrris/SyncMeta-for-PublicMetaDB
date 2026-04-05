@@ -188,13 +188,13 @@ class SyncService:
             return stats
 
         existing_keys = {
-            self._watched_key(item)
+            self._watched_identity_key(item)
             for item in existing_items
-            if self._watched_key(item)
+            if self._watched_identity_key(item)
         }
 
         for item in items:
-            key = self._watched_key(item)
+            key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
                 continue
@@ -210,7 +210,7 @@ class SyncService:
                     season=item.get("season"),
                     episode=item.get("episode"),
                     watched_at=item.get("watched_at"),
-                    dedupe=False,
+                    dedupe=True,
                 )
                 existing_keys.add(key)
                 stats.items_added += 1
@@ -697,6 +697,16 @@ class SyncService:
         episode = item.get("episode")
         watched_at = item.get("watched_at")
         return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}:{watched_at if watched_at is not None else 'null'}"
+
+    @staticmethod
+    def _watched_identity_key(item: dict) -> str:
+        tmdb_id = item.get("tmdb_id")
+        media_type = item.get("media_type")
+        if not tmdb_id or not media_type:
+            return ""
+        season = item.get("season")
+        episode = item.get("episode")
+        return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}"
 
     @staticmethod
     def _resume_key(item: dict) -> str:
