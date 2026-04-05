@@ -191,6 +191,8 @@ class RecordingSimklClient(SimklClient):
             return [(1, 2), (2, 1)]
         if tmdb_id == 7006:
             return [(1, 28)]
+        if tmdb_id == 7007:
+            return [(1, 12), (2, 12)]
         return []
 
 
@@ -256,6 +258,10 @@ class SimklClientTests(unittest.TestCase):
             params and params.get("date_from") == "2026-04-02T12:30:00Z"
             for _, params in client.requests
         ))
+        self.assertTrue(any(
+            item.get("tmdb_id") == 7005
+            for item in history
+        ))
 
     def test_get_playback_progress_parses_movie_and_episode(self) -> None:
         client = RecordingSimklClient()
@@ -289,7 +295,7 @@ class SimklClientTests(unittest.TestCase):
             [(1, 1), (1, 2), (2, 1)],
         )
 
-    def test_expand_aggregate_history_item_skips_incomplete_tmdb_season_plan(self) -> None:
+    def test_expand_aggregate_history_item_overflows_into_season_one_when_only_season_one_is_known(self) -> None:
         client = RecordingSimklClient()
 
         expanded = client.expand_aggregate_history_item({
@@ -301,7 +307,31 @@ class SimklClientTests(unittest.TestCase):
             "watched_at": "2026-04-03T13:00:00Z",
         })
 
+        self.assertEqual(len(expanded), 38)
+        self.assertTrue(all(item["season"] == 1 for item in expanded))
+        self.assertEqual(expanded[-1]["episode"], 38)
+
+    def test_expand_aggregate_history_item_still_skips_unsafe_multi_season_gap(self) -> None:
+        client = RecordingSimklClient()
+
+        expanded = client.expand_aggregate_history_item({
+            "tmdb_id": 7007,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "title": "Unsafe Multi Season Anime",
+            "aggregate_watched_count": 30,
+            "watched_at": "2026-04-03T13:00:00Z",
+        })
+
         self.assertEqual(expanded, [])
+
+    def test_cursor_exempt_aggregate_history_survives_since_filter(self) -> None:
+        client = RecordingSimklClient()
+
+        self.assertTrue(client._is_history_after({
+            "watched_at": "2026-04-01T00:00:00Z",
+            "cursor_exempt": True,
+        }, "2026-04-02T00:00:00Z"))
 
 
 if __name__ == "__main__":

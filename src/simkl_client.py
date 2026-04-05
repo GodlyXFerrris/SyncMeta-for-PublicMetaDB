@@ -540,6 +540,8 @@ class SimklClient:
         return parsed.astimezone(timezone.utc)
 
     def _is_history_after(self, item: dict, since: str) -> bool:
+        if item.get("cursor_exempt"):
+            return True
         watched_at = self._parse_history_datetime(item.get("watched_at"))
         since_dt = self._parse_history_datetime(since)
         if since_dt is None:
@@ -664,6 +666,7 @@ class SimklClient:
             "ids": ids,
             "aggregate_watched_count": watched_total,
             "aggregate_total_episodes": total_episodes,
+            "cursor_exempt": True,
         }]
 
     def expand_aggregate_history_item(self, item: dict) -> list[dict]:
@@ -694,6 +697,7 @@ class SimklClient:
             return []
         episodes: list[dict] = []
         remaining = watched_total
+        positive_seasons = [(season_number, season_episodes) for season_number, season_episodes in season_plan if season_number > 0 and season_episodes > 0]
         for season_number, season_episodes in season_plan:
             if season_number <= 0 or season_episodes <= 0:
                 continue
@@ -706,6 +710,19 @@ class SimklClient:
             if remaining <= 0:
                 break
         if remaining > 0:
+            if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
+                known_episodes = positive_seasons[0][1]
+                logger.info(
+                    "Falling back to Season 1 overflow for aggregate SIMKL anime history on TMDB %s (%d known, %d watched)",
+                    tmdb_id,
+                    known_episodes,
+                    watched_total,
+                )
+                episodes.extend(
+                    {"season": 1, "number": episode_number, "watched_at": watched_at}
+                    for episode_number in range(known_episodes + 1, watched_total + 1)
+                )
+                return episodes
             logger.info(
                 "Skipping aggregate SIMKL anime history for TMDB %s because TMDB season plan only covered %d/%d episodes",
                 tmdb_id,
