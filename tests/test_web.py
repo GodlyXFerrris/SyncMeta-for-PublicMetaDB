@@ -55,6 +55,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Watch History Source", html)
+        self.assertIn("Only import SIMKL anime watch history", html)
         self.assertIn("Resume Progress Source", html)
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)

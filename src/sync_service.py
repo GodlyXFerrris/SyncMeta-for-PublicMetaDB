@@ -210,6 +210,9 @@ class SyncService:
         )
         self._set_status("Fetching SIMKL watched history")
         items = self._simkl.get_watched_history(since=self._config.sync.simkl_history_cursor or None)
+        if self._config.sync.simkl_history_anime_only:
+            items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
+        items = self._expand_simkl_aggregate_history(items)
         stats.items_fetched = len(items)
         stats.history_cursor = self._latest_history_cursor(items, self._config.sync.simkl_history_cursor)
 
@@ -255,6 +258,20 @@ class SyncService:
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
         return stats
+
+    def _expand_simkl_aggregate_history(self, items: list[dict]) -> list[dict]:
+        expanded: list[dict] = []
+        for item in items:
+            aggregate_count = item.get("aggregate_watched_count")
+            if aggregate_count:
+                resolved = self._resolve_activity_item(item)
+                aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
+                if aggregate_rows:
+                    expanded.extend(aggregate_rows)
+                    continue
+                item = resolved
+            expanded.append(item)
+        return self._dedupe_activity_history_items(expanded)
 
     def _sync_simkl_resume_progress(self) -> SyncStats:
         stats = SyncStats(
@@ -960,6 +977,24 @@ class SyncService:
             **item,
             "tmdb_id": tmdb_id,
         }
+
+    def _dedupe_activity_history_items(self, items: list[dict]) -> list[dict]:
+        deduped: list[dict] = []
+        seen: set[str] = set()
+        for item in items:
+            key = self._watched_identity_key(item)
+            if not key:
+                key = (
+                    f"{item.get('title', '')}:"
+                    f"{item.get('watched_at', '')}:"
+                    f"{item.get('aggregate_watched_count', '')}:"
+                    f"{item.get('simkl_type', '')}"
+                )
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     @staticmethod
     def _chunked(items: list[dict], size: int) -> list[list[dict]]:

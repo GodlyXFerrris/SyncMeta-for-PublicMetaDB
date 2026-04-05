@@ -270,6 +270,23 @@ class SimklClientTests(unittest.TestCase):
             for item in progress
         ))
 
+    def test_expand_aggregate_history_item_uses_tmdb_season_plan(self) -> None:
+        client = RecordingSimklClient()
+
+        expanded = client.expand_aggregate_history_item({
+            "tmdb_id": 7005,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "title": "Count Only Anime",
+            "aggregate_watched_count": 3,
+            "watched_at": "2026-04-03T13:00:00Z",
+        })
+
+        self.assertEqual(
+            [(item["season"], item["episode"]) for item in expanded],
+            [(1, 1), (1, 2), (2, 1)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

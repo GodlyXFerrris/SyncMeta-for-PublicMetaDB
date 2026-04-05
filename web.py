@@ -212,6 +212,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             dry_run=dry_run,
             media_types=options["media_types"],
             simkl_sync_watched_history=modes["history"] and options["activity_history_source"] == "simkl",
+            simkl_history_anime_only=bool(options.get("simkl_history_anime_only", False)),
             simkl_sync_resume_progress=modes["resume"] and options["activity_resume_source"] == "simkl",
             trakt_sync_watched_history=modes["history"] and options["activity_history_source"] == "trakt",
             simkl_history_cursor=str(activity_state.get("simkl_history_cursor", "") or "").strip(),

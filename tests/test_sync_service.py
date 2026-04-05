@@ -21,14 +21,17 @@ class StubSimklClient:
     def get_watched_history(self, since: str | None = None) -> list[dict]:
         self.last_history_since = since
         return [
-            {"tmdb_id": 801, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "SIMKL Movie"},
-            {"tmdb_id": 802, "media_type": "tv", "season": 1, "episode": 3, "watched_at": "2026-04-01T13:00:00Z", "title": "SIMKL Episode"},
+            {"tmdb_id": 801, "media_type": "movie", "simkl_type": "movies", "watched_at": "2026-04-01T12:00:00Z", "title": "SIMKL Movie"},
+            {"tmdb_id": 802, "media_type": "tv", "simkl_type": "anime", "season": 1, "episode": 3, "watched_at": "2026-04-01T13:00:00Z", "title": "SIMKL Episode"},
         ]
 
     def get_playback_progress(self) -> list[dict]:
         return [
             {"tmdb_id": 803, "media_type": "movie", "position_ms": 1_200_000, "runtime_ms": 3_600_000, "progress": 33.3, "title": "SIMKL Resume Movie"},
         ]
+
+    def expand_aggregate_history_item(self, item: dict) -> list[dict]:
+        return []
 
 
 class StubMatcher:
@@ -167,6 +170,8 @@ class StubActivityMatcher:
             return 811
         if title == "Fallback Anime Episode":
             return 812
+        if title == "Aggregate Anime":
+            return 814
         if title == "Fallback Resume Show":
             return 813
         return item.get("tmdb_id")
@@ -476,6 +481,96 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_fetched, 1)
         self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
+
+    def test_simkl_history_anime_only_filters_non_anime_entries(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies", "anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = StubSimklClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 1)
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertEqual(len(pmdb.watched), 1)
+        self.assertEqual(pmdb.watched[0]["tmdb_id"], 802)
+
+    def test_simkl_history_expands_aggregate_anime_after_match_resolution(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        class AggregateAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "title": "Aggregate Anime",
+                    "anilist_id": "444",
+                    "ids": {"anilist": 444},
+                    "watched_at": "2026-04-01T13:00:00Z",
+                    "aggregate_watched_count": 3,
+                }]
+
+            def expand_aggregate_history_item(self, item: dict) -> list[dict]:
+                if item.get("tmdb_id") != 814:
+                    return []
+                return [
+                    {**item, "season": 1, "episode": 1},
+                    {**item, "season": 1, "episode": 2},
+                    {**item, "season": 2, "episode": 1},
+                ]
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = AggregateAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 3)
+        self.assertEqual(watched_stats.items_added, 3)
+        self.assertEqual(
+            [(item["season"], item["episode"]) for item in pmdb.watched],
+            [(1, 1), (1, 2), (2, 1)],
+        )
 
     def test_history_sync_passes_existing_source_cursor_to_clients(self) -> None:
         config = AppConfig(

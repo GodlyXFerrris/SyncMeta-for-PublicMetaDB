@@ -288,6 +288,7 @@
                   </select>
                   <div class="hint">Choose which service should import watched history when you press the dashboard button.</div>
                 </div>
+                <div class="toggle-row hidden" id="opt-simkl-history-anime-only-row"><label class="toggle"><input type="checkbox" id="opt-simkl-history-anime-only"><span class="slider"></span></label><label>Only import SIMKL anime watch history</label></div>
                 <div class="form-row">
                   <label>Resume Progress Source</label>
                   <select id="opt-activity-resume-source">
@@ -736,6 +737,7 @@
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         activity_history_source: el('opt-activity-history-source').value,
+        simkl_history_anime_only: el('opt-simkl-history-anime-only').checked,
         activity_resume_source: el('opt-activity-resume-source').value,
         trakt_watched_history_interval_seconds: 43200,
         simkl_visibility: el('opt-simkl-visibility').value,
@@ -839,6 +841,7 @@
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
+      el('opt-simkl-history-anime-only').checked = !!options.simkl_history_anime_only;
       el('opt-activity-resume-source').value = options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
@@ -846,6 +849,7 @@
       el('opt-trakt-public-visibility').value = options.trakt_public_visibility || 'public';
       el('opt-mdblist-visibility').value = options.mdblist_visibility || 'public';
       ensureLinkedSourceDefaults(true);
+      renderActivityOptionVisibility();
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
@@ -869,6 +873,7 @@
 
     function updateDots() {
       ensureLinkedSourceDefaults(false);
+      renderActivityOptionVisibility();
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
       const opts = gatherOptions();
@@ -881,6 +886,15 @@
 
     function setDot(id, ok) {
       el(id).className = 'dot ' + (ok ? 'dot-ok' : 'dot-off');
+    }
+
+    function renderActivityOptionVisibility() {
+      const historySource = el('opt-activity-history-source').value || 'off';
+      const animeOnlyRow = el('opt-simkl-history-anime-only-row');
+      const animeOnlyInput = el('opt-simkl-history-anime-only');
+      const showAnimeOnly = historySource === 'simkl';
+      animeOnlyRow.classList.toggle('hidden', !showAnimeOnly);
+      if (!showAnimeOnly) animeOnlyInput.checked = false;
     }
 
     function renderSimklStatuses() {
@@ -2231,7 +2245,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       showToast('Logged out.', false, true);
     }
@@ -2268,7 +2282,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       showToast('Profile data deleted.', false, true);
     }
@@ -2321,7 +2335,7 @@
       trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
     populateForm(draftCreds, draftOptions, {});
     resumeSimklPinState();
     resumeTraktDeviceState();
@@ -2347,7 +2361,7 @@
       input.addEventListener('change', () => { updateDots(); saveDraft(); });
     });
     document.querySelectorAll('.form-section select').forEach(select => {
-      select.addEventListener('change', () => { updateDots(); saveDraft(); });
+      select.addEventListener('change', () => { renderActivityOptionVisibility(); updateDots(); saveDraft(); });
     });
     el('trakt-discover-query').addEventListener('keydown', event => {
       if (event.key === 'Enter') {

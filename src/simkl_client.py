@@ -306,6 +306,7 @@ class SimklClient:
             history.append({
                 "tmdb_id": int(ids["tmdb"]) if ids.get("tmdb") else None,
                 "media_type": "movie",
+                "simkl_type": "movies",
                 "watched_at": watched_at,
                 "title": movie.get("title", "Unknown"),
                 "year": movie.get("year"),
@@ -426,6 +427,9 @@ class SimklClient:
 
         if not history:
             for episode in self._synthesize_episode_history_from_counts(entry, show, media_key):
+                if episode.get("aggregate_watched_count"):
+                    history.append(episode)
+                    continue
                 add_episode(
                     episode.get("season"),
                     episode.get("number") or episode.get("episode"),
@@ -609,6 +613,7 @@ class SimklClient:
         if media_key != "anime":
             return []
 
+        ids = show.get("ids", {}) or {}
         watched_count = entry.get("watched_episodes_count")
         total_count = entry.get("total_episodes_count")
         try:
@@ -633,37 +638,74 @@ class SimklClient:
             or show.get("last_watched_at")
             or show.get("last_watched")
         )
-        tmdb_raw = (show.get("ids", {}) or {}).get("tmdb")
+        tmdb_raw = ids.get("tmdb")
         try:
             tmdb_id = int(tmdb_raw) if tmdb_raw else None
         except (TypeError, ValueError):
             tmdb_id = None
 
         if tmdb_id:
-            season_plan = self._get_tmdb_season_plan_cached(tmdb_id)
-            if season_plan:
-                episodes: list[dict] = []
-                remaining = watched_total
-                for season_number, season_episodes in season_plan:
-                    if season_number <= 0 or season_episodes <= 0:
-                        continue
-                    take = min(remaining, season_episodes)
-                    episodes.extend(
-                        {"season": season_number, "number": episode_number, "watched_at": watched_at}
-                        for episode_number in range(1, take + 1)
-                    )
-                    remaining -= take
-                    if remaining <= 0:
-                        break
-                if episodes:
-                    return episodes
+            episodes = self._episode_rows_from_tmdb_plan(tmdb_id, watched_total, watched_at)
+            if episodes:
+                return episodes
 
-        if watched_total <= 30:
-            return [
-                {"season": 1, "number": episode_number, "watched_at": watched_at}
-                for episode_number in range(1, watched_total + 1)
-            ]
-        return []
+        return [{
+            "tmdb_id": tmdb_id,
+            "media_type": "tv",
+            "simkl_type": media_key,
+            "watched_at": watched_at,
+            "title": show.get("title", "Unknown"),
+            "year": show.get("year"),
+            "imdb_id": ids.get("imdb"),
+            "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+            "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+            "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+            "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+            "ids": ids,
+            "aggregate_watched_count": watched_total,
+            "aggregate_total_episodes": total_episodes,
+        }]
+
+    def expand_aggregate_history_item(self, item: dict) -> list[dict]:
+        watched_total = item.get("aggregate_watched_count")
+        if watched_total in (None, "", 0):
+            return []
+        try:
+            tmdb_id = int(item.get("tmdb_id") or 0)
+            watched_total = int(watched_total)
+        except (TypeError, ValueError):
+            return []
+        if tmdb_id <= 0 or watched_total <= 0:
+            return []
+        watched_at = item.get("watched_at")
+        expanded = self._episode_rows_from_tmdb_plan(tmdb_id, watched_total, watched_at)
+        return [
+            {
+                **item,
+                "season": row["season"],
+                "episode": row["number"],
+            }
+            for row in expanded
+        ]
+
+    def _episode_rows_from_tmdb_plan(self, tmdb_id: int, watched_total: int, watched_at: str | None) -> list[dict]:
+        season_plan = self._get_tmdb_season_plan_cached(tmdb_id)
+        if not season_plan:
+            return []
+        episodes: list[dict] = []
+        remaining = watched_total
+        for season_number, season_episodes in season_plan:
+            if season_number <= 0 or season_episodes <= 0:
+                continue
+            take = min(remaining, season_episodes)
+            episodes.extend(
+                {"season": season_number, "number": episode_number, "watched_at": watched_at}
+                for episode_number in range(1, take + 1)
+            )
+            remaining -= take
+            if remaining <= 0:
+                break
+        return episodes
 
     @classmethod
     def _get_tmdb_season_plan_cached(cls, tmdb_id: int) -> list[tuple[int, int]]:
