@@ -319,9 +319,13 @@ class SimklClient:
             params={"extended": "full", "episode_watched_at": "yes"},
         )
         items = []
-        if isinstance(raw, dict):
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, dict):
             if isinstance(raw.get(media_key), list):
                 items = raw.get(media_key, [])
+            elif media_key == "shows" and isinstance(raw.get("tv"), list):
+                items = raw.get("tv", [])
             elif media_key == "shows" and isinstance(raw.get("shows"), list):
                 items = raw.get("shows", [])
             elif media_key == "anime" and isinstance(raw.get("anime"), list):
@@ -386,7 +390,7 @@ class SimklClient:
                 "ids": ids,
             })
 
-        for season_entry in entry.get("seasons", []) or []:
+        for season_entry in self._history_seasons(entry, show):
             season_number = season_entry.get("number") or season_entry.get("season")
             for episode_entry in season_entry.get("episodes", []) or []:
                 add_episode(
@@ -395,7 +399,14 @@ class SimklClient:
                     episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
                 )
 
-        for episode_entry in entry.get("episodes", []) or []:
+        for episode_entry in self._history_episodes(entry, show):
+            add_episode(
+                episode_entry.get("season"),
+                episode_entry.get("number") or episode_entry.get("episode"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+            )
+
+        for episode_entry in self._history_last_watched_episodes(entry, show):
             add_episode(
                 episode_entry.get("season"),
                 episode_entry.get("number") or episode_entry.get("episode"),
@@ -510,7 +521,44 @@ class SimklClient:
             value = entry.get(key)
             if isinstance(value, dict):
                 return value
+        if isinstance(entry, dict) and isinstance(entry.get("ids"), dict):
+            if entry.get("title") or entry.get("name"):
+                return entry
         return None
+
+    @staticmethod
+    def _history_seasons(entry: dict, show: dict) -> list[dict]:
+        sources = [entry.get("seasons"), show.get("seasons")]
+        for value in sources:
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _history_episodes(entry: dict, show: dict) -> list[dict]:
+        sources = [entry.get("episodes"), show.get("episodes")]
+        for value in sources:
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _history_last_watched_episodes(entry: dict, show: dict) -> list[dict]:
+        candidates = [
+            entry.get("last_watched_episode"),
+            show.get("last_watched_episode"),
+            entry.get("last_episode"),
+            show.get("last_episode"),
+            entry.get("next_to_watch"),
+            show.get("next_to_watch"),
+        ]
+        episodes: list[dict] = []
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                episodes.append(candidate)
+            elif isinstance(candidate, list):
+                episodes.extend(item for item in candidate if isinstance(item, dict))
+        return episodes
 
     @staticmethod
     def _playback_progress_percent(entry: dict) -> float | None:

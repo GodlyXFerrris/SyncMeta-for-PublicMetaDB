@@ -88,10 +88,8 @@ class RecordingSimklClient(SimklClient):
             return {
                 "shows": [
                     {
-                        "show": {
-                            "title": "Completed Show",
-                            "ids": {"tmdb": 7002},
-                        },
+                        "title": "Completed Show",
+                        "ids": {"tmdb": 7002},
                         "seasons": [
                             {
                                 "number": 1,
@@ -127,9 +125,11 @@ class RecordingSimklClient(SimklClient):
                             "title": "Completed Anime",
                             "ids": {"tmdb": 7003},
                         },
-                        "episodes": [
-                            {"season": 1, "number": 3, "watched_at": "2026-04-03T12:00:00Z"},
-                        ],
+                        "last_watched_episode": {
+                            "season": 1,
+                            "number": 3,
+                            "watched_at": "2026-04-03T12:00:00Z",
+                        },
                     }
                 ]
             }
