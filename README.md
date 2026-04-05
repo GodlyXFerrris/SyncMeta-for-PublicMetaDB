@@ -1,6 +1,6 @@
 # SyncMeta
 
-SyncMeta keeps SIMKL and optionally AniList watchlists synced into private PublicMetaDB lists.
+SyncMeta keeps SIMKL, Trakt, and optionally AniList watchlists and lists synced into private PublicMetaDB lists.
 
 It supports:
 
@@ -10,6 +10,7 @@ It supports:
 - Manual sync and dry run
 - CLI usage for one-off or interval-based sync runs
 - SIMKL for shows, movies, and anime
+- Trakt for watchlist, liked lists, and selected public lists
 - AniList for anime when you want AniList to replace SIMKL anime
 
 ## What It Syncs
@@ -24,6 +25,9 @@ By default, SyncMeta creates separate private PublicMetaDB lists for each source
 - `SIMKL - Anime - Plan to Watch`
 - `AniList - Anime - Watching`
 - `AniList - Anime - Plan to Watch`
+- `Trakt - Series - Watchlist`
+- `Trakt - Movies - Watchlist`
+- `Trakt List - username - list-name`
 
 Anime behaves like this:
 
@@ -74,6 +78,14 @@ Important:
 After that, the server keeps syncing in the background based on that profile.
 
 SIMKL access tokens can be obtained directly inside the Settings page through the built-in PIN auth helper.
+
+Trakt also has a built-in device auth flow in Settings, plus a tabbed catalog picker:
+
+- `Default` lets you enable your Trakt watchlist
+- `My Lists` loads your liked Trakt lists so you can pick specific ones
+- `Discover` searches public Trakt lists and lets you add selected ones
+
+If you prefer the older behavior, you can still choose to sync all liked Trakt lists at once.
 
 ## CLI
 
@@ -198,6 +210,10 @@ These mainly matter for CLI use and deployment configuration.
 | `SIMKL_ACCESS_TOKEN` | CLI: Yes | SIMKL access token from `python main.py auth` |
 | `ANILIST_USERNAME` | No | Enables AniList anime sync |
 | `ANILIST_ACCESS_TOKEN` | No | Needed only for private AniList lists |
+| `TRAKT_CLIENT_ID` | No | Trakt app client ID |
+| `TRAKT_CLIENT_SECRET` | No | Required for Trakt device auth and syncing |
+| `TRAKT_ACCESS_TOKEN` | No | Trakt access token from the web auth flow |
+| `TRAKT_REFRESH_TOKEN` | No | Trakt refresh token |
 | `PMDB_API_KEY` | CLI: Yes | PublicMetaDB API key |
 
 ### Sync options

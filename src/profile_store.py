@@ -39,6 +39,7 @@ def normalize_credentials(credentials: dict | None) -> dict:
     raw = credentials or {}
     simkl = raw.get("simkl", {})
     anilist = raw.get("anilist", {})
+    trakt = raw.get("trakt", {})
     pmdb = raw.get("pmdb", {})
     return {
         "simkl": {
@@ -50,10 +51,63 @@ def normalize_credentials(credentials: dict | None) -> dict:
             "username": str(anilist.get("username", "")).strip(),
             "access_token": str(anilist.get("access_token", "")).strip(),
         },
+        "trakt": {
+            "client_id": str(trakt.get("client_id", "")).strip(),
+            "client_secret": str(trakt.get("client_secret", "")).strip(),
+            "access_token": str(trakt.get("access_token", "")).strip(),
+            "refresh_token": str(trakt.get("refresh_token", "")).strip(),
+            "username": str(trakt.get("username", "")).strip(),
+            "sync_watchlist": bool(trakt.get("sync_watchlist", True)),
+            "sync_liked_lists": bool(trakt.get("sync_liked_lists", True)),
+            "selected_lists": _normalize_trakt_selected_lists(trakt.get("selected_lists", [])),
+        },
         "pmdb": {
             "api_key": str(pmdb.get("api_key", "")).strip(),
         },
     }
+
+
+def _normalize_trakt_selected_lists(raw_lists: list | None) -> list[dict]:
+    if not isinstance(raw_lists, list):
+        return []
+
+    selected: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw_lists:
+        if not isinstance(item, dict):
+            continue
+        user = str(item.get("user", "")).strip()
+        slug = str(item.get("slug", "")).strip()
+        name = str(item.get("name", "")).strip()
+        if not user or not slug or not name:
+            continue
+        key = (user.lower(), slug.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            likes = int(item.get("likes", 0) or 0)
+        except (TypeError, ValueError):
+            likes = 0
+        try:
+            item_count = int(item.get("item_count", 0) or 0)
+        except (TypeError, ValueError):
+            item_count = 0
+        source = str(item.get("source", "liked")).strip().lower()
+        if source not in {"liked", "discover"}:
+            source = "liked"
+        selected.append({
+            "name": name,
+            "description": str(item.get("description", "")).strip(),
+            "user": user,
+            "slug": slug,
+            "trakt_id": item.get("trakt_id"),
+            "item_count": item_count,
+            "likes": likes,
+            "share_link": str(item.get("share_link", "")).strip(),
+            "source": source,
+        })
+    return selected
 
 
 def normalize_profile_options(options: dict | None) -> dict:
@@ -136,6 +190,9 @@ class ProfileStore:
             "last_results": list(raw_profile.get("last_results", [])),
             "sync_running": False,
             "sync_error": raw_profile.get("sync_error"),
+            "sync_status": raw_profile.get("sync_status") or "Idle",
+            "sync_started_at": raw_profile.get("sync_started_at"),
+            "sync_updated_at": raw_profile.get("sync_updated_at"),
             "history": list(raw_profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": next_sync_at,
         }
@@ -163,6 +220,9 @@ class ProfileStore:
             "last_sync": profile.get("last_sync"),
             "last_results": copy.deepcopy(profile.get("last_results", [])),
             "sync_error": profile.get("sync_error"),
+            "sync_status": profile.get("sync_status"),
+            "sync_started_at": profile.get("sync_started_at"),
+            "sync_updated_at": profile.get("sync_updated_at"),
             "history": copy.deepcopy(profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": profile.get("next_sync_at"),
         }
@@ -187,6 +247,9 @@ class ProfileStore:
             "last_results": copy.deepcopy(profile.get("last_results", [])),
             "sync_running": bool(profile.get("sync_running")),
             "sync_error": profile.get("sync_error"),
+            "sync_status": profile.get("sync_status"),
+            "sync_started_at": profile.get("sync_started_at"),
+            "sync_updated_at": profile.get("sync_updated_at"),
             "history": copy.deepcopy(profile.get("history", [])),
             "next_sync_at": profile.get("next_sync_at"),
             "options": copy.deepcopy(profile.get("options", {})),
@@ -214,6 +277,9 @@ class ProfileStore:
             "last_results": [],
             "sync_running": False,
             "sync_error": None,
+            "sync_status": "Idle",
+            "sync_started_at": None,
+            "sync_updated_at": None,
             "history": [],
             "next_sync_at": now if normalized_options["auto_sync"] else None,
         }
@@ -238,6 +304,7 @@ class ProfileStore:
             profile["options"] = normalized_options
             profile["updated_at"] = utc_now_iso()
             profile["sync_error"] = None
+            profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
                 profile["next_sync_at"] = (
                     utc_now_iso() if normalized_options["auto_sync"] else None
@@ -250,8 +317,12 @@ class ProfileStore:
             profile = self._authenticate_locked(profile_id, password)
             if profile["sync_running"]:
                 raise RuntimeError("Sync already in progress")
+            now = utc_now_iso()
             profile["sync_running"] = True
             profile["sync_error"] = None
+            profile["sync_status"] = "Queued"
+            profile["sync_started_at"] = now
+            profile["sync_updated_at"] = now
             self._save_locked()
             return copy.deepcopy(profile)
 
@@ -269,8 +340,12 @@ class ProfileStore:
                 next_sync_at = parse_iso_datetime(profile.get("next_sync_at"))
                 if next_sync_at is not None and next_sync_at > now:
                     continue
+                now_iso = utc_now_iso()
                 profile["sync_running"] = True
                 profile["sync_error"] = None
+                profile["sync_status"] = "Queued"
+                profile["sync_started_at"] = now_iso
+                profile["sync_updated_at"] = now_iso
                 due_profiles.append(copy.deepcopy(profile))
                 changed = True
 
@@ -287,7 +362,9 @@ class ProfileStore:
             profile["last_results"] = copy.deepcopy(results)
             profile["sync_error"] = None
             profile["sync_running"] = False
+            profile["sync_status"] = "Completed"
             profile["updated_at"] = now
+            profile["sync_updated_at"] = now
 
             history_entry = {
                 "timestamp": now,
@@ -314,12 +391,26 @@ class ProfileStore:
             now = utc_now_iso()
             profile["sync_running"] = False
             profile["sync_error"] = error_message
+            profile["sync_status"] = f"Failed: {error_message}"
             profile["updated_at"] = now
+            profile["sync_updated_at"] = now
             if not dry_run:
                 if profile["options"]["auto_sync"]:
                     profile["next_sync_at"] = self._next_sync_iso(profile["options"]["interval_seconds"])
                 else:
                     profile["next_sync_at"] = None
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
+    def update_sync_status(self, profile_id: str, status: str) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            now = utc_now_iso()
+            profile["sync_status"] = status
+            profile["sync_updated_at"] = now
+            if profile["sync_started_at"] is None:
+                profile["sync_started_at"] = now
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 

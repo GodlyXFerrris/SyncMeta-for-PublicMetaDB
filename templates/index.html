@@ -46,10 +46,28 @@
     .empty{text-align:center;padding:40px 20px;color:var(--z600);font-size:13px}.history-item{padding:12px 18px;border-bottom:1px solid rgba(39,39,46,.3);font-size:13px;display:flex;justify-content:space-between;align-items:center}.history-item:last-child{border-bottom:none}.history-time{color:var(--z500);font-size:12px}.history-stats{display:flex;gap:14px;font-variant-numeric:tabular-nums}
     .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.9);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300)}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
     .save-flash{font-size:12px;color:var(--green);opacity:0;transition:opacity .3s;margin-left:8px}.save-flash.show{opacity:1}.actions-bar{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions-meta{font-size:12px;color:var(--z600)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .hidden{display:none}
     .auth-box{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:var(--z900)}
     .auth-box.hidden{display:none}
     .auth-code{font-size:22px;font-weight:700;color:var(--white);letter-spacing:2px;margin:6px 0}
-    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}}
+    .catalog-tabs{display:flex;gap:8px;padding:6px;background:var(--z900);border:1px solid var(--z800);border-radius:10px;margin-bottom:12px}
+    .catalog-tab{flex:1;padding:10px 14px;border:none;border-radius:8px;background:transparent;color:var(--z400);font-size:13px;font-weight:600;cursor:pointer}
+    .catalog-tab.active{background:var(--z800);color:var(--white)}
+    .catalog-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .catalog-search{display:flex;gap:10px;margin-bottom:12px}
+    .catalog-search input{flex:1;padding:9px 12px;border-radius:8px;border:1px solid var(--z800);background:var(--z900);color:var(--z100);font-size:13px;font-family:inherit}
+    .catalog-list{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow:auto;padding-right:4px}
+    .catalog-row{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1px solid var(--z800);border-radius:10px;background:var(--z900);cursor:pointer;transition:border-color .2s,background .2s}
+    .catalog-row:hover{border-color:var(--z600)}
+    .catalog-row.selected{border-color:rgba(52,211,153,.45);background:rgba(20,83,45,.26)}
+    .catalog-check{width:20px;height:20px;border-radius:6px;border:1px solid var(--z700);background:var(--z950);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:transparent;font-size:12px;font-weight:700;margin-top:2px}
+    .catalog-row.selected .catalog-check{background:var(--green);border-color:var(--green);color:var(--black)}
+    .catalog-body{min-width:0}
+    .catalog-title{font-size:14px;font-weight:700;color:var(--white)}
+    .catalog-meta{font-size:12px;color:var(--z500);margin-top:4px;line-height:1.4}
+    .catalog-note{font-size:12px;color:var(--z500);margin-top:4px}
+    .status-inline{display:flex;align-items:center;gap:8px}
+    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}}
   </style>
 </head>
 <body>
@@ -145,6 +163,50 @@
             <div class="form-row"><label>Access Token</label><input type="password" id="anilist-access-token" placeholder="Only for private lists" autocomplete="off"></div>
           </div>
           <div class="form-section">
+            <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
+            <p class="desc">Sync your Trakt watchlist and liked Trakt lists into PublicMetaDB.</p>
+            <input type="checkbox" id="trakt-watchlist-toggle" checked class="hidden">
+            <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"></div>
+            <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
+            <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
+            <div class="form-row"><label>Refresh Token</label><input type="password" id="trakt-refresh-token" placeholder="Saved for future refresh support" autocomplete="off"></div>
+            <div class="actions-bar" style="margin-top:0">
+              <button class="btn btn-sm" id="btn-trakt-auth" onclick="startTraktAuth()">Connect Trakt</button>
+              <span class="actions-meta" id="trakt-auth-status">Start Trakt device auth here if you do not have a token yet.</span>
+            </div>
+            <div class="auth-box hidden" id="trakt-auth-box">
+              <div class="actions-meta">Trakt Code</div>
+              <div class="auth-code mono" id="trakt-auth-code">-----</div>
+              <div class="actions-bar" style="margin-top:8px">
+                <button class="btn btn-sm" type="button" onclick="copyTraktCode()">Copy Code</button>
+                <button class="btn btn-sm" type="button" onclick="openTraktVerification()">Open Trakt</button>
+              </div>
+              <div class="hint">If Trakt does not auto-fill the code, paste this code into the Trakt activation page manually.</div>
+            </div>
+          </div>
+          <div class="form-section full">
+            <h3>Trakt Catalogs</h3>
+            <p class="desc">Choose what should sync from Trakt. Default covers your watchlist, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
+            <div class="catalog-tabs">
+              <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
+              <button class="catalog-tab" type="button" data-trakt-tab="my-lists" onclick="switchTraktTab('my-lists')">My Lists</button>
+              <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
+            </div>
+            <div class="catalog-toolbar">
+              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load liked lists and search public lists.</span>
+              <div class="actions-bar" style="margin-top:0">
+                <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
+                <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
+                <button class="btn btn-sm" id="btn-trakt-select-all" type="button" onclick="selectAllVisibleTraktLists()">Select All</button>
+              </div>
+            </div>
+            <div class="catalog-search hidden" id="trakt-discover-search">
+              <input type="text" id="trakt-discover-query" placeholder="Search public Trakt lists..." autocomplete="off">
+              <button class="btn btn-sm" type="button" onclick="searchTraktLists()">Search</button>
+            </div>
+            <div class="catalog-list" id="trakt-catalog-list"></div>
+          </div>
+          <div class="form-section">
             <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
             <p class="desc">Destination for your synced lists.</p>
             <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key</a></div></div>
@@ -177,8 +239,15 @@
     const PROFILE_AUTH_KEY = 'sync_profile_auth';
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
+    const TRAKT_DEVICE_KEY = 'trakt_device_state';
     let polling = null;
     let simklPinPoller = null;
+    let traktDevicePoller = null;
+    let traktCatalogTab = 'default';
+    let traktLikedLists = [];
+    let traktDiscoverLists = [];
+    let traktSelectedLists = [];
+    let traktSyncAllLikedLists = false;
 
     function el(id) { return document.getElementById(id); }
 
@@ -227,6 +296,58 @@
       }
     }
 
+    function loadTraktDeviceState() {
+      return loadJson(TRAKT_DEVICE_KEY, null);
+    }
+
+    function saveTraktDeviceState(state) {
+      saveJson(TRAKT_DEVICE_KEY, state);
+    }
+
+    function clearTraktDeviceState() {
+      localStorage.removeItem(TRAKT_DEVICE_KEY);
+      if (traktDevicePoller) {
+        clearTimeout(traktDevicePoller);
+        traktDevicePoller = null;
+      }
+    }
+
+    function normalizeTraktSelectedLists(items) {
+      if (!Array.isArray(items)) return [];
+      const normalized = [];
+      const seen = new Set();
+      items.forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const user = String(item.user || '').trim();
+        const slug = String(item.slug || '').trim();
+        const name = String(item.name || '').trim();
+        if (!user || !slug || !name) return;
+        const key = `${user.toLowerCase()}/${slug.toLowerCase()}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        normalized.push({
+          name: name,
+          description: String(item.description || '').trim(),
+          user: user,
+          slug: slug,
+          trakt_id: item.trakt_id || null,
+          item_count: Number(item.item_count || 0) || 0,
+          likes: Number(item.likes || 0) || 0,
+          share_link: String(item.share_link || '').trim(),
+          source: item.source === 'discover' ? 'discover' : 'liked',
+        });
+      });
+      return normalized;
+    }
+
+    function traktListKey(item) {
+      return `${String(item.user || '').toLowerCase()}/${String(item.slug || '').toLowerCase()}`;
+    }
+
+    function isTraktConnected() {
+      return !!(el('trakt-client-id').value.trim() && el('trakt-access-token').value.trim());
+    }
+
     function gatherCreds() {
       return {
         simkl: {
@@ -237,6 +358,16 @@
         anilist: {
           username: el('anilist-username').value.trim(),
           access_token: el('anilist-access-token').value.trim(),
+        },
+        trakt: {
+          client_id: el('trakt-client-id').value.trim(),
+          client_secret: el('trakt-client-secret').value.trim(),
+          access_token: el('trakt-access-token').value.trim(),
+          refresh_token: el('trakt-refresh-token').value.trim(),
+          username: '',
+          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_liked_lists: traktSyncAllLikedLists,
+          selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
         },
         pmdb: { api_key: el('pmdb-api-key').value.trim() },
       };
@@ -265,6 +396,7 @@
       const profileAuth = auth || {};
       const simkl = creds && creds.simkl ? creds.simkl : {};
       const anilist = creds && creds.anilist ? creds.anilist : {};
+      const trakt = creds && creds.trakt ? creds.trakt : {};
       const pmdb = creds && creds.pmdb ? creds.pmdb : {};
       const options = opts || {};
       const mediaTypes = options.media_types || ['shows', 'movies', 'anime'];
@@ -276,6 +408,15 @@
       el('simkl-access-token').value = simkl.access_token || '';
       el('anilist-username').value = anilist.username || '';
       el('anilist-access-token').value = anilist.access_token || '';
+      el('trakt-client-id').value = trakt.client_id || '';
+      el('trakt-client-secret').value = trakt.client_secret || '';
+      el('trakt-access-token').value = trakt.access_token || '';
+      el('trakt-refresh-token').value = trakt.refresh_token || '';
+      el('trakt-watchlist-toggle').checked = trakt.sync_watchlist !== false;
+      traktSelectedLists = normalizeTraktSelectedLists(trakt.selected_lists || []);
+      traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
+      traktLikedLists = [];
+      traktDiscoverLists = [];
       el('pmdb-api-key').value = pmdb.api_key || '';
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
@@ -284,9 +425,14 @@
       el('opt-movies').checked = mediaTypes.indexOf('movies') !== -1;
       el('opt-anime').checked = mediaTypes.indexOf('anime') !== -1;
       updateDots();
+      renderTraktCatalogs();
       if (!loadSimklPinState()) {
         setSimklAuthCode('');
         setSimklAuthStatus(simkl.access_token ? 'SIMKL access token is already set.' : 'Start PIN auth here if you do not have an access token yet.', false);
+      }
+      if (!loadTraktDeviceState()) {
+        setTraktAuthCode('');
+        setTraktAuthStatus(trakt.access_token ? 'Trakt access token is already set.' : 'Start Trakt device auth here if you do not have a token yet.', false);
       }
     }
 
@@ -300,6 +446,7 @@
       const creds = gatherCreds();
       setDot('dot-simkl', !!(creds.simkl.client_id && creds.simkl.access_token));
       setDot('dot-anilist', !!creds.anilist.username);
+      setDot('dot-trakt', !!(creds.trakt.client_id && creds.trakt.access_token && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length)));
       setDot('dot-pmdb', !!creds.pmdb.api_key);
     }
 
@@ -409,6 +556,231 @@
       }
     }
 
+    function setTraktAuthStatus(message, isError) {
+      const node = el('trakt-auth-status');
+      node.textContent = message;
+      node.style.color = isError ? 'var(--red)' : '';
+    }
+
+    function setTraktAuthCode(code) {
+      const box = el('trakt-auth-box');
+      const codeNode = el('trakt-auth-code');
+      if (code) {
+        codeNode.textContent = code;
+        box.classList.remove('hidden');
+      } else {
+        codeNode.textContent = '-----';
+        box.classList.add('hidden');
+      }
+    }
+
+    function setTraktCatalogStatus(message, isError) {
+      const node = el('trakt-catalog-status');
+      node.textContent = message;
+      node.style.color = isError ? 'var(--red)' : '';
+    }
+
+    function switchTraktTab(tab) {
+      traktCatalogTab = tab;
+      renderTraktCatalogs();
+      if (tab === 'my-lists' && !traktLikedLists.length && isTraktConnected()) {
+        refreshTraktLists(true);
+      }
+    }
+
+    function toggleTraktWatchlist() {
+      el('trakt-watchlist-toggle').checked = !el('trakt-watchlist-toggle').checked;
+      traktSyncAllLikedLists = false;
+      renderTraktCatalogs();
+      updateDots();
+      saveDraft();
+    }
+
+    function findTraktListByKey(key) {
+      const items = traktLikedLists.concat(traktDiscoverLists).concat(traktSelectedLists);
+      for (const item of items) {
+        if (traktListKey(item) === key) return item;
+      }
+      return null;
+    }
+
+    function isTraktListSelected(key) {
+      return traktSelectedLists.some(item => traktListKey(item) === key);
+    }
+
+    function toggleTraktListSelection(key) {
+      const selected = traktSelectedLists.slice();
+      const index = selected.findIndex(item => traktListKey(item) === key);
+      if (index >= 0) {
+        selected.splice(index, 1);
+      } else {
+        const item = findTraktListByKey(key);
+        if (!item) return;
+        selected.push(item);
+      }
+      traktSelectedLists = normalizeTraktSelectedLists(selected);
+      traktSyncAllLikedLists = false;
+      renderTraktCatalogs();
+      updateDots();
+      saveDraft();
+    }
+
+    function enableAllLikedTraktLists() {
+      if (!isTraktConnected()) {
+        showToast('Connect Trakt first so SyncMeta can read your liked lists.', true, false);
+        return;
+      }
+      traktSyncAllLikedLists = true;
+      traktSelectedLists = traktSelectedLists.filter(item => item.source === 'discover');
+      renderTraktCatalogs();
+      updateDots();
+      saveDraft();
+      showToast('All liked Trakt lists will sync automatically.', false, true);
+    }
+
+    function selectAllVisibleTraktLists() {
+      if (traktCatalogTab === 'default') {
+        el('trakt-watchlist-toggle').checked = true;
+      } else {
+        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(visible));
+        if (traktCatalogTab === 'my-lists') {
+          traktSyncAllLikedLists = false;
+        }
+      }
+      renderTraktCatalogs();
+      updateDots();
+      saveDraft();
+    }
+
+    function traktCatalogMeta(item) {
+      const parts = [`Trakt by ${item.user}`];
+      if (item.item_count) parts.push(`${item.item_count} items`);
+      if (item.likes) parts.push(`${item.likes} likes`);
+      return parts.join(' · ');
+    }
+
+    function renderTraktCatalogs() {
+      document.querySelectorAll('[data-trakt-tab]').forEach(node => {
+        node.classList.toggle('active', node.dataset.traktTab === traktCatalogTab);
+      });
+
+      el('trakt-discover-search').classList.toggle('hidden', traktCatalogTab !== 'discover');
+      el('btn-trakt-refresh').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
+      el('btn-trakt-sync-all').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
+      el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable' : 'Select All';
+
+      const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0);
+      if (!isTraktConnected()) {
+        setTraktCatalogStatus('Connect Trakt to load liked lists and search public lists.', false);
+      } else if (traktSyncAllLikedLists) {
+        setTraktCatalogStatus(`Watchlist${el('trakt-watchlist-toggle').checked ? ' + ' : ' '}all liked Trakt lists will sync.`, false);
+      } else if (selectedCount) {
+        setTraktCatalogStatus(`${selectedCount} Trakt source${selectedCount === 1 ? '' : 's'} selected.`, false);
+      } else {
+        setTraktCatalogStatus('Choose at least one Trakt source to sync.', false);
+      }
+
+      let rows = '';
+      if (traktCatalogTab === 'default') {
+        const selected = el('trakt-watchlist-toggle').checked;
+        rows = `
+          <div class="catalog-row ${selected ? 'selected' : ''}" data-trakt-watchlist="1">
+            <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
+            <div class="catalog-body">
+              <div class="catalog-title">My Watchlist</div>
+              <div class="catalog-meta">Trakt default catalog</div>
+              <div class="catalog-note">Imports your Trakt movie and show watchlist into PublicMetaDB.</div>
+            </div>
+          </div>
+        `;
+      } else {
+        const items = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        if (!items.length) {
+          const emptyMessage = traktCatalogTab === 'my-lists'
+            ? 'No liked Trakt lists loaded yet. Connect Trakt and press Refresh My Lists.'
+            : 'Search for a public Trakt list to add it here.';
+          rows = `<div class="empty">${emptyMessage}</div>`;
+        } else {
+          rows = items.map(item => {
+            const key = traktListKey(item);
+            const selected = isTraktListSelected(key);
+            return `
+              <div class="catalog-row ${selected ? 'selected' : ''}" data-trakt-key="${esc(key)}">
+                <div class="catalog-check">${selected ? '&#10003;' : ''}</div>
+                <div class="catalog-body">
+                  <div class="catalog-title">${esc(item.name)}</div>
+                  <div class="catalog-meta">${esc(traktCatalogMeta(item))}</div>
+                  ${item.description ? `<div class="catalog-note">${esc(item.description)}</div>` : ''}
+                </div>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      el('trakt-catalog-list').innerHTML = rows;
+      document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist="1"]').forEach(node => {
+        node.addEventListener('click', toggleTraktWatchlist);
+      });
+      document.querySelectorAll('#trakt-catalog-list [data-trakt-key]').forEach(node => {
+        node.addEventListener('click', () => toggleTraktListSelection(node.dataset.traktKey));
+      });
+    }
+
+    async function refreshTraktLists(silent) {
+      if (!isTraktConnected()) {
+        if (!silent) showToast('Connect Trakt first to load your liked lists.', true, false);
+        return;
+      }
+      setTraktCatalogStatus('Loading your liked Trakt lists...', false);
+      try {
+        const result = await apiPost('/api/trakt/catalogs', {
+          client_id: el('trakt-client-id').value.trim(),
+          access_token: el('trakt-access-token').value.trim(),
+        });
+        if (!result.ok) {
+          setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt liked lists.'), true);
+          return;
+        }
+        traktLikedLists = Array.isArray(result.data.items) ? result.data.items : [];
+        renderTraktCatalogs();
+        if (!silent) {
+          showToast(traktLikedLists.length ? 'Trakt liked lists loaded.' : 'No liked Trakt lists found.', false, true);
+        }
+      } catch {
+        setTraktCatalogStatus('Network error while loading Trakt liked lists.', true);
+      }
+    }
+
+    async function searchTraktLists() {
+      if (!isTraktConnected()) {
+        showToast('Connect Trakt first to search public lists.', true, false);
+        return;
+      }
+      const query = el('trakt-discover-query').value.trim();
+      if (!query) {
+        showToast('Enter a search term for Trakt lists.', true, false);
+        return;
+      }
+      setTraktCatalogStatus(`Searching Trakt for "${query}"...`, false);
+      try {
+        const result = await apiPost('/api/trakt/catalogs', {
+          client_id: el('trakt-client-id').value.trim(),
+          access_token: el('trakt-access-token').value.trim(),
+          query: query,
+        });
+        if (!result.ok) {
+          setTraktCatalogStatus(formatApiError(result.data, 'Could not search Trakt lists.'), true);
+          return;
+        }
+        traktDiscoverLists = Array.isArray(result.data.items) ? result.data.items : [];
+        renderTraktCatalogs();
+      } catch {
+        setTraktCatalogStatus('Network error while searching Trakt lists.', true);
+      }
+    }
+
     function buildSimklVerifyUrl(baseUrl, userCode) {
       if (baseUrl && baseUrl.endsWith('/')) return baseUrl + encodeURIComponent(userCode);
       return baseUrl;
@@ -435,6 +807,29 @@
         return;
       }
       window.open(buildSimklVerifyUrl(state.verification_url, state.user_code), '_blank', 'noopener');
+    }
+
+    async function copyTraktCode() {
+      const state = loadTraktDeviceState();
+      if (!state || !state.user_code) {
+        showToast('No active Trakt code to copy.', true, false);
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(state.user_code);
+        showToast('Trakt code copied.', false, true);
+      } catch {
+        showToast('Could not copy the Trakt code.', true, false);
+      }
+    }
+
+    function openTraktVerification() {
+      const state = loadTraktDeviceState();
+      if (!state) {
+        showToast('Start Trakt auth first.', true, false);
+        return;
+      }
+      window.open(state.verification_url || 'https://trakt.tv/activate', '_blank', 'noopener');
     }
 
     async function startSimklAuth() {
@@ -474,9 +869,57 @@
       }
     }
 
+    async function startTraktAuth() {
+      const clientId = el('trakt-client-id').value.trim();
+      const clientSecret = el('trakt-client-secret').value.trim();
+      if (!clientId || !clientSecret) {
+        showToast('Enter your Trakt client ID and client secret first.', true, false);
+        return;
+      }
+
+      el('btn-trakt-auth').disabled = true;
+      setTraktAuthStatus('Requesting Trakt device code...', false);
+
+      try {
+        const result = await apiPost('/api/trakt/device/start', {
+          client_id: clientId,
+          client_secret: clientSecret,
+        });
+        if (!result.ok) {
+          setTraktAuthStatus(formatApiError(result.data, 'Could not start Trakt auth.'), true);
+          return;
+        }
+
+        const data = result.data;
+        const state = {
+          client_id: clientId,
+          client_secret: clientSecret,
+          device_code: data.device_code,
+          user_code: data.user_code,
+          verification_url: data.verification_url,
+          interval: data.interval || 5,
+          expires_at: Date.now() + ((data.expires_in || 600) * 1000),
+        };
+        saveTraktDeviceState(state);
+        setTraktAuthCode(data.user_code);
+        setTraktAuthStatus(`Approve code ${data.user_code} on Trakt. Waiting for confirmation...`, false);
+        window.open(data.verification_url || 'https://trakt.tv/activate', '_blank', 'noopener');
+        scheduleTraktDeviceCheck(1000);
+      } catch {
+        setTraktAuthStatus('Network error while starting Trakt auth.', true);
+      } finally {
+        el('btn-trakt-auth').disabled = false;
+      }
+    }
+
     function scheduleSimklPinCheck(delayMs) {
       if (simklPinPoller) clearTimeout(simklPinPoller);
       simklPinPoller = setTimeout(checkSimklPin, delayMs);
+    }
+
+    function scheduleTraktDeviceCheck(delayMs) {
+      if (traktDevicePoller) clearTimeout(traktDevicePoller);
+      traktDevicePoller = setTimeout(checkTraktDevice, delayMs);
     }
 
     async function checkSimklPin() {
@@ -521,6 +964,52 @@
       }
     }
 
+    async function checkTraktDevice() {
+      const state = loadTraktDeviceState();
+      if (!state) return;
+
+      if (Date.now() >= state.expires_at) {
+        clearTraktDeviceState();
+        setTraktAuthCode('');
+        setTraktAuthStatus('Trakt device code expired. Start the token flow again.', true);
+        return;
+      }
+
+      try {
+        const result = await apiPost('/api/trakt/device/check', {
+          client_id: state.client_id,
+          client_secret: state.client_secret,
+          device_code: state.device_code,
+        });
+
+        if (!result.ok) {
+          setTraktAuthStatus(formatApiError(result.data, 'Could not check Trakt auth.'), true);
+          scheduleTraktDeviceCheck((state.interval || 5) * 1000);
+          return;
+        }
+
+        if (result.data.status === 'approved' && result.data.access_token) {
+          el('trakt-access-token').value = result.data.access_token;
+          el('trakt-refresh-token').value = result.data.refresh_token || '';
+          clearTraktDeviceState();
+          setTraktAuthCode('');
+          updateDots();
+          saveDraft();
+          renderTraktCatalogs();
+          refreshTraktLists(true);
+          setTraktAuthStatus('Trakt access token received and filled in.', false);
+          showToast('Trakt token added.', false, true);
+          return;
+        }
+
+        setTraktAuthStatus(`Approve code ${state.user_code} on Trakt. Waiting for confirmation...`, false);
+        scheduleTraktDeviceCheck((state.interval || 5) * 1000);
+      } catch {
+        setTraktAuthStatus('Network error while checking Trakt auth.', true);
+        scheduleTraktDeviceCheck((state.interval || 5) * 1000);
+      }
+    }
+
     function resumeSimklPinState() {
       const state = loadSimklPinState();
       if (!state) {
@@ -537,6 +1026,24 @@
       setSimklAuthCode(state.user_code);
       setSimklAuthStatus(`Approve code ${state.user_code} on SIMKL. Waiting for confirmation...`, false);
       scheduleSimklPinCheck(1000);
+    }
+
+    function resumeTraktDeviceState() {
+      const state = loadTraktDeviceState();
+      if (!state) {
+        setTraktAuthCode('');
+        setTraktAuthStatus('Start Trakt device auth here if you do not have a token yet.', false);
+        return;
+      }
+      if (Date.now() >= state.expires_at) {
+        clearTraktDeviceState();
+        setTraktAuthCode('');
+        setTraktAuthStatus('Trakt device code expired. Start the token flow again.', true);
+        return;
+      }
+      setTraktAuthCode(state.user_code);
+      setTraktAuthStatus(`Approve code ${state.user_code} on Trakt. Waiting for confirmation...`, false);
+      scheduleTraktDeviceCheck(1000);
     }
 
     function renderEmptyDashboard(message) {
@@ -577,9 +1084,11 @@
         return acc;
       }, { fetched: 0, resolved: 0, added: 0, removed: 0, unresolved: 0, errors: 0 });
 
+      const liveStatus = profile.sync_status || 'Running...';
+      const liveStamp = profile.sync_updated_at ? `Updated ${timeAgo(profile.sync_updated_at)}` : '';
       const lastSyncSub = profile.sync_running
-        ? '<span class="spinner"></span> Running...'
-        : (profile.sync_error ? '<span style="color:var(--red)">Last run failed</span>' : 'Background sync ready');
+        ? `<span class="status-inline"><span class="spinner"></span><span>${esc(liveStatus)}</span></span>${liveStamp ? `<div class="catalog-note">${esc(liveStamp)}</div>` : ''}`
+        : (profile.sync_error ? `<span style="color:var(--red)">${esc(profile.sync_error)}</span>` : 'Background sync ready');
 
       el('cards').innerHTML = `
         <div class="card"><div class="card-label">Last Sync</div><div class="card-value">${profile.last_sync ? timeAgo(profile.last_sync) : 'Never'}</div><div class="card-sub">${lastSyncSub}</div></div>
@@ -593,7 +1102,9 @@
         ? 'Auto sync is off'
         : (profile.next_sync_at ? `Next automatic sync ${timeUntil(profile.next_sync_at)} (${intervalLabel(options.interval_seconds)})` : `Automatic sync every ${intervalLabel(options.interval_seconds)}`);
       const profileShort = profile.profile_id ? profile.profile_id.slice(0, 8) + '...' : 'Not saved';
-      el('sync-hint').textContent = `Profile ${profileShort} - ${nextSyncText}`;
+      el('sync-hint').textContent = profile.sync_running
+        ? `Profile ${profileShort} - ${liveStatus}${liveStamp ? ` - ${liveStamp}` : ''}`
+        : `Profile ${profileShort} - ${nextSyncText}`;
 
       el('results-time').textContent = profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '';
       if (!results.length) {
@@ -651,6 +1162,9 @@
         populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id, password: auth.password });
         renderDashboard(profile);
         flashSaved();
+        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
+          refreshTraktLists(true);
+        }
         if (announce) showToast(result.data.created ? 'Profile created.' : 'Profile updated.', false, true);
         return profile;
       } catch {
@@ -680,6 +1194,9 @@
         populateForm(profile.credentials, profile.options, auth);
         renderDashboard(profile);
         saveDraft();
+        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
+          refreshTraktLists(true);
+        }
         if (!silent) showToast('Profile loaded.', false, true);
         return profile;
       } catch {
@@ -749,6 +1266,10 @@
     const savedAuth = loadProfileAuth();
     populateForm(draftCreds, draftOptions, savedAuth);
     resumeSimklPinState();
+    resumeTraktDeviceState();
+    if (draftCreds.trakt && draftCreds.trakt.client_id && draftCreds.trakt.access_token) {
+      refreshTraktLists(true);
+    }
 
     if (localStorage.getItem(ENTERED_KEY)) enterApp(savedAuth.profile_id ? 'dashboard' : 'settings');
     if (savedAuth.profile_id && savedAuth.password) loadProfile(true).then(() => fetchStatus());
@@ -758,6 +1279,12 @@
     document.querySelectorAll('.form-section input').forEach(input => {
       input.addEventListener('input', () => { updateDots(); saveDraft(); });
       input.addEventListener('change', () => { updateDots(); saveDraft(); });
+    });
+    el('trakt-discover-query').addEventListener('keydown', event => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        searchTraktLists();
+      }
     });
   </script>
 </body>

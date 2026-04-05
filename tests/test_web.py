@@ -45,6 +45,85 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["status"], "approved")
         self.assertEqual(data["access_token"], "token-123")
 
+    @patch("web.TraktClient.request_device_code")
+    def test_trakt_device_start(self, mock_request_device_code) -> None:
+        mock_request_device_code.return_value = {
+            "device_code": "device",
+            "user_code": "TRAKT",
+            "verification_url": "https://trakt.tv/activate",
+            "interval": 5,
+            "expires_in": 600,
+        }
+
+        response = self.client.post("/api/trakt/device/start", json={
+            "client_id": "client",
+            "client_secret": "secret",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["device_code"], "device")
+        self.assertEqual(data["user_code"], "TRAKT")
+
+    @patch("web.TraktClient.poll_device_token")
+    def test_trakt_device_check_approved(self, mock_poll_device_token) -> None:
+        mock_poll_device_token.return_value = {
+            "access_token": "access",
+            "refresh_token": "refresh",
+        }
+
+        response = self.client.post("/api/trakt/device/check", json={
+            "client_id": "client",
+            "client_secret": "secret",
+            "device_code": "device",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["status"], "approved")
+        self.assertEqual(data["refresh_token"], "refresh")
+
+    @patch("web.TraktClient.get_liked_lists_metadata")
+    def test_trakt_catalogs_liked_lists(self, mock_get_liked_lists_metadata) -> None:
+        mock_get_liked_lists_metadata.return_value = [{
+            "name": "Anime",
+            "user": "demo",
+            "slug": "anime",
+            "source": "liked",
+            "likes": 42,
+            "item_count": 10,
+        }]
+
+        response = self.client.post("/api/trakt/catalogs", json={
+            "client_id": "client",
+            "access_token": "token",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["slug"], "anime")
+
+    @patch("web.TraktClient.search_lists")
+    def test_trakt_catalogs_search(self, mock_search_lists) -> None:
+        mock_search_lists.return_value = [{
+            "name": "Top Rated",
+            "user": "demo",
+            "slug": "top-rated",
+            "source": "discover",
+        }]
+
+        response = self.client.post("/api/trakt/catalogs", json={
+            "client_id": "client",
+            "access_token": "token",
+            "query": "top rated",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["query"], "top rated")
+        self.assertEqual(data["items"][0]["source"], "discover")
+
 
 if __name__ == "__main__":
     unittest.main()

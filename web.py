@@ -17,11 +17,13 @@ from src.config import (
     PublicMetaDBConfig,
     SimklConfig,
     SyncConfig,
+    TraktConfig,
     validate_config,
 )
 from src.profile_store import ProfileStore, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
 from src.sync_service import SyncService, SyncStats
+from src.trakt_client import TraktClient
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -53,6 +55,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
     credentials = normalize_credentials(profile.get("credentials"))
     options = normalize_profile_options(profile.get("options"))
     anilist_username = credentials["anilist"]["username"]
+    trakt_username = credentials["trakt"]["username"]
 
     return AppConfig(
         simkl=SimklConfig(
@@ -64,6 +67,17 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             username=anilist_username,
             access_token=credentials["anilist"]["access_token"],
             enabled=bool(anilist_username),
+        ),
+        trakt=TraktConfig(
+            client_id=credentials["trakt"]["client_id"],
+            client_secret=credentials["trakt"]["client_secret"],
+            access_token=credentials["trakt"]["access_token"],
+            refresh_token=credentials["trakt"]["refresh_token"],
+            username=trakt_username,
+            enabled=bool(credentials["trakt"]["client_id"] and credentials["trakt"]["access_token"]),
+            sync_watchlist=credentials["trakt"]["sync_watchlist"],
+            sync_liked_lists=credentials["trakt"]["sync_liked_lists"],
+            selected_lists=credentials["trakt"]["selected_lists"],
         ),
         pmdb=PublicMetaDBConfig(api_key=credentials["pmdb"]["api_key"]),
         sync=SyncConfig(
@@ -80,6 +94,8 @@ def _configured_sources(config: AppConfig) -> list[str]:
         sources.append("simkl")
     if config.anilist.enabled:
         sources.append("anilist")
+    if config.trakt.enabled:
+        sources.append("trakt")
     return sources
 
 
@@ -95,7 +111,7 @@ def _validate_profile_configuration(credentials: dict, options: dict) -> tuple[A
     config = _config_from_profile(normalized_profile, dry_run=False)
     sources = _configured_sources(config)
     if not sources:
-        return None, ["Configure at least one source (SIMKL or AniList)"]
+        return None, ["Configure at least one source (SIMKL, AniList, or Trakt)"]
 
     errors = validate_config(config, sources)
     return config, errors
@@ -118,7 +134,11 @@ def _profile_response(profile: dict, include_credentials: bool = False):
 def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
     profile_id = profile["profile_id"]
     try:
-        service = SyncService(_config_from_profile(profile, dry_run=dry_run))
+        _profile_store.update_sync_status(profile_id, "Starting sync")
+        service = SyncService(
+            _config_from_profile(profile, dry_run=dry_run),
+            status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
+        )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]
         _profile_store.record_sync_success(profile_id, result_dicts, dry_run=dry_run)
@@ -248,6 +268,89 @@ def api_simkl_pin_check():
         "status": "pending",
         "message": check.get("message", ""),
     })
+
+
+@app.route("/api/trakt/device/start", methods=["POST"])
+def api_trakt_device_start():
+    body = request.get_json(silent=True) or {}
+    client_id = str(body.get("client_id", "")).strip()
+    client_secret = str(body.get("client_secret", "")).strip()
+
+    if not client_id:
+        return _json_error("Trakt client ID is required", 400)
+    if not client_secret:
+        return _json_error("Trakt client secret is required", 400)
+
+    try:
+        client = TraktClient(TraktConfig(client_id=client_id, client_secret=client_secret))
+        data = client.request_device_code()
+    except Exception as exc:
+        logger.exception("Failed to start Trakt device auth")
+        return _json_error(f"Failed to start Trakt auth: {exc}", 400)
+
+    return jsonify({
+        "device_code": data.get("device_code"),
+        "user_code": data.get("user_code"),
+        "verification_url": data.get("verification_url") or "https://trakt.tv/activate",
+        "interval": data.get("interval", 5),
+        "expires_in": data.get("expires_in", 600),
+    })
+
+
+@app.route("/api/trakt/device/check", methods=["POST"])
+def api_trakt_device_check():
+    body = request.get_json(silent=True) or {}
+    client_id = str(body.get("client_id", "")).strip()
+    client_secret = str(body.get("client_secret", "")).strip()
+    device_code = str(body.get("device_code", "")).strip()
+
+    if not client_id:
+        return _json_error("Trakt client ID is required", 400)
+    if not client_secret:
+        return _json_error("Trakt client secret is required", 400)
+    if not device_code:
+        return _json_error("Trakt device code is required", 400)
+
+    try:
+        client = TraktClient(TraktConfig(client_id=client_id, client_secret=client_secret))
+        data = client.poll_device_token(device_code) or {}
+    except Exception as exc:
+        logger.exception("Failed to check Trakt device auth")
+        return _json_error(f"Failed to check Trakt auth: {exc}", 400)
+
+    if data.get("access_token"):
+        return jsonify({
+            "status": "approved",
+            "access_token": data.get("access_token"),
+            "refresh_token": data.get("refresh_token", ""),
+        })
+
+    return jsonify({
+        "status": "pending",
+        "message": data.get("error", "") or data.get("message", ""),
+    })
+
+
+@app.route("/api/trakt/catalogs", methods=["POST"])
+def api_trakt_catalogs():
+    body = request.get_json(silent=True) or {}
+    client_id = str(body.get("client_id", "")).strip()
+    access_token = str(body.get("access_token", "")).strip()
+    query = str(body.get("query", "")).strip()
+
+    if not client_id:
+        return _json_error("Trakt client ID is required", 400)
+    if not access_token:
+        return _json_error("Trakt access token is required", 400)
+
+    try:
+        client = TraktClient(TraktConfig(client_id=client_id, access_token=access_token))
+        items = client.search_lists(query) if query else client.get_liked_lists_metadata()
+    except Exception as exc:
+        logger.exception("Failed to load Trakt catalogs")
+        return _json_error(f"Failed to load Trakt catalogs: {exc}", 400)
+
+    return jsonify({"items": items, "query": query})
 
 
 @app.route("/api/profile/save", methods=["POST"])
