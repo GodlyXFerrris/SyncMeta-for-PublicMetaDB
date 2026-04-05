@@ -189,8 +189,6 @@ class SyncService:
         self._set_status("Fetching Trakt watched history")
         items = self._trakt.get_watched_history()
         stats.items_fetched = len(items)
-        match_full_counts = self._config.sync.trakt_sync_full_watch_counts
-        reconcile_counts = self._config.sync.trakt_reconcile_watched_history
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -199,14 +197,10 @@ class SyncService:
             return stats
 
         existing_counts: dict[str, int] = {}
-        existing_by_key: dict[str, list[dict]] = {}
         for existing_item in existing_items:
             key = self._watched_identity_key(existing_item)
             if key:
                 existing_counts[key] = existing_counts.get(key, 0) + 1
-                existing_by_key.setdefault(key, []).append(existing_item)
-
-        source_counts: dict[str, int] = {}
 
         for item in items:
             self._check_cancelled()
@@ -215,14 +209,11 @@ class SyncService:
                 stats.items_skipped_unresolved += 1
                 continue
             stats.items_resolved += 1
-            source_counts[key] = source_counts.get(key, 0) + 1
-            desired_count = source_counts[key] if match_full_counts else 1
-            current_count = existing_counts.get(key, 0)
-            if current_count >= desired_count:
+            if existing_counts.get(key, 0) > 0:
                 stats.items_skipped_duplicate += 1
                 continue
             if self._config.sync.dry_run:
-                existing_counts[key] = current_count + 1
+                existing_counts[key] = 1
                 stats.items_added += 1
                 continue
             try:
@@ -233,46 +224,12 @@ class SyncService:
                     season=item.get("season"),
                     episode=item.get("episode"),
                     watched_at=item.get("watched_at"),
-                    dedupe=not match_full_counts,
+                    dedupe=True,
                 )
-                existing_counts[key] = current_count + 1
-                existing_by_key.setdefault(key, []).append({
-                    "tmdb_id": item.get("tmdb_id"),
-                    "media_type": item.get("media_type"),
-                    "season": item.get("season"),
-                    "episode": item.get("episode"),
-                    "watched_at": item.get("watched_at"),
-                })
+                existing_counts[key] = 1
                 stats.items_added += 1
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
-
-        if reconcile_counts:
-            desired_by_key: dict[str, int] = {}
-            for key, count in source_counts.items():
-                desired_by_key[key] = count if match_full_counts else 1
-
-            for key, current_items in existing_by_key.items():
-                desired_count = desired_by_key.get(key, 0)
-                current_count = len(current_items)
-                excess = current_count - desired_count
-                if excess <= 0:
-                    continue
-                deletable = [item for item in current_items if str(item.get("id", "")).strip()]
-                deletable.sort(key=lambda item: str(item.get("watched_at", "") or ""), reverse=True)
-                for existing_item in deletable[:excess]:
-                    self._check_cancelled()
-                    if self._config.sync.dry_run:
-                        stats.items_removed += 1
-                        continue
-                    try:
-                        self._set_status("Reconciling Trakt watched history with PublicMetaDB")
-                        self._pmdb.delete_watched_entry(str(existing_item["id"]))
-                        stats.items_removed += 1
-                    except Exception as exc:
-                        stats.errors.append(
-                            f"Failed to delete extra watched entry '{key}': {exc}"
-                        )
         return stats
 
     def _sync_trakt_resume_progress(self) -> SyncStats:
@@ -303,14 +260,21 @@ class SyncService:
             return stats
 
         try:
-            self._pmdb.get_resume_points()
+            existing_resume_points = self._pmdb.get_resume_points()
         except Exception as exc:
             stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
             return stats
 
+        existing_resume_by_key: dict[str, dict] = {}
+        for item in existing_resume_points:
+            key = self._resume_key(item)
+            if key:
+                existing_resume_by_key[key] = item
+
         payloads: list[dict] = []
         for item in normalized_items:
             self._check_cancelled()
+            key = self._resume_key(item)
             payload = {
                 "tmdb_id": int(item["tmdb_id"]),
                 "media_type": item["media_type"],
@@ -321,7 +285,14 @@ class SyncService:
                 payload["season"] = int(item["season"])
             if item.get("episode") is not None:
                 payload["episode"] = int(item["episode"])
+            existing = existing_resume_by_key.get(key)
+            if existing and self._resume_matches(existing, payload):
+                stats.items_skipped_duplicate += 1
+                continue
             payloads.append(payload)
+
+        if not payloads:
+            return stats
 
         for chunk in self._chunked(payloads, 50):
             self._check_cancelled()
@@ -801,6 +772,13 @@ class SyncService:
         season = item.get("season")
         episode = item.get("episode")
         return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}"
+
+    @staticmethod
+    def _resume_matches(existing: dict, payload: dict) -> bool:
+        return (
+            int(existing.get("position_ms", 0) or 0) == int(payload.get("position_ms", 0) or 0)
+            and int(existing.get("runtime_ms", 0) or 0) == int(payload.get("runtime_ms", 0) or 0)
+        )
 
     @staticmethod
     def _chunked(items: list[dict], size: int) -> list[list[dict]]:

@@ -280,10 +280,9 @@
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-watched-history"><span class="slider"></span></label><label>Sync Trakt watched history</label></div>
-                <div class="form-row"><label>Watch History Update Every (Seconds)</label><input type="number" id="opt-trakt-history-interval-seconds" min="43200" step="1" value="43200"><div class="hint">Minimum 43200 seconds (12 hours). This applies only to the automatic Trakt watch history sync.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-resume-progress"><span class="slider"></span></label><label>Sync Trakt resume progress</label></div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Trakt watch history always matches repeated plays and reconciles PublicMetaDB back down when needed. Trakt resume sync refreshes automatically every hour and can also be forced from the dashboard.</div>
+                <div class="hint">Trakt watch history only imports items that are not already watched in PublicMetaDB. Watch history and resume progress sync only when you run them from the dashboard buttons.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -713,14 +712,13 @@
 
     function gatherOptions() {
       const intervalSeconds = parseInt(el('opt-interval-seconds').value || '1800', 10);
-      const historyIntervalSeconds = parseInt(el('opt-trakt-history-interval-seconds').value || '43200', 10);
       return {
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         trakt_sync_watched_history: el('opt-trakt-sync-watched-history').checked,
-        trakt_watched_history_interval_seconds: Number.isFinite(historyIntervalSeconds) ? historyIntervalSeconds : 43200,
+        trakt_watched_history_interval_seconds: 43200,
         trakt_sync_resume_progress: el('opt-trakt-sync-resume-progress').checked,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
@@ -818,7 +816,6 @@
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-trakt-sync-watched-history').checked = !!options.trakt_sync_watched_history;
-      el('opt-trakt-history-interval-seconds').value = options.trakt_watched_history_interval_seconds || 43200;
       el('opt-trakt-sync-resume-progress').checked = !!options.trakt_sync_resume_progress;
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
@@ -1861,17 +1858,17 @@
         return;
       }
 
-      const watchEnabled = !!options.trakt_sync_watched_history;
-      const resumeEnabled = !!options.trakt_sync_resume_progress;
+        const watchEnabled = !!options.trakt_sync_watched_history;
+        const resumeEnabled = !!options.trakt_sync_resume_progress;
       el('btn-sync-history').disabled = !!profile.sync_running || !watchEnabled;
       el('btn-sync-resume').disabled = !!profile.sync_running || !resumeEnabled;
       el('activity-panel').classList.remove('hidden');
       updateClearHistoryButtons(!!(watchEnabled || watchRow), !profile.sync_running);
       el('activity-cards').innerHTML = [
-        buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', profile.next_history_sync_at, activityResults.watch_history && activityResults.watch_history.timestamp),
-        buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', profile.next_resume_sync_at, activityResults.resume_progress && activityResults.resume_progress.timestamp),
-      ].join('');
-    }
+          buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
+          buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
+        ].join('');
+      }
 
     function updateClearHistoryButtons(show, canUse) {
       const arm = el('btn-clear-history-arm');
@@ -1904,28 +1901,22 @@
       return (results || []).find(row => (row.display_name || '') === displayName) || null;
     }
 
-    function buildActivityCard(title, subtitle, row, enabled, primaryLabel, secondaryLabel, tertiaryLabel, quaternaryLabel, nextRunAt, lastRunAt) {
-      let statusText = enabled ? 'Waiting for the next sync run.' : 'Turned off in Settings.';
-      let primaryValue = 0;
-      let secondaryValue = 0;
-      let tertiaryValue = 0;
-      let quaternaryValue = 0;
+      function buildActivityCard(title, subtitle, row, enabled, primaryLabel, secondaryLabel, tertiaryLabel, quaternaryLabel, lastRunAt) {
+        let statusText = enabled ? 'Run this manually from the button above.' : 'Turned off in Settings.';
+        let primaryValue = 0;
+        let secondaryValue = 0;
+        let tertiaryValue = 0;
+        let quaternaryValue = 0;
 
       if (row) {
         primaryValue = row.items_added || 0;
         secondaryValue = row.items_fetched || 0;
         tertiaryValue = title === 'Resume Progress' ? (row.items_removed || 0) : (row.items_skipped_duplicate || 0);
         quaternaryValue = row.error_count || 0;
-        statusText = quaternaryValue > 0
-          ? `${quaternaryValue} issue${quaternaryValue === 1 ? '' : 's'} in the latest run.`
-          : 'Latest sync completed cleanly.';
-      } else if (enabled && nextRunAt) {
-        statusText = `Next automatic refresh ${timeUntil(nextRunAt)}.`;
-      }
-
-      if (enabled && !row && title === 'Resume Progress') {
-        statusText = nextRunAt ? `Refreshes automatically every hour. Next run ${timeUntil(nextRunAt)}.` : 'Refreshes automatically every hour.';
-      }
+          statusText = quaternaryValue > 0
+            ? `${quaternaryValue} issue${quaternaryValue === 1 ? '' : 's'} in the latest run.`
+            : 'Latest sync completed cleanly.';
+        }
 
       let metaText = subtitle;
       if (lastRunAt) {

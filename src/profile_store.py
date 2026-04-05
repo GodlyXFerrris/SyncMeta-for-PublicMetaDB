@@ -21,7 +21,6 @@ DEFAULT_SYNC_INTERVAL_SECONDS = 1800
 MIN_SYNC_INTERVAL_SECONDS = 300
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
-RESUME_SYNC_INTERVAL_SECONDS = 3600
 MAX_HISTORY_ITEMS = 20
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"}
@@ -393,8 +392,8 @@ def normalize_profile_options(options: dict | None) -> dict:
         "interval_seconds": interval_seconds,
         "trakt_sync_watched_history": bool(raw.get("trakt_sync_watched_history", False)),
         "trakt_watched_history_interval_seconds": watched_history_interval_seconds,
-        "trakt_sync_full_watch_counts": bool(raw.get("trakt_sync_watched_history", False)),
-        "trakt_reconcile_watched_history": bool(raw.get("trakt_sync_watched_history", False)),
+        "trakt_sync_full_watch_counts": False,
+        "trakt_reconcile_watched_history": False,
         "trakt_sync_resume_progress": bool(raw.get("trakt_sync_resume_progress", False)),
         "simkl_visibility": _normalize_visibility(raw.get("simkl_visibility"), "private"),
         "anilist_visibility": _normalize_visibility(raw.get("anilist_visibility"), "private"),
@@ -447,18 +446,6 @@ class ProfileStore:
         if not options["auto_sync"]:
             next_sync_at = None
 
-        next_history_sync_at = raw_profile.get("next_history_sync_at")
-        if options["auto_sync"] and options["trakt_sync_watched_history"] and not next_history_sync_at:
-            next_history_sync_at = utc_now_iso()
-        if not options["auto_sync"] or not options["trakt_sync_watched_history"]:
-            next_history_sync_at = None
-
-        next_resume_sync_at = raw_profile.get("next_resume_sync_at")
-        if options["auto_sync"] and options["trakt_sync_resume_progress"] and not next_resume_sync_at:
-            next_resume_sync_at = utc_now_iso()
-        if not options["auto_sync"] or not options["trakt_sync_resume_progress"]:
-            next_resume_sync_at = None
-
         return {
             "profile_id": profile_id,
             "password_hash": raw_profile["password_hash"],
@@ -477,9 +464,9 @@ class ProfileStore:
             "history": list(raw_profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": next_sync_at,
             "last_history_sync": raw_profile.get("last_history_sync"),
-            "next_history_sync_at": next_history_sync_at,
+            "next_history_sync_at": None,
             "last_resume_sync": raw_profile.get("last_resume_sync"),
-            "next_resume_sync_at": next_resume_sync_at,
+            "next_resume_sync_at": None,
             "activity_results": _normalize_activity_results(raw_profile.get("activity_results")),
             "managed_lists": _normalize_managed_lists(raw_profile.get("managed_lists", [])),
         }
@@ -556,18 +543,10 @@ class ProfileStore:
             profile["next_sync_at"] = self._next_sync_iso(options["interval_seconds"]) if auto_sync else None
         if sync_modes["history"]:
             profile["last_history_sync"] = utc_now_iso()
-            profile["next_history_sync_at"] = (
-                self._next_sync_iso(options["trakt_watched_history_interval_seconds"])
-                if auto_sync and options.get("trakt_sync_watched_history")
-                else None
-            )
+            profile["next_history_sync_at"] = None
         if sync_modes["resume"]:
             profile["last_resume_sync"] = utc_now_iso()
-            profile["next_resume_sync_at"] = (
-                self._next_sync_iso(RESUME_SYNC_INTERVAL_SECONDS)
-                if auto_sync and options.get("trakt_sync_resume_progress")
-                else None
-            )
+            profile["next_resume_sync_at"] = None
 
     @staticmethod
     def _merge_activity_results(profile: dict, results: list[dict], timestamp: str) -> None:
@@ -634,9 +613,9 @@ class ProfileStore:
             "history": [],
             "next_sync_at": now if normalized_options["auto_sync"] else None,
             "last_history_sync": None,
-            "next_history_sync_at": now if normalized_options["auto_sync"] and normalized_options["trakt_sync_watched_history"] else None,
+            "next_history_sync_at": None,
             "last_resume_sync": None,
-            "next_resume_sync_at": now if normalized_options["auto_sync"] and normalized_options["trakt_sync_resume_progress"] else None,
+            "next_resume_sync_at": None,
             "activity_results": {},
             "managed_lists": [],
         }
@@ -673,12 +652,8 @@ class ProfileStore:
             if not profile["sync_running"]:
                 now = utc_now_iso()
                 profile["next_sync_at"] = now if normalized_options["auto_sync"] else None
-                profile["next_history_sync_at"] = (
-                    now if normalized_options["auto_sync"] and normalized_options["trakt_sync_watched_history"] else None
-                )
-                profile["next_resume_sync_at"] = (
-                    now if normalized_options["auto_sync"] and normalized_options["trakt_sync_resume_progress"] else None
-                )
+                profile["next_history_sync_at"] = None
+                profile["next_resume_sync_at"] = None
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 
@@ -695,12 +670,8 @@ class ProfileStore:
             if not profile["sync_running"]:
                 now = utc_now_iso()
                 profile["next_sync_at"] = now if normalized_options["auto_sync"] else None
-                profile["next_history_sync_at"] = (
-                    now if normalized_options["auto_sync"] and normalized_options["trakt_sync_watched_history"] else None
-                )
-                profile["next_resume_sync_at"] = (
-                    now if normalized_options["auto_sync"] and normalized_options["trakt_sync_resume_progress"] else None
-                )
+                profile["next_history_sync_at"] = None
+                profile["next_resume_sync_at"] = None
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 
@@ -757,14 +728,6 @@ class ProfileStore:
                 next_sync_at = parse_iso_datetime(profile.get("next_sync_at"))
                 if next_sync_at is None or next_sync_at <= now:
                     due_modes["lists"] = True
-                if options.get("trakt_sync_watched_history"):
-                    next_history_sync_at = parse_iso_datetime(profile.get("next_history_sync_at"))
-                    if next_history_sync_at is None or next_history_sync_at <= now:
-                        due_modes["history"] = True
-                if options.get("trakt_sync_resume_progress"):
-                    next_resume_sync_at = parse_iso_datetime(profile.get("next_resume_sync_at"))
-                    if next_resume_sync_at is None or next_resume_sync_at <= now:
-                        due_modes["resume"] = True
                 if not any(due_modes.values()):
                     continue
                 now_iso = utc_now_iso()

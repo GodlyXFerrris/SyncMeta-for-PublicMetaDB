@@ -250,6 +250,23 @@ class ProfileStoreTests(unittest.TestCase):
         })
         self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], [])
 
+    def test_activity_sync_is_manual_only_even_when_enabled(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "trakt_sync_watched_history": True,
+            "trakt_sync_resume_progress": True,
+        })
+
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+        due_profiles = self.store.claim_due_profiles()
+
+        self.assertIsNone(loaded["next_history_sync_at"])
+        self.assertIsNone(loaded["next_resume_sync_at"])
+        self.assertEqual(len(due_profiles), 1)
+        self.assertTrue(due_profiles[0]["pending_sync_modes"]["lists"])
+        self.assertFalse(due_profiles[0]["pending_sync_modes"]["history"])
+        self.assertFalse(due_profiles[0]["pending_sync_modes"]["resume"])
+
 
 if __name__ == "__main__":
     unittest.main()

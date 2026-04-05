@@ -27,6 +27,7 @@ class StubPMDBClient:
         self.deleted_watched: list[str] = []
         self.created_lists: list[dict] = []
         self.watched: list[dict] = []
+        self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
 
     def get_or_create_list(self, name: str, description: str, is_public: bool = False) -> dict:
@@ -74,7 +75,7 @@ class StubPMDBClient:
         return {"success": True, "item": item}
 
     def get_resume_points(self) -> list[dict]:
-        return []
+        return list(self.resume_points)
 
     def save_resume_points_batch(self, items: list[dict]) -> dict:
         self.resume_batches.append(list(items))
@@ -344,7 +345,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_added, 0)
         self.assertEqual(watched_stats.items_skipped_duplicate, 2)
 
-    def test_trakt_watched_history_can_match_full_watch_counts(self) -> None:
+    def test_trakt_watched_history_does_not_add_repeat_watches_for_same_title(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="",
@@ -358,7 +359,6 @@ class SyncServiceTests(unittest.TestCase):
                 dry_run=False,
                 media_types=["shows", "movies"],
                 trakt_sync_watched_history=True,
-                trakt_sync_full_watch_counts=True,
             ),
         )
         config.trakt.client_id = "trakt-client"
@@ -368,51 +368,6 @@ class SyncServiceTests(unittest.TestCase):
 
         service = SyncService(config)
         pmdb = StubPMDBClient()
-        pmdb.watched = [
-            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
-        ]
-        service._trakt = StubRepeatedWatchTraktClient()
-        service._matcher = StubMatcher()
-        service._pmdb = pmdb
-
-        results = service.run()
-
-        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
-
-        self.assertEqual(watched_stats.items_fetched, 2)
-        self.assertEqual(watched_stats.items_resolved, 2)
-        self.assertEqual(watched_stats.items_added, 1)
-        self.assertEqual(watched_stats.items_skipped_duplicate, 1)
-
-    def test_trakt_watched_history_can_reconcile_extra_pmdb_watches(self) -> None:
-        config = AppConfig(
-            simkl=SimklConfig(
-                client_id="",
-                access_token="",
-                selected_statuses={"shows": [], "movies": [], "anime": []},
-            ),
-            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
-            sync=SyncConfig(
-                remove_missing=False,
-                delete_disabled_lists=False,
-                dry_run=False,
-                media_types=["shows", "movies"],
-                trakt_sync_watched_history=True,
-                trakt_reconcile_watched_history=True,
-            ),
-        )
-        config.trakt.client_id = "trakt-client"
-        config.trakt.client_secret = "trakt-secret"
-        config.trakt.access_token = "trakt-token"
-        config.trakt.enabled = True
-
-        service = SyncService(config)
-        pmdb = StubPMDBClient()
-        pmdb.watched = [
-            {"id": "w1", "tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-30T12:00:00Z"},
-            {"id": "w2", "tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
-            {"id": "w3", "tmdb_id": 999, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
-        ]
         service._trakt = StubTraktClient()
         service._matcher = StubMatcher()
         service._pmdb = pmdb
@@ -421,9 +376,51 @@ class SyncServiceTests(unittest.TestCase):
 
         watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
 
-        self.assertEqual(watched_stats.items_added, 1)
-        self.assertEqual(watched_stats.items_removed, 2)
-        self.assertEqual(pmdb.deleted_watched, ["w2", "w3"])
+        self.assertEqual(watched_stats.items_added, 2)
+        self.assertEqual(watched_stats.items_removed, 0)
+        self.assertEqual(pmdb.deleted_watched, [])
+
+    def test_trakt_resume_progress_skips_unchanged_existing_points(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_resume_progress=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.resume_points = [
+            {"tmdb_id": 903, "media_type": "movie", "position_ms": 1_800_000, "runtime_ms": 3_600_000},
+            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "position_ms": 3_000_000, "runtime_ms": 3_600_000},
+        ]
+        service._trakt = StubTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        resume_stats = next(item for item in results if item.display_name == "Trakt Resume Progress")
+
+        self.assertEqual(resume_stats.items_fetched, 2)
+        self.assertEqual(resume_stats.items_resolved, 2)
+        self.assertEqual(resume_stats.items_added, 0)
+        self.assertEqual(resume_stats.items_removed, 0)
+        self.assertEqual(resume_stats.items_skipped_duplicate, 2)
+        self.assertEqual(pmdb.resume_batches, [])
 
 
 if __name__ == "__main__":
