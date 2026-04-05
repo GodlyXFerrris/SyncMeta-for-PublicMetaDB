@@ -3,6 +3,7 @@
 import logging
 import time
 import webbrowser
+from urllib.parse import quote
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -18,6 +19,20 @@ SIMKL_STATUS_PLAN_TO_WATCH = "plantowatch"
 SIMKL_STATUS_COMPLETED = "completed"
 SIMKL_STATUS_ON_HOLD = "hold"
 SIMKL_STATUS_DROPPED = "dropped"
+
+SIMKL_API_STATUS_MAP = {
+    SIMKL_STATUS_WATCHING: "watching",
+    SIMKL_STATUS_PLAN_TO_WATCH: "plan to watch",
+    SIMKL_STATUS_COMPLETED: "completed",
+    SIMKL_STATUS_ON_HOLD: "on hold",
+    SIMKL_STATUS_DROPPED: "dropped",
+}
+
+SIMKL_API_TYPE_MAP = {
+    "shows": "tv",
+    "movies": "movie",
+    "anime": "anime",
+}
 
 
 class SimklClient:
@@ -117,15 +132,16 @@ class SimklClient:
 
     def _fetch_list(self, status: str, media_types: list[str] | None = None) -> dict[str, list[dict]]:
         """Fetch and normalize items for a given status, grouped by SIMKL media type."""
-        raw = self._get(f"/sync/all-items//{status}")
-        if not raw:
-            logger.info("No items found for status '%s'", status)
-            return {}
-
         grouped: dict[str, list[dict]] = {}
         types_to_process = media_types or ["shows", "movies", "anime"]
+        api_status = self._api_status(status)
 
         for media_type in types_to_process:
+            api_type = self._api_type(media_type)
+            raw = self._get(f"/sync/all-items/{api_type}/{quote(api_status, safe='')}")
+            if not raw:
+                logger.info("No items found for status '%s' and type '%s'", status, media_type)
+                continue
             raw_items = raw.get(media_type, [])
             items = []
             for entry in raw_items:
@@ -138,6 +154,16 @@ class SimklClient:
         total = sum(len(v) for v in grouped.values())
         logger.info("Fetched %d items for status '%s' across %s", total, status, list(grouped.keys()))
         return grouped
+
+    @staticmethod
+    def _api_status(status: str) -> str:
+        return SIMKL_API_STATUS_MAP.get(status, status.replace("_", " "))
+
+    @staticmethod
+    def _api_type(media_type: str) -> str:
+        if media_type not in SIMKL_API_TYPE_MAP:
+            raise ValueError(f"Unsupported SIMKL media type: {media_type}")
+        return SIMKL_API_TYPE_MAP[media_type]
 
     def _normalize_item(self, entry: dict, media_type: str) -> dict | None:
         """Normalize a SIMKL list entry to a common format."""
