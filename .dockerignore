@@ -1,0 +1,6 @@
+.env
+.git
+__pycache__
+*.pyc
+sync_state.json
+.venv

@@ -1,0 +1,17 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # One-shot sync (run manually): docker compose run --rm sync
+  sync:
+    build: .
+    command: python main.py sync
+    env_file:
+      - .env
+    profiles:
+      - cli
