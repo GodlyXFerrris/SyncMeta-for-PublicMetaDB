@@ -55,6 +55,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Sync Trakt watched history", html)
+        self.assertIn("Match repeated Trakt watches", html)
         self.assertIn("Sync Trakt resume progress", html)
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)

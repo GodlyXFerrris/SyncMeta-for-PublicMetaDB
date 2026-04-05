@@ -175,11 +175,7 @@ class SyncService:
         self._set_status("Fetching Trakt watched history")
         items = self._trakt.get_watched_history()
         stats.items_fetched = len(items)
-
-        if self._config.sync.dry_run:
-            stats.items_resolved = len(items)
-            stats.items_added = len(items)
-            return stats
+        match_full_counts = self._config.sync.trakt_sync_full_watch_counts
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -187,11 +183,13 @@ class SyncService:
             stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
             return stats
 
-        existing_keys = {
-            self._watched_identity_key(item)
-            for item in existing_items
-            if self._watched_identity_key(item)
-        }
+        existing_counts: dict[str, int] = {}
+        for existing_item in existing_items:
+            key = self._watched_identity_key(existing_item)
+            if key:
+                existing_counts[key] = existing_counts.get(key, 0) + 1
+
+        source_counts: dict[str, int] = {}
 
         for item in items:
             key = self._watched_identity_key(item)
@@ -199,8 +197,15 @@ class SyncService:
                 stats.items_skipped_unresolved += 1
                 continue
             stats.items_resolved += 1
-            if key in existing_keys:
+            source_counts[key] = source_counts.get(key, 0) + 1
+            desired_count = source_counts[key] if match_full_counts else 1
+            current_count = existing_counts.get(key, 0)
+            if current_count >= desired_count:
                 stats.items_skipped_duplicate += 1
+                continue
+            if self._config.sync.dry_run:
+                existing_counts[key] = current_count + 1
+                stats.items_added += 1
                 continue
             try:
                 self._set_status("Writing Trakt watched history to PublicMetaDB")
@@ -210,9 +215,9 @@ class SyncService:
                     season=item.get("season"),
                     episode=item.get("episode"),
                     watched_at=item.get("watched_at"),
-                    dedupe=True,
+                    dedupe=not match_full_counts,
                 )
-                existing_keys.add(key)
+                existing_counts[key] = current_count + 1
                 stats.items_added += 1
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")

@@ -77,6 +77,7 @@ class SyncConfig:
     interval_minutes: int = 0
     media_types: list[str] = field(default_factory=lambda: ["shows", "movies", "anime"])
     trakt_sync_watched_history: bool = False
+    trakt_sync_full_watch_counts: bool = False
     trakt_sync_resume_progress: bool = False
     simkl_visibility: str = "private"
     anilist_visibility: str = "private"
@@ -140,6 +141,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.delete_disabled_lists = os.getenv("SYNC_DELETE_DISABLED_LISTS", "false").lower() == "true"
     cfg.sync.dry_run = os.getenv("SYNC_DRY_RUN", "false").lower() == "true"
     cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
+    cfg.sync.trakt_sync_full_watch_counts = os.getenv("TRAKT_SYNC_FULL_WATCH_COUNTS", "false").lower() == "true"
     cfg.sync.trakt_sync_resume_progress = os.getenv("TRAKT_SYNC_RESUME_PROGRESS", "false").lower() == "true"
 
     interval = os.getenv("SYNC_INTERVAL_MINUTES", "0")
@@ -221,6 +223,8 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.dry_run = sync["dry_run"]
     if "trakt_sync_watched_history" in sync and not os.getenv("TRAKT_SYNC_WATCHED_HISTORY"):
         cfg.sync.trakt_sync_watched_history = bool(sync["trakt_sync_watched_history"])
+    if "trakt_sync_full_watch_counts" in sync and not os.getenv("TRAKT_SYNC_FULL_WATCH_COUNTS"):
+        cfg.sync.trakt_sync_full_watch_counts = bool(sync["trakt_sync_full_watch_counts"])
     if "trakt_sync_resume_progress" in sync and not os.getenv("TRAKT_SYNC_RESUME_PROGRESS"):
         cfg.sync.trakt_sync_resume_progress = bool(sync["trakt_sync_resume_progress"])
     if "interval_minutes" in sync and not os.getenv("SYNC_INTERVAL_MINUTES"):

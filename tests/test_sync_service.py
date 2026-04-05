@@ -114,6 +114,14 @@ class StubTraktClient:
         ]
 
 
+class StubRepeatedWatchTraktClient(StubTraktClient):
+    def get_watched_history(self) -> list[dict]:
+        return [
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-02T12:00:00Z", "title": "Watched Movie"},
+        ]
+
+
 class StubMdbListClient:
     def get_list_items(self, list_id: int) -> list[dict]:
         return [{"title": f"MDB-{list_id}", "media_type": "movie"}]
@@ -322,6 +330,46 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_resolved, 2)
         self.assertEqual(watched_stats.items_added, 0)
         self.assertEqual(watched_stats.items_skipped_duplicate, 2)
+
+    def test_trakt_watched_history_can_match_full_watch_counts(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+                trakt_sync_full_watch_counts=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.watched = [
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-03-31T12:00:00Z"},
+        ]
+        service._trakt = StubRepeatedWatchTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 2)
+        self.assertEqual(watched_stats.items_resolved, 2)
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertEqual(watched_stats.items_skipped_duplicate, 1)
 
 
 if __name__ == "__main__":
