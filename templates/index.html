@@ -400,12 +400,18 @@
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
     const TRAKT_DEVICE_KEY = 'trakt_device_state';
-    const DEFAULT_SIMKL_STATUSES = {
+    const LINKED_SIMKL_STATUSES = {
       shows: ['watching', 'plantowatch'],
       movies: ['plantowatch'],
       anime: ['watching', 'plantowatch'],
     };
-    const DEFAULT_ANILIST_STATUSES = ['CURRENT', 'PLANNING'];
+    const DEFAULT_SIMKL_STATUSES = {
+      shows: [],
+      movies: [],
+      anime: [],
+    };
+    const LINKED_ANILIST_STATUSES = ['CURRENT', 'PLANNING'];
+    const DEFAULT_ANILIST_STATUSES = [];
     const SIMKL_STATUS_OPTIONS = {
       movies: [
         { value: 'plantowatch', label: 'Plan to Watch' },
@@ -448,6 +454,8 @@
     let traktDevicePoller = null;
     let simklSelectedStatuses = cloneSimklStatuses(DEFAULT_SIMKL_STATUSES);
     let anilistSelectedStatuses = DEFAULT_ANILIST_STATUSES.slice();
+    let simklWasLinked = false;
+    let anilistWasLinked = false;
     let traktCatalogTab = 'default';
     let traktLikedLists = [];
     let traktDiscoverLists = [];
@@ -559,6 +567,33 @@
       const allowed = ANILIST_STATUS_OPTIONS.map(option => option.value);
       const raw = Array.isArray(value) ? value : DEFAULT_ANILIST_STATUSES;
       return raw.filter((status, index) => allowed.includes(status) && raw.indexOf(status) === index);
+    }
+
+    function hasAnySimklStatuses(value) {
+      return Object.values(cloneSimklStatuses(value)).some(items => items.length);
+    }
+
+    function isSimklLinked() {
+      return !!(el('simkl-client-id').value.trim() && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved'));
+    }
+
+    function isAniListLinked() {
+      return !!el('anilist-username').value.trim();
+    }
+
+    function ensureLinkedSourceDefaults(forceInitial) {
+      const simklLinked = isSimklLinked();
+      const anilistLinked = isAniListLinked();
+
+      if (simklLinked && !hasAnySimklStatuses(simklSelectedStatuses) && (forceInitial || !simklWasLinked)) {
+        simklSelectedStatuses = cloneSimklStatuses(LINKED_SIMKL_STATUSES);
+      }
+      if (anilistLinked && !anilistSelectedStatuses.length && (forceInitial || !anilistWasLinked)) {
+        anilistSelectedStatuses = LINKED_ANILIST_STATUSES.slice();
+      }
+
+      simklWasLinked = simklLinked;
+      anilistWasLinked = anilistLinked;
     }
 
     function normalizeTraktSelectedLists(items) {
@@ -774,6 +809,7 @@
       el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
       el('opt-trakt-public-visibility').value = options.trakt_public_visibility || 'public';
       el('opt-mdblist-visibility').value = options.mdblist_visibility || 'public';
+      ensureLinkedSourceDefaults(true);
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
@@ -796,6 +832,7 @@
     }
 
     function updateDots() {
+      ensureLinkedSourceDefaults(false);
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
       setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && simklHasStatuses));

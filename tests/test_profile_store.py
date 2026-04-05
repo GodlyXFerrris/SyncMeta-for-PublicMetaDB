@@ -206,6 +206,28 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(private_loaded["credentials"]["mdblist"]["api_key"], "mdbl-key")
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
 
+    def test_empty_source_statuses_stay_empty_until_user_selects_them(self) -> None:
+        created = self.store.create_profile("secret", {
+            **self.credentials,
+            "simkl": {
+                **self.credentials["simkl"],
+                "selected_statuses": {},
+            },
+            "anilist": {
+                **self.credentials["anilist"],
+                "selected_statuses": [],
+            },
+        }, self.options)
+
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+
+        self.assertEqual(loaded["credentials"]["simkl"]["selected_statuses"], {
+            "shows": [],
+            "movies": [],
+            "anime": [],
+        })
+        self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

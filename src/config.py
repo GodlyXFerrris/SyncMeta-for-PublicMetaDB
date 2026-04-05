@@ -6,13 +6,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-SIMKL_DEFAULT_SELECTED_STATUSES = {
+SIMKL_LINKED_SELECTED_STATUSES = {
     "shows": ["watching", "plantowatch"],
     "movies": ["plantowatch"],
     "anime": ["watching", "plantowatch"],
 }
 
-ANILIST_DEFAULT_SELECTED_STATUSES = ["CURRENT", "PLANNING"]
+SIMKL_DEFAULT_SELECTED_STATUSES = {
+    "shows": [],
+    "movies": [],
+    "anime": [],
+}
+
+ANILIST_LINKED_SELECTED_STATUSES = ["CURRENT", "PLANNING"]
+ANILIST_DEFAULT_SELECTED_STATUSES = []
 
 
 @dataclass
