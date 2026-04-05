@@ -169,6 +169,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["status"], "approved")
         self.assertEqual(data["refresh_token"], "refresh")
 
+    @patch("web.TraktClient.poll_device_token")
+    def test_trakt_device_check_pending_is_not_reported_as_error(self, mock_poll_device_token) -> None:
+        mock_poll_device_token.return_value = {
+            "error": "authorization_pending",
+            "error_description": "User has not finished authorizing yet.",
+        }
+
+        response = self.client.post("/api/trakt/device/check", json={
+            "client_id": "client",
+            "client_secret": "secret",
+            "device_code": "device",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["status"], "pending")
+        self.assertTrue(data["message"])
+
     @patch("web.TraktClient.get_liked_lists_metadata")
     def test_trakt_catalogs_liked_lists(self, mock_get_liked_lists_metadata) -> None:
         mock_get_liked_lists_metadata.return_value = [{

@@ -774,6 +774,26 @@ def api_trakt_device_check():
         client = TraktClient(TraktConfig(client_id=client_id, client_secret=client_secret))
         data = client.poll_device_token(device_code) or {}
     except Exception as exc:
+        response = getattr(exc, "response", None)
+        payload = {}
+        if response is not None and getattr(response, "text", ""):
+            try:
+                payload = response.json() or {}
+            except ValueError:
+                payload = {}
+
+        error_code = str(payload.get("error", "")).strip().lower()
+        if error_code in {"authorization_pending", "slow_down"}:
+            return jsonify({
+                "status": "pending",
+                "message": payload.get("error_description") or payload.get("message") or payload.get("error") or "",
+            })
+        if error_code in {"expired_token", "access_denied"}:
+            return jsonify({
+                "status": "failed",
+                "message": payload.get("error_description") or payload.get("message") or payload.get("error") or "",
+            }), 400
+
         logger.exception("Failed to check Trakt device auth")
         return _json_error(f"Failed to check Trakt auth: {exc}", 400)
 
