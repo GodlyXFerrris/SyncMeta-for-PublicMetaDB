@@ -209,8 +209,7 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        since_cursor = self._config.sync.simkl_history_cursor or None
-        items = self._simkl.get_watched_history(since=since_cursor)
+        items = self._simkl.get_watched_history()
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -218,17 +217,10 @@ class SyncService:
             stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
             return stats
 
-        full_refetch = False
-        if since_cursor and not existing_items and not items:
-            logger.info("PublicMetaDB watched history is empty; retrying full SIMKL watched history without cursor")
-            items = self._simkl.get_watched_history()
-            full_refetch = True
-
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
         stats.items_fetched = len(items)
-        stats.history_cursor = self._latest_history_cursor(items, "" if full_refetch else self._config.sync.simkl_history_cursor)
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -375,8 +367,7 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        since_cursor = self._config.sync.trakt_history_cursor or None
-        items = self._trakt.get_watched_history(since=since_cursor)
+        items = self._trakt.get_watched_history()
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -384,14 +375,7 @@ class SyncService:
             stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
             return stats
 
-        full_refetch = False
-        if since_cursor and not existing_items and not items:
-            logger.info("PublicMetaDB watched history is empty; retrying full Trakt watched history without cursor")
-            items = self._trakt.get_watched_history()
-            full_refetch = True
-
         stats.items_fetched = len(items)
-        stats.history_cursor = self._latest_history_cursor(items, "" if full_refetch else self._config.sync.trakt_history_cursor)
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
