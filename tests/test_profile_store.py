@@ -338,6 +338,26 @@ class ProfileStoreTests(unittest.TestCase):
             "Trakt Resume Progress",
         )
 
+    def test_history_sync_persists_latest_source_cursor(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "activity_history_source": "simkl",
+        })
+
+        self.store.claim_profile_for_sync(created["profile_id"], "secret", sync_modes={"lists": False, "history": True, "resume": False})
+        updated = self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "",
+            "display_name": "SIMKL Watch History",
+            "source_name": "SIMKL",
+            "items_fetched": 5,
+            "history_cursor": "2026-04-05T12:00:00Z",
+        }], dry_run=False, sync_modes={"lists": False, "history": True, "resume": False})
+
+        private_loaded = self.store.get_private_profile_by_id(created["profile_id"])
+
+        self.assertEqual(updated["activity_results"]["watch_history"]["row"]["history_cursor"], "2026-04-05T12:00:00Z")
+        self.assertEqual(private_loaded["activity_state"]["simkl_history_cursor"], "2026-04-05T12:00:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()

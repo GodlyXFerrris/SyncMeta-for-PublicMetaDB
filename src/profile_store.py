@@ -66,6 +66,18 @@ def _normalize_activity_results(raw_results: dict | None) -> dict:
     return normalized
 
 
+def _normalize_activity_state(raw_state: dict | None) -> dict:
+    if not isinstance(raw_state, dict):
+        return {
+            "simkl_history_cursor": "",
+            "trakt_history_cursor": "",
+        }
+    return {
+        "simkl_history_cursor": str(raw_state.get("simkl_history_cursor", "") or "").strip(),
+        "trakt_history_cursor": str(raw_state.get("trakt_history_cursor", "") or "").strip(),
+    }
+
+
 class CredentialCipher:
     """Encrypts stored source credentials with a Fernet key."""
 
@@ -506,6 +518,7 @@ class ProfileStore:
             "last_resume_sync": raw_profile.get("last_resume_sync"),
             "next_resume_sync_at": None,
             "activity_results": _normalize_activity_results(raw_profile.get("activity_results")),
+            "activity_state": _normalize_activity_state(raw_profile.get("activity_state")),
             "managed_lists": _normalize_managed_lists(raw_profile.get("managed_lists", [])),
         }
 
@@ -542,6 +555,7 @@ class ProfileStore:
             "last_resume_sync": profile.get("last_resume_sync"),
             "next_resume_sync_at": profile.get("next_resume_sync_at"),
             "activity_results": copy.deepcopy(profile.get("activity_results", {})),
+            "activity_state": copy.deepcopy(profile.get("activity_state", {})),
             "managed_lists": copy.deepcopy(profile.get("managed_lists", [])),
         }
 
@@ -589,6 +603,7 @@ class ProfileStore:
     @staticmethod
     def _merge_activity_results(profile: dict, results: list[dict], timestamp: str) -> None:
         merged = copy.deepcopy(profile.get("activity_results", {}))
+        state = _normalize_activity_state(profile.get("activity_state"))
         for row in results:
             key = ACTIVITY_RESULT_NAMES.get(str(row.get("display_name", "")).strip())
             if not key:
@@ -597,7 +612,16 @@ class ProfileStore:
                 "timestamp": timestamp,
                 "row": copy.deepcopy(row),
             }
+            if key == "watch_history":
+                source_name = str(row.get("source_name", "")).strip().lower()
+                history_cursor = str(row.get("history_cursor", "") or "").strip()
+                if history_cursor:
+                    if "simkl" in source_name:
+                        state["simkl_history_cursor"] = history_cursor
+                    if "trakt" in source_name:
+                        state["trakt_history_cursor"] = history_cursor
         profile["activity_results"] = merged
+        profile["activity_state"] = state
 
     def _public_profile(self, profile: dict, include_credentials: bool = False) -> dict:
         result = {
@@ -619,6 +643,7 @@ class ProfileStore:
             "last_resume_sync": profile.get("last_resume_sync"),
             "next_resume_sync_at": profile.get("next_resume_sync_at"),
             "activity_results": copy.deepcopy(profile.get("activity_results", {})),
+            "activity_state": copy.deepcopy(profile.get("activity_state", {})),
             "options": copy.deepcopy(profile.get("options", {})),
         }
         if include_credentials:
@@ -655,6 +680,7 @@ class ProfileStore:
             "last_resume_sync": None,
             "next_resume_sync_at": None,
             "activity_results": {},
+            "activity_state": _normalize_activity_state(None),
             "managed_lists": [],
         }
 

@@ -66,6 +66,7 @@ class SyncStats:
     items_skipped_duplicate: int = 0
     items_skipped_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
+    history_cursor: str = ""
 
 
 class SyncService:
@@ -208,8 +209,9 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        items = self._simkl.get_watched_history()
+        items = self._simkl.get_watched_history(since=self._config.sync.simkl_history_cursor or None)
         stats.items_fetched = len(items)
+        stats.history_cursor = self._latest_history_cursor(items, self._config.sync.simkl_history_cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -225,6 +227,7 @@ class SyncService:
 
         for item in items:
             self._check_cancelled()
+            item = self._resolve_activity_item(item)
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -266,6 +269,7 @@ class SyncService:
         normalized_items: list[dict] = []
         for item in items:
             self._check_cancelled()
+            item = self._resolve_activity_item(item)
             key = self._resume_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -342,8 +346,9 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        items = self._trakt.get_watched_history()
+        items = self._trakt.get_watched_history(since=self._config.sync.trakt_history_cursor or None)
         stats.items_fetched = len(items)
+        stats.history_cursor = self._latest_history_cursor(items, self._config.sync.trakt_history_cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -359,6 +364,7 @@ class SyncService:
 
         for item in items:
             self._check_cancelled()
+            item = self._resolve_activity_item(item)
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -400,6 +406,7 @@ class SyncService:
         normalized_items: list[dict] = []
         for item in items:
             self._check_cancelled()
+            item = self._resolve_activity_item(item)
             key = self._resume_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -805,6 +812,9 @@ class SyncService:
             tmdb_id = item["resolved_tmdb_id"]
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
+            if key in desired_keys:
+                stats.items_skipped_duplicate += 1
+                continue
             desired_keys.add(key)
 
             if key in existing_map:
@@ -814,6 +824,10 @@ class SyncService:
             try:
                 self._set_status(f"Adding items to {actual_list_name}")
                 self._pmdb.add_item_to_list(list_id, tmdb_id, media_type)
+                existing_map[key] = {
+                    "tmdb_id": tmdb_id,
+                    "media_type": media_type,
+                }
                 stats.items_added += 1
             except Exception as exc:
                 message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"
@@ -936,6 +950,17 @@ class SyncService:
             and int(existing.get("runtime_ms", 0) or 0) == int(payload.get("runtime_ms", 0) or 0)
         )
 
+    def _resolve_activity_item(self, item: dict) -> dict:
+        if item.get("tmdb_id"):
+            return item
+        tmdb_id = self._matcher.resolve_tmdb_id(item)
+        if tmdb_id is None:
+            return item
+        return {
+            **item,
+            "tmdb_id": tmdb_id,
+        }
+
     @staticmethod
     def _chunked(items: list[dict], size: int) -> list[list[dict]]:
         return [items[index:index + size] for index in range(0, len(items), size)]
@@ -966,6 +991,8 @@ class SyncService:
             aggregate.items_skipped_duplicate += row.items_skipped_duplicate
             aggregate.items_skipped_unresolved += row.items_skipped_unresolved
             aggregate.errors.extend(list(row.errors))
+            if row.history_cursor:
+                aggregate.history_cursor = row.history_cursor
 
             existing_sources = {part.strip() for part in aggregate.source_name.split("+") if part.strip()}
             if row.source_name:
@@ -973,6 +1000,15 @@ class SyncService:
             aggregate.source_name = " + ".join(sorted(existing_sources))
 
         return [grouped[key] for key in ("watch_history", "resume_progress") if key in grouped]
+
+    @staticmethod
+    def _latest_history_cursor(items: list[dict], existing_cursor: str = "") -> str:
+        latest = str(existing_cursor or "").strip()
+        for item in items or []:
+            watched_at = str(item.get("watched_at", "") or "").strip()
+            if watched_at and (not latest or watched_at > latest):
+                latest = watched_at
+        return latest
 
     @staticmethod
     def _normalize_sync_modes(sync_modes: dict | None, config: AppConfig | None = None) -> dict[str, bool]:

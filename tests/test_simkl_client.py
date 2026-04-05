@@ -8,9 +8,11 @@ class RecordingSimklClient(SimklClient):
     def __init__(self) -> None:
         super().__init__(SimklConfig(client_id="client", access_token="token"))
         self.paths: list[str] = []
+        self.requests: list[tuple[str, dict | None]] = []
 
     def _get(self, path: str, params: dict | None = None) -> dict | list | None:
         self.paths.append(path)
+        self.requests.append((path, params))
         if path == "/sync/all-items/tv/watching":
             return {
                 "shows": [
@@ -216,6 +218,18 @@ class SimklClientTests(unittest.TestCase):
         self.assertTrue(any(
             item["tmdb_id"] == 7003 and item["media_type"] == "tv" and item["season"] == 1 and item["episode"] == 3 and item["watched_at"] == "2026-04-03T12:00:00Z" and item["title"] == "Completed Anime"
             for item in history
+        ))
+
+    def test_get_watched_history_since_filters_older_entries_and_passes_date_from(self) -> None:
+        client = RecordingSimklClient()
+
+        history = client.get_watched_history(since="2026-04-02T12:30:00Z")
+
+        self.assertEqual(len(history), 2)
+        self.assertTrue(all(item["watched_at"] > "2026-04-02T12:30:00Z" for item in history))
+        self.assertTrue(any(
+            params and params.get("date_from") == "2026-04-02T12:30:00Z"
+            for _, params in client.requests
         ))
 
     def test_get_playback_progress_parses_movie_and_episode(self) -> None:

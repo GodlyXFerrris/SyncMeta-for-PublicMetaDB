@@ -91,6 +91,28 @@ class TraktClientTests(unittest.TestCase):
         self.assertEqual(item["media_type"], "movie")
         self.assertEqual(item["watched_at"], "2026-04-01T12:00:00.000Z")
 
+    def test_get_watched_history_since_filters_older_entries(self) -> None:
+        class RecordingTraktClient(TraktClient):
+            def __init__(self) -> None:
+                super().__init__(TraktConfig())
+
+            def _get_paginated_history(self, path: str, normalizer) -> list[dict]:
+                if "movies" in path:
+                    return [
+                        {"tmdb_id": 1, "media_type": "movie", "watched_at": "2026-04-01T12:00:00.000Z", "title": "Old Movie"},
+                        {"tmdb_id": 2, "media_type": "movie", "watched_at": "2026-04-03T12:00:00.000Z", "title": "New Movie"},
+                    ]
+                return [
+                    {"tmdb_id": 3, "media_type": "tv", "season": 1, "episode": 1, "watched_at": "2026-04-04T12:00:00.000Z", "title": "New Episode"},
+                ]
+
+        client = RecordingTraktClient()
+
+        history = client.get_watched_history(since="2026-04-02T00:00:00.000Z")
+
+        self.assertEqual(len(history), 2)
+        self.assertEqual({item["tmdb_id"] for item in history}, {2, 3})
+
     def test_normalize_episode_playback_entry(self) -> None:
         client = TraktClient(TraktConfig())
 

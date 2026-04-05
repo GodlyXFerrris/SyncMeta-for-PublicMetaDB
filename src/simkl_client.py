@@ -3,6 +3,7 @@
 import logging
 import time
 import webbrowser
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
@@ -240,15 +241,17 @@ class SimklClient:
         """Fetch last activity timestamps (used for incremental sync)."""
         return self._get("/sync/activities")
 
-    def get_watched_history(self) -> list[dict]:
+    def get_watched_history(self, since: str | None = None) -> list[dict]:
         """Fetch SIMKL completed history as watched-once records."""
         history: list[dict] = []
-        movie_history = self._get_completed_movie_history()
-        show_history = self._get_show_history("shows")
-        anime_history = self._get_show_history("anime")
+        movie_history = self._get_completed_movie_history(since=since)
+        show_history = self._get_show_history("shows", since=since)
+        anime_history = self._get_show_history("anime", since=since)
         history.extend(movie_history)
         history.extend(show_history)
         history.extend(anime_history)
+        if since:
+            history = [item for item in history if self._is_history_after(item, since)]
         deduped = self._dedupe_watched_history(history)
         logger.info(
             "SIMKL watched history summary: movies=%d shows=%d anime=%d total=%d deduped=%d",
@@ -280,8 +283,11 @@ class SimklClient:
                 entries.append(normalized)
         return entries
 
-    def _get_completed_movie_history(self) -> list[dict]:
-        raw = self._get("/sync/all-items/movie/completed", params={"extended": "full"})
+    def _get_completed_movie_history(self, since: str | None = None) -> list[dict]:
+        params = {"extended": "full"}
+        if since:
+            params["date_from"] = since
+        raw = self._get("/sync/all-items/movie/completed", params=params)
         items = raw.get("movies", []) if isinstance(raw, dict) else []
         history: list[dict] = []
         for entry in items:
@@ -306,17 +312,20 @@ class SimklClient:
             })
         return history
 
-    def _get_show_history(self, media_key: str) -> list[dict]:
+    def _get_show_history(self, media_key: str, since: str | None = None) -> list[dict]:
         history: list[dict] = []
         for status in SIMKL_HISTORY_STATUS_SCAN_ORDER:
-            history.extend(self._get_show_history_for_status(media_key, status))
+            history.extend(self._get_show_history_for_status(media_key, status, since=since))
         return history
 
-    def _get_show_history_for_status(self, media_key: str, status: str) -> list[dict]:
+    def _get_show_history_for_status(self, media_key: str, status: str, since: str | None = None) -> list[dict]:
         api_type = self._api_type(media_key)
+        params = {"extended": "full", "episode_watched_at": "yes"}
+        if since:
+            params["date_from"] = since
         raw = self._get(
             f"/sync/all-items/{api_type}/{quote(self._api_status(status), safe='')}",
-            params={"extended": "full", "episode_watched_at": "yes"},
+            params=params,
         )
         items = []
         if isinstance(raw, list):
@@ -498,6 +507,32 @@ class SimklClient:
             seen.add(key)
             deduped.append(item)
         return deduped
+
+    @staticmethod
+    def _parse_history_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        candidate = str(value).strip()
+        if not candidate:
+            return None
+        try:
+            if candidate.endswith("Z"):
+                candidate = candidate[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _is_history_after(self, item: dict, since: str) -> bool:
+        watched_at = self._parse_history_datetime(item.get("watched_at"))
+        since_dt = self._parse_history_datetime(since)
+        if since_dt is None:
+            return True
+        if watched_at is None:
+            return False
+        return watched_at > since_dt
 
     @staticmethod
     def _describe_history_entry(entry: dict) -> dict:

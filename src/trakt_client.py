@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -176,10 +177,12 @@ class TraktClient:
                 items.append(normalized)
         return items
 
-    def get_watched_history(self) -> list[dict]:
+    def get_watched_history(self, since: str | None = None) -> list[dict]:
         history: list[dict] = []
         history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry))
         history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry))
+        if since:
+            history = [item for item in history if self._is_history_after(item, since)]
         return history
 
     def get_playback_progress(self) -> list[dict]:
@@ -219,6 +222,32 @@ class TraktClient:
                 break
             page += 1
         return items
+
+    @staticmethod
+    def _parse_history_datetime(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        candidate = str(value).strip()
+        if not candidate:
+            return None
+        try:
+            if candidate.endswith("Z"):
+                candidate = candidate[:-1] + "+00:00"
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _is_history_after(self, item: dict, since: str) -> bool:
+        watched_at = self._parse_history_datetime(item.get("watched_at"))
+        since_dt = self._parse_history_datetime(since)
+        if since_dt is None:
+            return True
+        if watched_at is None:
+            return False
+        return watched_at > since_dt
 
     def _normalize_list_metadata(self, entry: dict, source: str) -> dict | None:
         list_data = entry.get("list") if isinstance(entry, dict) and entry.get("list") else entry

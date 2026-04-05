@@ -5,6 +5,9 @@ from src.sync_service import SyncCancelled, SyncService
 
 
 class StubSimklClient:
+    def __init__(self) -> None:
+        self.last_history_since = None
+
     def get_status(self, status_key: str, media_types: list[str]) -> dict[str, list[dict]]:
         if status_key == "watching" and media_types == ["shows"]:
             return {
@@ -15,7 +18,8 @@ class StubSimklClient:
             }
         return {media_type: [] for media_type in media_types}
 
-    def get_watched_history(self) -> list[dict]:
+    def get_watched_history(self, since: str | None = None) -> list[dict]:
+        self.last_history_since = since
         return [
             {"tmdb_id": 801, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "SIMKL Movie"},
             {"tmdb_id": 802, "media_type": "tv", "season": 1, "episode": 3, "watched_at": "2026-04-01T13:00:00Z", "title": "SIMKL Episode"},
@@ -37,6 +41,7 @@ class StubPMDBClient:
         self.deleted_lists: list[str] = []
         self.deleted_watched: list[str] = []
         self.created_lists: list[dict] = []
+        self.added_items: list[dict] = []
         self.watched: list[dict] = []
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
@@ -52,6 +57,11 @@ class StubPMDBClient:
         return []
 
     def add_item_to_list(self, list_id: str, tmdb_id: int, media_type: str) -> None:
+        self.added_items.append({
+            "list_id": list_id,
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+        })
         return None
 
     def delete_list(self, list_id: str) -> bool:
@@ -104,6 +114,9 @@ class StubPMDBClient:
 
 
 class StubTraktClient:
+    def __init__(self) -> None:
+        self.last_history_since = None
+
     def get_watchlist(self) -> list[dict]:
         return [
             {"title": "Watchlist Movie", "media_type": "movie"},
@@ -119,7 +132,8 @@ class StubTraktClient:
     def get_liked_lists(self) -> list[dict]:
         return []
 
-    def get_watched_history(self) -> list[dict]:
+    def get_watched_history(self, since: str | None = None) -> list[dict]:
+        self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
             {"tmdb_id": 902, "media_type": "tv", "season": 1, "episode": 2, "watched_at": "2026-04-01T13:00:00Z", "title": "Watched Episode"},
@@ -133,7 +147,8 @@ class StubTraktClient:
 
 
 class StubRepeatedWatchTraktClient(StubTraktClient):
-    def get_watched_history(self) -> list[dict]:
+    def get_watched_history(self, since: str | None = None) -> list[dict]:
+        self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-02T12:00:00Z", "title": "Watched Movie"},
@@ -143,6 +158,18 @@ class StubRepeatedWatchTraktClient(StubTraktClient):
 class StubMdbListClient:
     def get_list_items(self, list_id: int) -> list[dict]:
         return [{"title": f"MDB-{list_id}", "media_type": "movie"}]
+
+
+class StubActivityMatcher:
+    def resolve_tmdb_id(self, item: dict) -> int | None:
+        title = item.get("title")
+        if title == "Fallback Show Episode":
+            return 811
+        if title == "Fallback Anime Episode":
+            return 812
+        if title == "Fallback Resume Show":
+            return 813
+        return item.get("tmdb_id")
 
 
 class SyncServiceTests(unittest.TestCase):
@@ -327,6 +354,50 @@ class SyncServiceTests(unittest.TestCase):
             ["Trending Movies", "Trending Movies (MDBList)", "Watchlist - Movies"],
         )
 
+    def test_duplicate_source_rows_only_add_one_pmdb_item(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={
+                    "shows": ["watching"],
+                    "movies": [],
+                    "anime": [],
+                },
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows"],
+            ),
+        )
+
+        class DuplicateSimklClient(StubSimklClient):
+            def get_status(self, status_key: str, media_types: list[str]) -> dict[str, list[dict]]:
+                if status_key == "watching" and media_types == ["shows"]:
+                    return {
+                        "shows": [
+                            {"title": "Duplicate Show", "media_type": "tv"},
+                            {"title": "Duplicate Show", "media_type": "tv"},
+                            {"title": "Duplicate Show", "media_type": "tv"},
+                        ],
+                    }
+                return {}
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = DuplicateSimklClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        self.assertEqual(len(pmdb.added_items), 1)
+        self.assertEqual(results[0].items_added, 1)
+        self.assertEqual(results[0].items_skipped_duplicate, 2)
+
     def test_syncs_trakt_watched_history_and_resume_when_enabled(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
@@ -367,6 +438,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(resume_stats.items_removed, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
+        self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
 
     def test_syncs_simkl_watched_history_and_resume_when_enabled(self) -> None:
         config = AppConfig(
@@ -400,9 +472,107 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(watched_stats.source_name, "SIMKL")
+        self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
         self.assertEqual(resume_stats.items_fetched, 1)
         self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
+
+    def test_history_sync_passes_existing_source_cursor_to_clients(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                simkl_sync_watched_history=True,
+                trakt_sync_watched_history=True,
+                simkl_history_cursor="2026-04-01T00:00:00Z",
+                trakt_history_cursor="2026-04-02T00:00:00Z",
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        simkl = StubSimklClient()
+        trakt = StubTraktClient()
+        service._simkl = simkl
+        service._trakt = trakt
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        service.run()
+
+        self.assertEqual(simkl.last_history_since, "2026-04-01T00:00:00Z")
+        self.assertEqual(trakt.last_history_since, "2026-04-02T00:00:00Z")
+
+    def test_simkl_activity_resolves_show_and_anime_without_direct_tmdb_ids(self) -> None:
+        class NoTmdbSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [
+                    {"media_type": "tv", "season": 1, "episode": 2, "title": "Fallback Show Episode", "tvdb_id": "991"},
+                    {"media_type": "tv", "season": 1, "episode": 3, "title": "Fallback Anime Episode", "anilist_id": "992"},
+                ]
+
+            def get_playback_progress(self) -> list[dict]:
+                return [
+                    {
+                        "media_type": "tv",
+                        "season": 2,
+                        "episode": 4,
+                        "position_ms": 900_000,
+                        "runtime_ms": 2_700_000,
+                        "progress": 33.3,
+                        "title": "Fallback Resume Show",
+                        "tvdb_id": "993",
+                    },
+                ]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "anime"],
+                simkl_sync_watched_history=True,
+                simkl_sync_resume_progress=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = NoTmdbSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
+
+        self.assertEqual(watched_stats.items_added, 2)
+        self.assertEqual(
+            {(item["tmdb_id"], item["season"], item["episode"]) for item in pmdb.watched},
+            {(811, 1, 2), (812, 1, 3)},
+        )
+        self.assertEqual(resume_stats.items_added, 1)
+        self.assertEqual(pmdb.resume_batches[0][0]["tmdb_id"], 813)
 
     def test_history_only_mode_does_not_run_list_syncs(self) -> None:
         config = AppConfig(
