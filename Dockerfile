@@ -10,5 +10,4 @@ COPY . .
 EXPOSE 8080
 
 # Default: run the web dashboard with gunicorn
-# Override CMD to run CLI instead: docker run ... python main.py sync
 CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "web:app"]

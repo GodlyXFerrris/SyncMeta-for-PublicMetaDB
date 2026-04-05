@@ -246,7 +246,7 @@ def validate_config(cfg: AppConfig, sources: list[str] | None = None) -> list[st
         if not cfg.simkl.client_id:
             errors.append("SIMKL_CLIENT_ID is required")
         if not cfg.simkl.access_token:
-            errors.append("SIMKL_ACCESS_TOKEN is required (run `python main.py auth` to authenticate)")
+            errors.append("SIMKL_ACCESS_TOKEN is required (use the web UI PIN auth flow to authenticate)")
         if not any(cfg.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"]):
             errors.append("Select at least one SIMKL status to sync")
 

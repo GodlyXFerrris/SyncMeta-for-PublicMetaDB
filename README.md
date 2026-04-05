@@ -1,24 +1,21 @@
 # SyncMeta: Multi-Source Sync for PublicMetaDB
 
-SyncMeta is a self-hostable sync dashboard for keeping selected SIMKL, AniList, Trakt, and MDBList lists mirrored into PublicMetaDB without rebuilding them by hand.
+SyncMeta is a self-hostable web dashboard for mirroring selected SIMKL, AniList, Trakt, and MDBList lists into PublicMetaDB.
 
-It gives each user a persistent profile, lets them choose exactly which statuses or catalogs should sync, and keeps those selections updated in PublicMetaDB with background jobs, dry runs, inline delete controls, and source-based visibility settings.
+It is now a web-first, Docker-first project. Users create persistent profiles, choose exactly what should sync, and let the server keep those selections updated in the background.
 
 ## Features
 
-- Multi-source sync: Pull from SIMKL, AniList, Trakt, and MDBList, then push into PublicMetaDB.
-- Fine-grained source selection: Choose SIMKL statuses per media type, AniList list states, specific Trakt catalogs including public lists, and selected MDBList account catalogs.
-- Background automation: Save a profile once and let the server keep it updated on a schedule, with a minimum interval of 300 seconds.
-- Multi-user profiles: Each user gets a UUID-backed profile with its own credentials, selections, sync history, and schedule.
-- Secure hosted mode: Passwords are hashed, saved credentials are encrypted at rest, browsers use server-side sessions, and login attempts are throttled.
-- Optional site-wide access gate: Set a shared site password if you want the whole instance behind a single private entry screen.
-- Built-in auth helpers: SIMKL PIN auth and Trakt device auth can be started directly from the Settings page.
-- Trakt activity sync: Optionally import Trakt watched history and continue-watching resume points into PublicMetaDB.
-- Source visibility controls: Set SIMKL, AniList, Trakt personal, Trakt public, and MDBList syncs to private or public based on the type of list.
-- Safe sync controls: Use dry runs, remove items missing from source lists, delete SyncMeta-managed PublicMetaDB lists when they are deselected, and delete user records from the dashboard when you want to wipe a profile.
-- Fast source cleanup: `Select All` and `Deselect All` are built into the Trakt and MDBList pickers.
-- Inline list management: Delete a synced list from the dashboard with an in-app `Delete -> Confirm / Cancel` flow that also clears the matching saved source selection so it will not be re-added on the next sync.
-- Docker-first deployment: Run the web dashboard with Docker Compose, or use the CLI for one-off sync jobs.
+- Multi-source sync from SIMKL, AniList, Trakt, and MDBList into PublicMetaDB
+- Per-source selection for SIMKL statuses, AniList states, Trakt catalogs, and MDBList lists
+- Background sync with saved profiles and a minimum interval of 300 seconds
+- Source visibility controls for private/public PublicMetaDB output
+- Trakt watched history sync
+- Trakt resume / continue-watching sync
+- Inline dashboard delete flow that also clears the matching saved source selection
+- `Select All` and `Deselect All` for Trakt and MDBList pickers
+- Server-side sessions, hashed passwords, encrypted saved credentials, and login throttling
+- Optional site-wide access password
 
 ## Supported Sources
 
@@ -35,34 +32,33 @@ It gives each user a persistent profile, lets them choose exactly which statuses
 ### AniList
 
 - Anime lists
-- Username-based public sync
-- Optional access token for private lists
-- List selection:
-  - All
-  - Watching
-  - Completed
-  - Paused
-  - Dropped
-  - Planning
+- Public sync by username
+- Optional token for private lists
+- Watching
+- Completed
+- Paused
+- Dropped
+- Planning
 
 ### Trakt
 
-- Watchlist catalogs
+- Watchlist
 - Default personal catalogs
 - Liked lists
-- Selected public lists from Discover
-- Device auth flow in the web UI
+- Public Discover lists
+- Device auth in the web UI
 - Optional watched history import
-- Optional resume / continue-watching sync
+- Optional resume/progress sync
 
 ### MDBList
 
-- Your MDBList account lists and curated catalog selections
+- Selected MDBList account lists
 - Per-list selection in the web UI
 
 ### Destination
 
-- PublicMetaDB lists with per-source visibility controls
+- PublicMetaDB lists
+- Per-source private/public visibility controls
 
 ## What SyncMeta Creates
 
@@ -73,64 +69,35 @@ SyncMeta creates clean PublicMetaDB list names without source prefixes. Examples
 - `Planning - Anime`
 - `Watchlist - Movies`
 - `Watchlist - Series`
-- `Popular Movies`
-- `Custom Trakt List Name`
-- `MDBList List Name`
+- `Recommended Movies`
+- `Popular Netflix Movies`
 
-## How Matching Works
-
-Items are resolved to TMDB IDs in this order:
-
-1. Direct TMDB ID
-2. IMDb
-3. MyAnimeList
-4. AniList
-5. AniDB
-6. TVDB
-7. Root-series MAL or AniList fallback for anime sequels
-
-That fallback helps map later anime seasons back to the main series when needed.
-
-## Installation
-
-### 1. Hosted Instance
-
-If you are using a hosted SyncMeta instance:
-
-1. Open the web dashboard.
-2. Create a new profile or sign in with an existing UUID and password.
-3. Connect the services you want to use.
-4. Pick your SIMKL, AniList, Trakt, and MDBList lists or statuses.
-5. Save the profile.
-6. Let the background scheduler keep it updated.
-
-### 2. Self-Hosting (Docker Compose)
+## Docker Quick Start
 
 Requirements:
 
 - Docker Engine or Docker Desktop
 - Docker Compose support
 
-The repo already includes a working `docker-compose.yml`. The quickest start is:
+Start the app:
 
 ```bash
 docker compose up -d --build web
 ```
 
-Open the dashboard at:
+Open:
 
 - `http://127.0.0.1:8080`
 
-The included Docker setup:
+The included Compose setup:
 
 - builds from the local `Dockerfile`
-- serves the Flask dashboard through Gunicorn
+- serves the Flask app through Gunicorn
 - exposes port `8080`
-- runs with one web worker, which matches the built-in background scheduler model
-- persists app data in `./data` by default so profiles survive rebuilds and updates
-- does not require a `.env` file for normal web use
+- keeps profile data in `./data`
+- uses one web worker, which matches the in-process scheduler design
 
-The current Compose file already mounts persistent storage for safe updates:
+Current `docker-compose.yml`:
 
 ```yaml
 services:
@@ -147,55 +114,46 @@ services:
       - ./data:/app/data
 ```
 
-That means normal updates like this keep user data:
+Stop it:
+
+```bash
+docker compose down
+```
+
+## Safe Updates
+
+Normal rebuilds keep user data as long as these stay intact:
+
+- `./data/profiles.json`
+- `./data/profiles.key` if you are not using `SYNCMETA_MASTER_KEY`
+
+Safe update flow:
 
 ```bash
 docker compose pull
 docker compose up -d --build web
 ```
 
-Your profiles stay intact as long as these are preserved:
+If you want the most reliable setup across fresh hosts or re-deploys, set a fixed `SYNCMETA_MASTER_KEY`.
 
-- `./data/profiles.json`
-- `./data/profiles.key` if you are not using `SYNCMETA_MASTER_KEY`
+## Optional `.env`
 
-If you want the most reliable setup across servers or fresh deploys, set a fixed `SYNCMETA_MASTER_KEY` in your environment. Then SyncMeta can still decrypt saved credentials even if the container is rebuilt elsewhere.
+You do not need a `.env` file for normal use if users enter everything in the dashboard.
 
-Then run:
+Use `.env` only for deployment overrides like:
 
-```bash
-docker compose up -d --build web
-```
+- `SITE_ACCESS_PASSWORD`
+- `SYNCMETA_MASTER_KEY`
+- session / throttle tuning
+- optional server-side source prefills
 
-Stop it with:
-
-```bash
-docker compose down
-```
-
-### 3. Optional `.env` Overrides
-
-You do not need a `.env` file for the normal web dashboard flow if users enter their credentials in the UI.
-
-Create `.env` only if you want:
-
-- CLI defaults
-- Docker overrides
-- a fixed encryption key
-- deployment-specific settings
+Start from:
 
 ```bash
 cp .env.example .env
 ```
 
-Important production note:
-
-- `PROFILE_STORE_FILE` controls where profiles are stored
-- `SYNCMETA_MASTER_KEY` lets you provide your own encryption key
-- if you do not set `SYNCMETA_MASTER_KEY`, SyncMeta creates a key file beside the profile store, usually `profiles.key`
-- `SITE_ACCESS_PASSWORD` enables the optional shared site access gate
-
-### 4. Local Python Run
+## Local Python Run
 
 If you want to run the web app without Docker:
 
@@ -208,158 +166,37 @@ Default address:
 
 - `http://127.0.0.1:8080`
 
-## Web Dashboard
-
-SyncMeta is designed around persistent per-user profiles.
+## Web Workflow
 
 Each profile has:
 
-- a generated UUID
-- a password chosen by the user
-- encrypted stored credentials
-- selected source lists and statuses
+- a UUID
+- a password
+- encrypted saved credentials
+- source selections
 - latest sync results
 - sync history
-- automatic background scheduling
+- background scheduling
 
 Security behavior:
 
 - passwords are hashed before storage
-- saved source credentials are encrypted at rest
-- saved secrets are not returned to the browser after login
-- the browser uses a server-side session after login instead of storing the password locally
-- login attempts are throttled
+- source credentials are encrypted at rest
+- saved secrets are not returned to the browser as raw values
+- browsers use server-side sessions after login
+- login and site-access attempts are throttled
 
-Secret fields are overwrite-only. If a field says `Stored securely for this profile`, leaving it blank keeps the current stored secret.
+Secret fields are overwrite-only. If a field says `Stored securely for this profile`, leaving it blank keeps the existing saved secret.
 
-The dashboard also lets users:
+## Source Setup Notes
 
-- delete a synced PublicMetaDB list inline
-- clear the matching saved SyncMeta selection at the same time
-- bulk select or deselect Trakt and MDBList sources
+- SIMKL app setup may ask for a redirect URL, but SyncMeta uses PIN auth in the web UI.
+- Trakt app setup may ask for a redirect URL, but SyncMeta uses device auth in the web UI.
+- AniList only needs a token for private lists.
+- MDBList uses an API key from your MDBList account.
+- PublicMetaDB needs your API key from [publicmetadb.com/api-docs](https://publicmetadb.com/api-docs).
 
-## Docker Notes
-
-The default profile store path is:
-
-- `data/profiles.json`
-
-When credential encryption is enabled, SyncMeta also needs either:
-
-- `SYNCMETA_MASTER_KEY` from the environment
-- or the generated key file stored beside the profile store
-
-With the default layout, that means persisting both:
-
-- `data/profiles.json`
-- `data/profiles.key`
-
-## Updating Safely
-
-If you update SyncMeta with Docker, you should not lose data as long as the `data` folder stays mounted and the encryption key source stays the same.
-
-Safe update flow:
-
-```bash
-docker compose up -d --build web
-```
-
-If you use a remote registry image later, this also works:
-
-```bash
-docker compose pull
-docker compose up -d web
-```
-
-Avoid changing both of these at the same time unless you know what you are doing:
-
-- the mounted `data` folder
-- the `SYNCMETA_MASTER_KEY` or generated `profiles.key`
-
-If `profiles.json` survives but the key changes, SyncMeta may no longer be able to decrypt saved credentials.
-
-Automatic background syncing works in Docker because the scheduler runs inside the web process.
-
-Because the scheduler is in-process, the current Docker setup intentionally uses a single Gunicorn worker.
-
-## CLI
-
-The CLI is still available for one-off jobs, debugging, or scheduled shell-based syncs.
-
-### Authenticate with SIMKL
-
-```bash
-python main.py auth
-```
-
-### One-time sync
-
-```bash
-python main.py sync
-```
-
-### Dry run
-
-```bash
-python main.py sync --dry-run
-```
-
-### Remove items missing from the source
-
-```bash
-python main.py sync --remove-missing
-```
-
-### Continuous CLI sync every 30 minutes
-
-```bash
-python main.py sync --interval 30
-```
-
-### Verbose logging
-
-```bash
-python main.py -v sync
-```
-
-### Use a JSON config file
-
-```bash
-python main.py -c config.json sync
-```
-
-### Docker CLI service
-
-The repo also includes a one-shot CLI service:
-
-```bash
-docker compose run --rm sync
-```
-
-That runs:
-
-```bash
-python main.py sync
-```
-
-This path usually does need environment variables, because it runs the CLI directly instead of using a saved web profile.
-
-## Configuration
-
-### Source Setup
-
-- SIMKL: Create an app at [simkl.com/settings/developer](https://simkl.com/settings/developer/)
-- PublicMetaDB: Create an API key at [publicmetadb.com/api-docs](https://publicmetadb.com/api-docs)
-- AniList: Username is enough for public lists; token is only needed for private lists
-- Trakt: Create an app in Trakt's API settings, then use the built-in device auth helper
-- MDBList: Generate an API key from your MDBList account
-
-Notes:
-
-- SIMKL app setup may ask for a redirect URL, but SyncMeta uses PIN auth in the UI.
-- Trakt app setup may ask for a redirect URL, but SyncMeta uses device auth in the UI.
-
-### Sync Options
+## Sync Options
 
 - Automatic background sync
 - Update interval in seconds, minimum `300`
@@ -368,17 +205,15 @@ Notes:
 - Sync Trakt watched history
 - Sync Trakt resume progress
 - Per-source private/public visibility controls
-- Dry run before a real sync if you want to preview changes
+- Dry runs
 
 ## API Endpoints
 
-Main dashboard and API routes:
-
-- `/` - web dashboard
-- `/api/profile/login` - sign in with profile UUID and password
-- `/api/profile/logout` - clear the current session
+- `/` - dashboard
+- `/api/profile/login` - sign in with UUID and password
+- `/api/profile/logout` - clear the active session
 - `/api/profile/save` - create or update a profile
-- `/api/profile/status` - load the current profile and dashboard state
+- `/api/profile/status` - get current profile/dashboard state
 - `/api/profile/sync` - trigger a sync or dry run
 - `/api/profile/list/delete` - delete a synced PublicMetaDB list and clear the matching selection
 - `/api/simkl/pin/start` - start SIMKL PIN auth
@@ -386,59 +221,46 @@ Main dashboard and API routes:
 - `/api/trakt/device/start` - start Trakt device auth
 - `/api/trakt/device/check` - poll Trakt device auth
 - `/api/trakt/catalogs` - load liked or discovered Trakt lists
-- `/api/mdblist/lists` - load MDBList account lists
+- `/api/mdblist/lists` - load MDBList lists
 
 ## Environment Variables
 
-These matter mainly for CLI use, Docker overrides, and production hosting.
+These are mainly useful for Docker deployment and optional server defaults.
 
-### Source credentials
+### Core app settings
 
-| Variable | Required | Description |
-|---|---|---|
-| `SIMKL_CLIENT_ID` | CLI: Yes | SIMKL app client ID |
-| `SIMKL_CLIENT_SECRET` | No | SIMKL app client secret |
-| `SIMKL_ACCESS_TOKEN` | CLI: Yes | SIMKL access token from `python main.py auth` |
-| `ANILIST_USERNAME` | No | AniList username |
-| `ANILIST_ACCESS_TOKEN` | No | Needed only for private AniList lists |
-| `TRAKT_CLIENT_ID` | No | Trakt app client ID |
-| `TRAKT_CLIENT_SECRET` | No | Used for Trakt device auth |
-| `TRAKT_ACCESS_TOKEN` | No | Trakt access token |
-| `TRAKT_REFRESH_TOKEN` | No | Trakt refresh token |
-| `TRAKT_SYNC_WATCHED_HISTORY` | No | Enable Trakt watched history sync for CLI/config-driven runs |
-| `TRAKT_SYNC_RESUME_PROGRESS` | No | Enable Trakt resume-progress sync for CLI/config-driven runs |
-| `MDBLIST_API_KEY` | No | MDBList API key |
-| `PMDB_API_KEY` | CLI: Yes | PublicMetaDB API key |
+| Variable | Description |
+|---|---|
+| `PROFILE_STORE_FILE` | Path to the JSON profile store |
+| `SYNCMETA_MASTER_KEY` | Optional Fernet key for encrypted saved credentials |
+| `SYNCMETA_MASTER_KEY_FILE` | Optional key-file path if you do not want the default |
+| `SITE_ACCESS_PASSWORD` | Shared password that gates the whole site |
+| `DISABLE_PROFILE_SCHEDULER` | Set to `1` to disable background scheduling |
+| `SYNCMETA_SESSION_TTL_SECONDS` | Session lifetime for signed-in browsers |
+| `SYNCMETA_LOGIN_MAX_ATTEMPTS` | Max login attempts inside the throttle window |
+| `SYNCMETA_LOGIN_WINDOW_SECONDS` | Login throttle window |
+| `SYNCMETA_ACCESS_MAX_ATTEMPTS` | Max site-access attempts inside the throttle window |
+| `SYNCMETA_ACCESS_WINDOW_SECONDS` | Site-access throttle window |
 
-### Sync options
+### Optional source defaults
 
-| Variable | Required | Description |
-|---|---|---|
-| `SYNC_REMOVE_MISSING` | No | Remove stale items from PublicMetaDB lists |
-| `SYNC_DELETE_DISABLED_LISTS` | No | Delete SyncMeta-managed lists that are no longer selected |
-| `SYNC_DRY_RUN` | No | Preview changes without writing |
-| `SYNC_INTERVAL_MINUTES` | No | CLI repeat interval in minutes |
-| `SYNC_MEDIA_TYPES` | No | Comma-separated media types such as `shows,movies,anime` |
-
-### Web app options
-
-| Variable | Required | Description |
-|---|---|---|
-| `PROFILE_STORE_FILE` | No | Path to the JSON profile store |
-| `DISABLE_PROFILE_SCHEDULER` | No | Set to `1` to disable background scheduling |
-| `SYNCMETA_MASTER_KEY` | No | Optional Fernet key for encrypting stored credentials |
-| `SYNCMETA_MASTER_KEY_FILE` | No | Optional path to the encryption key file |
-| `SYNCMETA_SESSION_TTL_SECONDS` | No | Session lifetime for signed-in browsers |
-| `SYNCMETA_LOGIN_MAX_ATTEMPTS` | No | Max login attempts per client inside the throttle window |
-| `SYNCMETA_LOGIN_WINDOW_SECONDS` | No | Throttle window for login attempts |
-| `SITE_ACCESS_PASSWORD` | No | Shared password that gates the whole site before the app loads |
-| `SYNCMETA_ACCESS_MAX_ATTEMPTS` | No | Max site-access password attempts per client inside the throttle window |
-| `SYNCMETA_ACCESS_WINDOW_SECONDS` | No | Throttle window for site-access password attempts |
+| Variable | Description |
+|---|---|
+| `SIMKL_CLIENT_ID` | Optional SIMKL client ID default |
+| `SIMKL_CLIENT_SECRET` | Optional SIMKL client secret default |
+| `SIMKL_ACCESS_TOKEN` | Optional SIMKL token default |
+| `ANILIST_USERNAME` | Optional AniList username default |
+| `ANILIST_ACCESS_TOKEN` | Optional AniList token default |
+| `TRAKT_CLIENT_ID` | Optional Trakt client ID default |
+| `TRAKT_CLIENT_SECRET` | Optional Trakt client secret default |
+| `TRAKT_ACCESS_TOKEN` | Optional Trakt access token default |
+| `TRAKT_REFRESH_TOKEN` | Optional Trakt refresh token default |
+| `MDBLIST_API_KEY` | Optional MDBList API key default |
+| `PMDB_API_KEY` | Optional PublicMetaDB API key default |
 
 ## Project Structure
 
 ```text
-main.py
 web.py
 src/
   anilist_client.py
@@ -470,7 +292,7 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Run the test suite:
+Run tests:
 
 ```bash
 python -m unittest discover -v
@@ -480,14 +302,14 @@ Notes:
 
 - PublicMetaDB requests use retry logic and rate limiting
 - dry runs are recorded in history but do not advance the automatic schedule
-- the scheduler checks for due profiles in the web process and starts sync jobs in background threads
-- deleting a synced list from the dashboard also clears the matching saved source selection when it can be mapped back to the source profile data
+- the scheduler runs in the web process and starts sync jobs in background threads
+- deleting a synced list from the dashboard also clears the matching saved source selection when it can be mapped back to the saved profile data
 
 ## Current Limits
 
 - Automatic syncing depends on the web process staying alive
 - The scheduler is designed around a single active web worker
-- A VPS admin can still theoretically extract secrets from a live server, even though SyncMeta now hides them from the browser and encrypts them at rest
+- A VPS admin can still theoretically extract secrets from a live server, even though SyncMeta hides them from the browser and encrypts them at rest
 
 ## License
 
