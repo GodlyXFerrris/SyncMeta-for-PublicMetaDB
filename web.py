@@ -11,7 +11,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, make_response, render_template, request
+from flask import Flask, jsonify, make_response, redirect, render_template, request, url_for
 
 from src.config import (
     AniListConfig,
@@ -44,15 +44,19 @@ PROFILE_STORE_FILE = Path(
 )
 SCHEDULER_POLL_SECONDS = 5
 SESSION_COOKIE_NAME = "syncmeta_session"
+ACCESS_COOKIE_NAME = "syncmeta_site_access"
 SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))
 LOGIN_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_LOGIN_MAX_ATTEMPTS", "10"))
 LOGIN_WINDOW_SECONDS = int(os.getenv("SYNCMETA_LOGIN_WINDOW_SECONDS", "900"))
+SITE_ACCESS_PASSWORD = os.getenv("SITE_ACCESS_PASSWORD", "").strip()
+ACCESS_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_ACCESS_MAX_ATTEMPTS", "10"))
+ACCESS_WINDOW_SECONDS = int(os.getenv("SYNCMETA_ACCESS_WINDOW_SECONDS", "900"))
 LEGAL_CONTEXT = {
-    "operator_name": os.getenv("LEGAL_NAME", "Please set LEGAL_NAME before public launch"),
-    "operator_address": os.getenv("LEGAL_ADDRESS", "Please set LEGAL_ADDRESS before public launch"),
-    "operator_email": os.getenv("LEGAL_EMAIL", "Please set LEGAL_EMAIL before public launch"),
+    "operator_name": os.getenv("LEGAL_NAME", "Justin Tasler"),
+    "operator_address": os.getenv("LEGAL_ADDRESS", "Saarstrasse 46\n03046 Cottbus"),
+    "operator_email": os.getenv("LEGAL_EMAIL", "justin.tasler@gmail.com"),
     "operator_phone": os.getenv("LEGAL_PHONE", ""),
-    "responsible_person": os.getenv("LEGAL_RESPONSIBLE_PERSON", ""),
+    "responsible_person": os.getenv("LEGAL_RESPONSIBLE_PERSON", "Justin Tasler"),
     "vat_id": os.getenv("LEGAL_VAT_ID", ""),
     "court_register": os.getenv("LEGAL_COURT_REGISTER", ""),
     "base_url": os.getenv("PUBLIC_BASE_URL", "").strip() or "your public SyncMeta URL",
@@ -139,6 +143,8 @@ class LoginAttemptLimiter:
 
 _session_store = ServerSessionStore()
 _login_limiter = LoginAttemptLimiter()
+_access_store = ServerSessionStore()
+_access_limiter = LoginAttemptLimiter(max_attempts=ACCESS_MAX_ATTEMPTS, window_seconds=ACCESS_WINDOW_SECONDS)
 
 
 def _stats_to_dict(stats: SyncStats) -> dict:
@@ -257,8 +263,18 @@ def _session_token() -> str | None:
     return request.cookies.get(SESSION_COOKIE_NAME)
 
 
+def _access_token() -> str | None:
+    return request.cookies.get(ACCESS_COOKIE_NAME)
+
+
 def _current_profile_id() -> str | None:
     return _session_store.get_profile_id(_session_token())
+
+
+def _has_site_access() -> bool:
+    if not SITE_ACCESS_PASSWORD:
+        return True
+    return bool(_access_store.get_profile_id(_access_token()))
 
 
 def _current_public_profile(include_credentials: bool = False) -> dict | None:
@@ -300,8 +316,25 @@ def _with_session_cookie(response, session_token: str):
     return response
 
 
+def _with_access_cookie(response, access_token: str):
+    response.set_cookie(
+        ACCESS_COOKIE_NAME,
+        access_token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="Lax",
+        secure=_cookie_secure(),
+    )
+    return response
+
+
 def _clear_session_cookie(response):
     response.delete_cookie(SESSION_COOKIE_NAME, httponly=True, samesite="Lax", secure=_cookie_secure())
+    return response
+
+
+def _clear_access_cookie(response):
+    response.delete_cookie(ACCESS_COOKIE_NAME, httponly=True, samesite="Lax", secure=_cookie_secure())
     return response
 
 
@@ -371,11 +404,48 @@ def _ensure_scheduler_started() -> None:
 @app.before_request
 def _before_request() -> None:
     _ensure_scheduler_started()
+    if not SITE_ACCESS_PASSWORD:
+        return
+    allowed_paths = {"/access"}
+    if request.path in allowed_paths or request.path.startswith("/static/"):
+        return
+    if _has_site_access():
+        return
+    if request.path.startswith("/api/"):
+        return _clear_access_cookie(make_response(jsonify({"error": "Site password required"}), 401))
+    return _clear_access_cookie(make_response(render_template("access.html", error=None), 401))
 
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/access", methods=["GET", "POST"])
+def access():
+    if not SITE_ACCESS_PASSWORD:
+        return redirect(url_for("index"))
+    if _has_site_access():
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        body = request.form if request.form else (request.get_json(silent=True) or {})
+        password = str(body.get("password", "")).strip()
+        client_key = _request_client_key()
+
+        if _access_limiter.is_limited(client_key):
+            error = "Too many access attempts. Please wait and try again."
+        elif password != SITE_ACCESS_PASSWORD:
+            _access_limiter.record_failure(client_key)
+            error = "Wrong site password."
+        else:
+            _access_limiter.clear(client_key)
+            access_token = _access_store.create("site-access")
+            response = redirect(url_for("index"))
+            return _with_access_cookie(response, access_token)
+
+    return render_template("access.html", error=error)
 
 
 @app.route("/impressum")
@@ -386,6 +456,16 @@ def impressum():
 @app.route("/datenschutz")
 def datenschutz():
     return render_template("legal.html", page_title="Datenschutz", legal_type="privacy", legal=LEGAL_CONTEXT)
+
+
+@app.route("/terms")
+def terms():
+    return render_template("legal.html", page_title="Terms of Service", legal_type="terms", legal=LEGAL_CONTEXT)
+
+
+@app.route("/cookie-settings")
+def cookie_settings():
+    return render_template("legal.html", page_title="Cookie Settings", legal_type="cookies", legal=LEGAL_CONTEXT)
 
 
 @app.route("/api/profile/login", methods=["POST"])

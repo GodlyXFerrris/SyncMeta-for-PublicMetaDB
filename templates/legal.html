@@ -46,6 +46,8 @@
         <a href="/">Home</a>
         <a href="/impressum">Impressum</a>
         <a href="/datenschutz">Datenschutz</a>
+        <a href="/terms">Terms</a>
+        <a href="/cookie-settings">Cookie Settings</a>
       </div>
     </div>
   </nav>
@@ -55,9 +57,13 @@
       <h1>{{ page_title }}</h1>
       <p class="lead">
         {% if legal_type == "impressum" %}
-        Angaben gemaess den Anforderungen fuer oeffentlich erreichbare Webseiten. Bitte pruefe die Inhalte fuer deinen konkreten Betrieb.
-        {% else %}
+        Angaben gemaess den Anforderungen fuer oeffentlich erreichbare Webseiten.
+        {% elif legal_type == "privacy" %}
         Uebersicht der Datenverarbeitung fuer diese SyncMeta-Instanz. Bitte pruefe und ergaenze die Angaben fuer deinen konkreten Betrieb.
+        {% elif legal_type == "terms" %}
+        Regeln fuer die Nutzung dieser oeffentlich erreichbaren SyncMeta-Instanz.
+        {% else %}
+        Uebersicht ueber die in dieser Instanz verwendeten Cookies und browserseitigen Speichermechanismen.
         {% endif %}
       </p>
 
@@ -101,7 +107,7 @@
         {% endif %}
       </section>
       {% endif %}
-      {% else %}
+      {% elif legal_type == "privacy" %}
       <section>
         <h2>Verantwortlicher</h2>
         <p>{{ legal.operator_name }}</p>
@@ -139,6 +145,58 @@
         <h2>Rechte</h2>
         <p class="muted">Ergaenze hier die fuer dein Land und deinen Betrieb passenden Hinweise zu Auskunft, Berichtigung, Loeschung, Einschraenkung, Datenuebertragbarkeit und Beschwerderecht.</p>
       </section>
+      {% elif legal_type == "terms" %}
+      <section>
+        <h2>Anbieter</h2>
+        <p>{{ legal.operator_name }}</p>
+        <p style="white-space:pre-line">{{ legal.operator_address }}</p>
+        <p>E-Mail: <a href="mailto:{{ legal.operator_email }}">{{ legal.operator_email }}</a></p>
+      </section>
+
+      <section>
+        <h2>Leistungsbeschreibung</h2>
+        <p>SyncMeta ist eine Konfigurations- und Synchronisierungsoberflaeche fuer persoenliche Listen aus Diensten wie SIMKL, AniList, Trakt und MDBList in Richtung PublicMetaDB.</p>
+      </section>
+
+      <section>
+        <h2>Nutzung</h2>
+        <p>Die Nutzung dieser Instanz erfolgt auf eigene Verantwortung. Nutzer sind dafuer verantwortlich, nur Konten, API-Schluessel und Listen zu verbinden, zu deren Verwendung sie berechtigt sind.</p>
+      </section>
+
+      <section>
+        <h2>Verfuegbarkeit</h2>
+        <p>Es besteht kein Anspruch auf dauerhafte Verfuegbarkeit, fehlerfreie Funktion oder eine bestimmte Synchronisierungsfrequenz. Funktionen koennen jederzeit geaendert, eingeschraenkt oder eingestellt werden.</p>
+      </section>
+
+      <section>
+        <h2>Haftung</h2>
+        <p>Diese Instanz verarbeitet Daten von Drittanbietern. Fuer die Verfuegbarkeit, Richtigkeit oder Vollstaendigkeit externer Dienste und deren Inhalte wird keine Gewaehr uebernommen.</p>
+      </section>
+
+      <section>
+        <h2>Missbrauch</h2>
+        <p>Der Betreiber kann Profile oder Zugriffe sperren oder loeschen, wenn technische Sicherheit, Stabilitaet oder rechtliche Anforderungen dies erforderlich machen.</p>
+      </section>
+      {% else %}
+      <section>
+        <h2>Essenzielle Cookies</h2>
+        <p>SyncMeta verwendet ein serverseitiges Sitzungs-Cookie, damit angemeldete Nutzer zwischen Seitenaufrufen eingeloggt bleiben koennen. Dieses Cookie ist fuer den Betrieb der Anwendung erforderlich.</p>
+      </section>
+
+      <section>
+        <h2>Lokaler Speicher im Browser</h2>
+        <p>Zusätzlich speichert SyncMeta bestimmte nichtkritische Informationen im Browser, zum Beispiel Entwurfsdaten fuer Formulare, den Status von SIMKL- und Trakt-Authentifizierungshilfen sowie, ob der Cookie-Hinweis bereits bestaetigt wurde.</p>
+      </section>
+
+      <section>
+        <h2>Aktuelle Einstellung</h2>
+        <p>Diese Instanz verwendet derzeit nur notwendige Sitzungs- und Speicherfunktionen. Es gibt aktuell keine separaten Analyse- oder Marketing-Cookies, die ueber den Betrieb der Anwendung hinausgehen.</p>
+      </section>
+
+      <section>
+        <h2>Kontakt</h2>
+        <p>Bei Fragen zum Einsatz von Cookies oder browserseitigem Speicher kannst du den Betreiber unter <a href="mailto:{{ legal.operator_email }}">{{ legal.operator_email }}</a> kontaktieren.</p>
+      </section>
       {% endif %}
     </div>
   </main>
@@ -149,6 +207,8 @@
       <div class="footer-links">
         <a href="/impressum">Impressum</a>
         <a href="/datenschutz">Datenschutz</a>
+        <a href="/terms">Terms of Service</a>
+        <a href="/cookie-settings">Cookie Settings</a>
       </div>
     </div>
   </footer>

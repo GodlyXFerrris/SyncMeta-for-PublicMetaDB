@@ -12,12 +12,17 @@ import web  # noqa: E402
 class WebTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
+        self.original_site_access_password = web.SITE_ACCESS_PASSWORD
         web._profile_store = web.ProfileStore(Path(self.tmpdir.name) / "profiles.json")
         web._session_store = web.ServerSessionStore(ttl_seconds=3600)
         web._login_limiter = web.LoginAttemptLimiter(max_attempts=5, window_seconds=60)
+        web._access_store = web.ServerSessionStore(ttl_seconds=3600)
+        web._access_limiter = web.LoginAttemptLimiter(max_attempts=5, window_seconds=60)
+        web.SITE_ACCESS_PASSWORD = ""
         self.client = web.app.test_client()
 
     def tearDown(self) -> None:
+        web.SITE_ACCESS_PASSWORD = self.original_site_access_password
         self.tmpdir.cleanup()
 
     def test_index_contains_new_source_sections(self) -> None:
@@ -44,8 +49,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn('href="/impressum"', html)
         self.assertIn('href="/datenschutz"', html)
-        self.assertIn("SyncMeta uses an essential session cookie", html)
-        self.assertIn("cookie_notice_ack", html)
+        self.assertIn('href="/terms"', html)
+        self.assertIn('href="/cookie-settings"', html)
+        self.assertNotIn("cookie_notice_ack", html)
         self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
         self.assertIn("choose which anime lists should sync into PublicMetaDB", html)
         self.assertNotIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
@@ -56,12 +62,39 @@ class WebTests(unittest.TestCase):
     def test_legal_pages_render(self) -> None:
         impressum = self.client.get("/impressum")
         privacy = self.client.get("/datenschutz")
+        terms = self.client.get("/terms")
+        cookies = self.client.get("/cookie-settings")
 
         self.assertEqual(impressum.status_code, 200)
         self.assertEqual(privacy.status_code, 200)
+        self.assertEqual(terms.status_code, 200)
+        self.assertEqual(cookies.status_code, 200)
         self.assertIn("Impressum", impressum.get_data(as_text=True))
         self.assertIn("Datenschutz", privacy.get_data(as_text=True))
-        self.assertIn("LEGAL_NAME", privacy.get_data(as_text=True))
+        self.assertIn("Justin Tasler", impressum.get_data(as_text=True))
+        self.assertIn("Saarstrasse 46", impressum.get_data(as_text=True))
+        self.assertIn("justin.tasler@gmail.com", privacy.get_data(as_text=True))
+        self.assertIn("Terms of Service", terms.get_data(as_text=True))
+        self.assertIn("Cookie Settings", cookies.get_data(as_text=True))
+
+    def test_site_access_password_gate(self) -> None:
+        web.SITE_ACCESS_PASSWORD = "letmein"
+
+        blocked = self.client.get("/")
+        self.assertEqual(blocked.status_code, 401)
+        self.assertIn("Private Access", blocked.get_data(as_text=True))
+
+        api_blocked = self.client.post("/api/profile/status", json={})
+        self.assertEqual(api_blocked.status_code, 401)
+        self.assertEqual(api_blocked.get_json()["error"], "Site password required")
+
+        wrong = self.client.post("/access", data={"password": "wrong"})
+        self.assertEqual(wrong.status_code, 200)
+        self.assertIn("Wrong site password.", wrong.get_data(as_text=True))
+
+        unlocked = self.client.post("/access", data={"password": "letmein"}, follow_redirects=True)
+        self.assertEqual(unlocked.status_code, 200)
+        self.assertIn("Sync Your Lists.<br>Keep Them Fresh.", unlocked.get_data(as_text=True))
 
     @patch("web.SimklClient.request_pin")
     def test_simkl_pin_start(self, mock_request_pin) -> None:

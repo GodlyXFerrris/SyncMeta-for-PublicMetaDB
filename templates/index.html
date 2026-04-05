@@ -99,13 +99,7 @@
     .footer-links{display:flex;gap:16px;flex-wrap:wrap}
     .footer-links a{font-size:12px;color:var(--z500);text-decoration:none}
     .footer-links a:hover{color:var(--white)}
-    .cookie-banner{position:fixed;left:24px;right:24px;bottom:24px;z-index:90;display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:16px 18px;border-radius:12px;background:rgba(10,10,11,.96);border:1px solid var(--z800);backdrop-filter:blur(18px);box-shadow:0 10px 30px rgba(0,0,0,.35)}
-    .cookie-banner.hidden{display:none}
-    .cookie-copy{font-size:12px;line-height:1.6;color:var(--z400);max-width:760px}
-    .cookie-copy a{color:var(--z300);text-decoration:none}
-    .cookie-copy a:hover{color:var(--white)}
-    .cookie-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
-    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}.cookie-banner{left:12px;right:12px;bottom:12px;flex-direction:column}.cookie-actions{width:100%}.cookie-actions .btn{width:100%;justify-content:center}}
+    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}}
   </style>
 </head>
 <body>
@@ -314,18 +308,11 @@
       <div class="footer-links">
         <a href="/impressum">Impressum</a>
         <a href="/datenschutz">Datenschutz</a>
+        <a href="/terms">Terms of Service</a>
+        <a href="/cookie-settings">Cookie Settings</a>
       </div>
     </div>
   </footer>
-
-  <div class="cookie-banner hidden" id="cookie-banner">
-    <div class="cookie-copy">
-      SyncMeta uses an essential session cookie to keep you signed in and local browser storage for draft settings, auth helper state, and whether you opened the app before. See <a href="/datenschutz">Datenschutz</a>.
-    </div>
-    <div class="cookie-actions">
-      <button class="btn btn-primary btn-sm" type="button" onclick="acceptCookieBanner()">OK</button>
-    </div>
-  </div>
 
   <div class="toast" id="toast"></div>
 
@@ -335,7 +322,6 @@
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
     const TRAKT_DEVICE_KEY = 'trakt_device_state';
-    const COOKIE_BANNER_KEY = 'cookie_notice_ack';
     const DEFAULT_SIMKL_STATUSES = {
       shows: ['watching', 'plantowatch'],
       movies: ['plantowatch'],
@@ -417,19 +403,6 @@
 
     function saveJson(key, value) {
       localStorage.setItem(key, JSON.stringify(value));
-    }
-
-    function hasAcceptedCookieBanner() {
-      return localStorage.getItem(COOKIE_BANNER_KEY) === '1';
-    }
-
-    function acceptCookieBanner() {
-      localStorage.setItem(COOKIE_BANNER_KEY, '1');
-      el('cookie-banner').classList.add('hidden');
-    }
-
-    function renderCookieBanner() {
-      el('cookie-banner').classList.toggle('hidden', hasAcceptedCookieBanner());
     }
 
     function gatherProfileAuth() {
@@ -1825,7 +1798,6 @@
     });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] });
     populateForm(draftCreds, draftOptions, {});
-    renderCookieBanner();
     resumeSimklPinState();
     resumeTraktDeviceState();
 
