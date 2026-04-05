@@ -121,6 +121,10 @@
             <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID</div></div>
             <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
             <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
+            <div class="actions-bar" style="margin-top:0">
+              <button class="btn btn-sm" id="btn-simkl-auth" onclick="startSimklAuth()">Get SIMKL Token</button>
+              <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if you do not have an access token yet.</span>
+            </div>
           </div>
           <div class="form-section">
             <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
@@ -160,7 +164,9 @@
     const OPTIONS_KEY = 'sync_options';
     const PROFILE_AUTH_KEY = 'sync_profile_auth';
     const ENTERED_KEY = 'entered';
+    const SIMKL_PIN_KEY = 'simkl_pin_state';
     let polling = null;
+    let simklPinPoller = null;
 
     function el(id) { return document.getElementById(id); }
 
@@ -191,6 +197,22 @@
 
     function clearProfileAuth() {
       localStorage.removeItem(PROFILE_AUTH_KEY);
+    }
+
+    function loadSimklPinState() {
+      return loadJson(SIMKL_PIN_KEY, null);
+    }
+
+    function saveSimklPinState(state) {
+      saveJson(SIMKL_PIN_KEY, state);
+    }
+
+    function clearSimklPinState() {
+      localStorage.removeItem(SIMKL_PIN_KEY);
+      if (simklPinPoller) {
+        clearTimeout(simklPinPoller);
+        simklPinPoller = null;
+      }
     }
 
     function gatherCreds() {
@@ -250,6 +272,9 @@
       el('opt-movies').checked = mediaTypes.indexOf('movies') !== -1;
       el('opt-anime').checked = mediaTypes.indexOf('anime') !== -1;
       updateDots();
+      if (!loadSimklPinState()) {
+        setSimklAuthStatus(simkl.access_token ? 'SIMKL access token is already set.' : 'Start PIN auth here if you do not have an access token yet.', false);
+      }
     }
 
     function flashSaved() {
@@ -351,6 +376,113 @@
       toast.textContent = message;
       toast.className = 'toast show' + (isError ? ' error' : '') + (isSuccess ? ' success' : '');
       setTimeout(() => { toast.className = 'toast'; }, 3500);
+    }
+
+    function setSimklAuthStatus(message, isError) {
+      const node = el('simkl-auth-status');
+      node.textContent = message;
+      node.style.color = isError ? 'var(--red)' : '';
+    }
+
+    function buildSimklVerifyUrl(baseUrl, userCode) {
+      if (baseUrl && baseUrl.endsWith('/')) return baseUrl + encodeURIComponent(userCode);
+      return baseUrl;
+    }
+
+    async function startSimklAuth() {
+      const clientId = el('simkl-client-id').value.trim();
+      if (!clientId) {
+        showToast('Enter your SIMKL client ID first.', true, false);
+        return;
+      }
+
+      el('btn-simkl-auth').disabled = true;
+      setSimklAuthStatus('Requesting SIMKL PIN...', false);
+
+      try {
+        const result = await apiPost('/api/simkl/pin/start', { client_id: clientId });
+        if (!result.ok) {
+          setSimklAuthStatus(formatApiError(result.data, 'Could not start SIMKL auth.'), true);
+          return;
+        }
+
+        const pin = result.data;
+        const state = {
+          client_id: clientId,
+          user_code: pin.user_code,
+          verification_url: pin.verification_url,
+          interval: pin.interval || 5,
+          expires_at: Date.now() + ((pin.expires_in || 900) * 1000),
+        };
+        saveSimklPinState(state);
+        setSimklAuthStatus(`Approve code ${pin.user_code} on SIMKL. Waiting for confirmation...`, false);
+        window.open(buildSimklVerifyUrl(pin.verification_url, pin.user_code), '_blank', 'noopener');
+        scheduleSimklPinCheck(1000);
+      } catch {
+        setSimklAuthStatus('Network error while starting SIMKL auth.', true);
+      } finally {
+        el('btn-simkl-auth').disabled = false;
+      }
+    }
+
+    function scheduleSimklPinCheck(delayMs) {
+      if (simklPinPoller) clearTimeout(simklPinPoller);
+      simklPinPoller = setTimeout(checkSimklPin, delayMs);
+    }
+
+    async function checkSimklPin() {
+      const state = loadSimklPinState();
+      if (!state) return;
+
+      if (Date.now() >= state.expires_at) {
+        clearSimklPinState();
+        setSimklAuthStatus('SIMKL PIN expired. Start the token flow again.', true);
+        return;
+      }
+
+      try {
+        const result = await apiPost('/api/simkl/pin/check', {
+          client_id: state.client_id,
+          user_code: state.user_code,
+        });
+
+        if (!result.ok) {
+          setSimklAuthStatus(formatApiError(result.data, 'Could not check SIMKL auth.'), true);
+          scheduleSimklPinCheck((state.interval || 5) * 1000);
+          return;
+        }
+
+        if (result.data.status === 'approved' && result.data.access_token) {
+          el('simkl-access-token').value = result.data.access_token;
+          clearSimklPinState();
+          updateDots();
+          saveDraft();
+          setSimklAuthStatus('SIMKL access token received and filled in.', false);
+          showToast('SIMKL token added.', false, true);
+          return;
+        }
+
+        setSimklAuthStatus(`Approve code ${state.user_code} on SIMKL. Waiting for confirmation...`, false);
+        scheduleSimklPinCheck((state.interval || 5) * 1000);
+      } catch {
+        setSimklAuthStatus('Network error while checking SIMKL auth.', true);
+        scheduleSimklPinCheck((state.interval || 5) * 1000);
+      }
+    }
+
+    function resumeSimklPinState() {
+      const state = loadSimklPinState();
+      if (!state) {
+        setSimklAuthStatus('Start PIN auth here if you do not have an access token yet.', false);
+        return;
+      }
+      if (Date.now() >= state.expires_at) {
+        clearSimklPinState();
+        setSimklAuthStatus('SIMKL PIN expired. Start the token flow again.', true);
+        return;
+      }
+      setSimklAuthStatus(`Approve code ${state.user_code} on SIMKL. Waiting for confirmation...`, false);
+      scheduleSimklPinCheck(1000);
     }
 
     function renderEmptyDashboard(message) {
@@ -562,6 +694,7 @@
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] });
     const savedAuth = loadProfileAuth();
     populateForm(draftCreds, draftOptions, savedAuth);
+    resumeSimklPinState();
 
     if (localStorage.getItem(ENTERED_KEY)) enterApp(savedAuth.profile_id ? 'dashboard' : 'settings');
     if (savedAuth.profile_id && savedAuth.password) loadProfile(true).then(() => fetchStatus());

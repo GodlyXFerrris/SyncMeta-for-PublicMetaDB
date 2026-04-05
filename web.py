@@ -20,6 +20,7 @@ from src.config import (
     validate_config,
 )
 from src.profile_store import ProfileStore, normalize_credentials, normalize_profile_options
+from src.simkl_client import SimklClient
 from src.sync_service import SyncService, SyncStats
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -193,6 +194,60 @@ def api_profile_login():
         return _json_error(str(exc), 400)
 
     return _profile_response(profile, include_credentials=True)
+
+
+@app.route("/api/simkl/pin/start", methods=["POST"])
+def api_simkl_pin_start():
+    body = request.get_json(silent=True) or {}
+    client_id = str(body.get("client_id", "")).strip()
+
+    if not client_id:
+        return _json_error("SIMKL client ID is required", 400)
+
+    try:
+        client = SimklClient(SimklConfig(client_id=client_id))
+        pin_data = client.request_pin()
+    except Exception as exc:
+        logger.exception("Failed to start SIMKL PIN auth")
+        return _json_error(f"Failed to start SIMKL auth: {exc}", 400)
+
+    response = {
+        "user_code": pin_data.get("user_code"),
+        "verification_url": pin_data.get("verification_url"),
+        "interval": pin_data.get("interval", 5),
+        "expires_in": pin_data.get("expires_in", 900),
+    }
+    return jsonify(response)
+
+
+@app.route("/api/simkl/pin/check", methods=["POST"])
+def api_simkl_pin_check():
+    body = request.get_json(silent=True) or {}
+    client_id = str(body.get("client_id", "")).strip()
+    user_code = str(body.get("user_code", "")).strip()
+
+    if not client_id:
+        return _json_error("SIMKL client ID is required", 400)
+    if not user_code:
+        return _json_error("SIMKL user code is required", 400)
+
+    try:
+        client = SimklClient(SimklConfig(client_id=client_id))
+        check = client.check_pin(user_code) or {}
+    except Exception as exc:
+        logger.exception("Failed to check SIMKL PIN auth")
+        return _json_error(f"Failed to check SIMKL auth: {exc}", 400)
+
+    if check.get("result") == "OK" and check.get("access_token"):
+        return jsonify({
+            "status": "approved",
+            "access_token": check["access_token"],
+        })
+
+    return jsonify({
+        "status": "pending",
+        "message": check.get("message", ""),
+    })
 
 
 @app.route("/api/profile/save", methods=["POST"])

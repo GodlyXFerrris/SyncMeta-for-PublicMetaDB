@@ -55,14 +55,22 @@ class SimklClient:
 
     # ── Authentication (PIN flow) ──────────────────────────────────
 
-    def authenticate_pin(self) -> str:
-        """Run the SIMKL PIN authentication flow. Returns an access token."""
+    def request_pin(self) -> dict:
+        """Request a SIMKL PIN/device-code payload."""
         data = self._get(f"/oauth/pin?client_id={self._config.client_id}")
         if not data or data.get("result") != "OK":
             raise RuntimeError(f"Failed to request PIN: {data}")
+        return data
+
+    def check_pin(self, user_code: str) -> dict | None:
+        """Check whether a SIMKL PIN has been approved yet."""
+        return self._get(f"/oauth/pin/{user_code}?client_id={self._config.client_id}")
+
+    def authenticate_pin(self) -> str:
+        """Run the SIMKL PIN authentication flow. Returns an access token."""
+        data = self.request_pin()
 
         user_code = data["user_code"]
-        device_code = data["device_code"]
         verification_url = data["verification_url"]
         interval = data.get("interval", 5)
         expires_in = data.get("expires_in", 900)
@@ -78,7 +86,7 @@ class SimklClient:
         deadline = time.time() + expires_in
         while time.time() < deadline:
             time.sleep(interval)
-            check = self._get(f"/oauth/pin/{user_code}?client_id={self._config.client_id}")
+            check = self.check_pin(user_code)
             if check and check.get("result") == "OK":
                 token = check["access_token"]
                 logger.info("Authentication successful")

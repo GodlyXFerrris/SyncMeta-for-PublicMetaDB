@@ -73,6 +73,8 @@ Important:
 
 After that, the server keeps syncing in the background based on that profile.
 
+SIMKL access tokens can be obtained directly inside the Settings page through the built-in PIN auth helper.
+
 ## CLI
 
 The CLI is still available for manual or standalone use.
