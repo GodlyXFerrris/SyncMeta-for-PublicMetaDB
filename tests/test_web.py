@@ -56,6 +56,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Sync Trakt watched history", html)
         self.assertIn("Sync Trakt resume progress", html)
+        self.assertIn("Activity Sync", html)
+        self.assertIn('id="activity-cards"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
         self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
