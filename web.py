@@ -376,6 +376,7 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
             managed_lists=profile.get("managed_lists", []),
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
+            sync_modes=modes,
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]

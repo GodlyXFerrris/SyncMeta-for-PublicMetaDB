@@ -357,6 +357,46 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_removed, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
 
+    def test_history_only_mode_does_not_run_list_syncs(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={
+                    "shows": ["watching"],
+                    "movies": [],
+                    "anime": [],
+                },
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=True,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+        config.trakt.sync_watchlist = True
+
+        service = SyncService(config, sync_modes={"lists": False, "history": True, "resume": False})
+        pmdb = StubPMDBClient()
+        service._simkl = StubSimklClient()
+        service._trakt = StubTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        self.assertEqual([item.display_name for item in results], ["Trakt Watch History"])
+        self.assertEqual(pmdb.created_lists, [])
+        self.assertEqual(pmdb.deleted_lists, [])
+        self.assertEqual(len(pmdb.watched), 2)
+
     def test_trakt_watched_history_skips_already_watched_title_even_with_new_timestamp(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(

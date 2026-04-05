@@ -77,6 +77,7 @@ class SyncService:
         status_callback=None,
         managed_lists: list[dict] | None = None,
         cancel_requested_callback=None,
+        sync_modes: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl)
@@ -87,6 +88,7 @@ class SyncService:
         self._status_callback = status_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
         self._cancel_requested_callback = cancel_requested_callback
+        self._sync_modes = self._normalize_sync_modes(sync_modes, config)
 
     @property
     def simkl(self) -> SimklClient:
@@ -107,19 +109,22 @@ class SyncService:
         )
 
         all_stats: list[SyncStats] = []
-        all_stats.extend(self._sync_simkl())
+        if self._sync_modes["lists"]:
+            all_stats.extend(self._sync_simkl())
 
-        if self._config.anilist.enabled and self._config.anilist.selected_statuses:
-            all_stats.extend(self._sync_anilist())
+            if self._config.anilist.enabled and self._config.anilist.selected_statuses:
+                all_stats.extend(self._sync_anilist())
 
-        if self._config.trakt.enabled:
-            all_stats.extend(self._sync_trakt())
+            if self._config.trakt.enabled:
+                all_stats.extend(self._sync_trakt())
+
+            if self._config.mdblist.enabled:
+                all_stats.extend(self._sync_mdblist())
+
+        if self._config.trakt.enabled and (self._sync_modes["history"] or self._sync_modes["resume"]):
             all_stats.extend(self._sync_trakt_activity())
 
-        if self._config.mdblist.enabled:
-            all_stats.extend(self._sync_mdblist())
-
-        if not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
+        if self._sync_modes["lists"] and not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
             desired_names = {stats.list_name for stats in all_stats if stats.list_name}
             self._delete_disabled_lists(desired_names)
 
@@ -784,6 +789,22 @@ class SyncService:
     @staticmethod
     def _chunked(items: list[dict], size: int) -> list[list[dict]]:
         return [items[index:index + size] for index in range(0, len(items), size)]
+
+    @staticmethod
+    def _normalize_sync_modes(sync_modes: dict | None, config: AppConfig | None = None) -> dict[str, bool]:
+        if sync_modes is None:
+            raw = {
+                "lists": True,
+                "history": bool(config.sync.trakt_sync_watched_history) if config else False,
+                "resume": bool(config.sync.trakt_sync_resume_progress) if config else False,
+            }
+        else:
+            raw = sync_modes
+        return {
+            "lists": bool(raw.get("lists", True)),
+            "history": bool(raw.get("history", False)),
+            "resume": bool(raw.get("resume", False)),
+        }
 
     @staticmethod
     def _normalize_managed_lists(items: list[dict] | None) -> dict[str, dict]:
