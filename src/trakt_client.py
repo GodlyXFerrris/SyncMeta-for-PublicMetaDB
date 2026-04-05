@@ -176,6 +176,50 @@ class TraktClient:
                 items.append(normalized)
         return items
 
+    def get_watched_history(self) -> list[dict]:
+        history: list[dict] = []
+        history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry))
+        history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry))
+        return history
+
+    def get_playback_progress(self) -> list[dict]:
+        progress: list[dict] = []
+        progress.extend(self._get_paginated_playback("/sync/playback/movies", self._normalize_movie_playback_entry))
+        progress.extend(self._get_paginated_playback("/sync/playback/episodes", self._normalize_episode_playback_entry))
+        return progress
+
+    def _get_paginated_history(self, path: str, normalizer) -> list[dict]:
+        items: list[dict] = []
+        page = 1
+        while True:
+            raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
+            if not raw:
+                break
+            for entry in raw:
+                normalized = normalizer(entry)
+                if normalized:
+                    items.append(normalized)
+            if not isinstance(raw, list) or len(raw) < 100:
+                break
+            page += 1
+        return items
+
+    def _get_paginated_playback(self, path: str, normalizer) -> list[dict]:
+        items: list[dict] = []
+        page = 1
+        while True:
+            raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
+            if not raw:
+                break
+            for entry in raw:
+                normalized = normalizer(entry)
+                if normalized:
+                    items.append(normalized)
+            if not isinstance(raw, list) or len(raw) < 100:
+                break
+            page += 1
+        return items
+
     def _normalize_list_metadata(self, entry: dict, source: str) -> dict | None:
         list_data = entry.get("list") if isinstance(entry, dict) and entry.get("list") else entry
         if not isinstance(list_data, dict):
@@ -268,4 +312,92 @@ class TraktClient:
             "ids": ids,
             "status": entry.get("listed_at"),
             "added_at": entry.get("listed_at"),
+        }
+
+    @staticmethod
+    def _normalize_movie_history_entry(entry: dict) -> dict | None:
+        movie = entry.get("movie") if isinstance(entry, dict) else None
+        if not isinstance(movie, dict):
+            return None
+        ids = movie.get("ids", {})
+        tmdb_id = ids.get("tmdb")
+        if not tmdb_id:
+            return None
+        return {
+            "tmdb_id": int(tmdb_id),
+            "media_type": "movie",
+            "watched_at": entry.get("watched_at"),
+            "title": movie.get("title", "Unknown"),
+        }
+
+    @staticmethod
+    def _normalize_episode_history_entry(entry: dict) -> dict | None:
+        show = entry.get("show") if isinstance(entry, dict) else None
+        episode = entry.get("episode") if isinstance(entry, dict) else None
+        if not isinstance(show, dict) or not isinstance(episode, dict):
+            return None
+        show_ids = show.get("ids", {})
+        tmdb_id = show_ids.get("tmdb")
+        season = episode.get("season")
+        number = episode.get("number")
+        if not tmdb_id or season is None or number is None:
+            return None
+        return {
+            "tmdb_id": int(tmdb_id),
+            "media_type": "tv",
+            "season": int(season),
+            "episode": int(number),
+            "watched_at": entry.get("watched_at"),
+            "title": show.get("title", "Unknown"),
+        }
+
+    @staticmethod
+    def _normalize_movie_playback_entry(entry: dict) -> dict | None:
+        movie = entry.get("movie") if isinstance(entry, dict) else None
+        if not isinstance(movie, dict):
+            return None
+        ids = movie.get("ids", {})
+        tmdb_id = ids.get("tmdb")
+        runtime = movie.get("runtime")
+        progress = entry.get("progress")
+        if not tmdb_id or runtime in (None, 0) or progress is None:
+            return None
+        runtime_ms = int(float(runtime) * 60_000)
+        position_ms = int(round(runtime_ms * (float(progress) / 100.0)))
+        return {
+            "tmdb_id": int(tmdb_id),
+            "media_type": "movie",
+            "position_ms": position_ms,
+            "runtime_ms": runtime_ms,
+            "progress": float(progress),
+            "paused_at": entry.get("paused_at"),
+            "title": movie.get("title", "Unknown"),
+        }
+
+    @staticmethod
+    def _normalize_episode_playback_entry(entry: dict) -> dict | None:
+        show = entry.get("show") if isinstance(entry, dict) else None
+        episode = entry.get("episode") if isinstance(entry, dict) else None
+        if not isinstance(show, dict) or not isinstance(episode, dict):
+            return None
+        show_ids = show.get("ids", {})
+        tmdb_id = show_ids.get("tmdb")
+        runtime = episode.get("runtime")
+        progress = entry.get("progress")
+        season = episode.get("season")
+        number = episode.get("number")
+        if not tmdb_id or runtime in (None, 0) or progress is None or season is None or number is None:
+            return None
+        runtime_ms = int(float(runtime) * 60_000)
+        position_ms = int(round(runtime_ms * (float(progress) / 100.0)))
+        return {
+            "tmdb_id": int(tmdb_id),
+            "media_type": "tv",
+            "season": int(season),
+            "episode": int(number),
+            "position_ms": position_ms,
+            "runtime_ms": runtime_ms,
+            "progress": float(progress),
+            "paused_at": entry.get("paused_at"),
+            "title": show.get("title", "Unknown"),
         }

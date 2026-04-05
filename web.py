@@ -201,6 +201,8 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             delete_disabled_lists=options["delete_disabled_lists"],
             dry_run=dry_run,
             media_types=options["media_types"],
+            trakt_sync_watched_history=options["trakt_sync_watched_history"],
+            trakt_sync_resume_progress=options["trakt_sync_resume_progress"],
             simkl_visibility=options["simkl_visibility"],
             anilist_visibility=options["anilist_visibility"],
             trakt_personal_visibility=options["trakt_personal_visibility"],
@@ -226,6 +228,8 @@ def _configured_sources(config: AppConfig) -> list[str]:
             config.trakt.sync_watchlist
             or config.trakt.sync_liked_lists
             or config.trakt.selected_lists
+            or config.sync.trakt_sync_watched_history
+            or config.sync.trakt_sync_resume_progress
         )
     ):
         sources.append("trakt")

@@ -76,6 +76,45 @@ class TraktClientTests(unittest.TestCase):
         self.assertEqual(item["media_type"], "movie")
         self.assertEqual(item["tmdb_id"], "321")
 
+    def test_normalize_movie_history_entry(self) -> None:
+        client = TraktClient(TraktConfig())
+
+        item = client._normalize_movie_history_entry({
+            "watched_at": "2026-04-01T12:00:00.000Z",
+            "movie": {
+                "title": "History Movie",
+                "ids": {"tmdb": 777},
+            },
+        })
+
+        self.assertEqual(item["tmdb_id"], 777)
+        self.assertEqual(item["media_type"], "movie")
+        self.assertEqual(item["watched_at"], "2026-04-01T12:00:00.000Z")
+
+    def test_normalize_episode_playback_entry(self) -> None:
+        client = TraktClient(TraktConfig())
+
+        item = client._normalize_episode_playback_entry({
+            "progress": 50,
+            "paused_at": "2026-04-01T13:00:00.000Z",
+            "show": {
+                "title": "Playback Show",
+                "ids": {"tmdb": 888},
+            },
+            "episode": {
+                "season": 2,
+                "number": 4,
+                "runtime": 48,
+            },
+        })
+
+        self.assertEqual(item["tmdb_id"], 888)
+        self.assertEqual(item["media_type"], "tv")
+        self.assertEqual(item["season"], 2)
+        self.assertEqual(item["episode"], 4)
+        self.assertEqual(item["runtime_ms"], 48 * 60_000)
+        self.assertEqual(item["position_ms"], 24 * 60_000)
+
 
 if __name__ == "__main__":
     unittest.main()

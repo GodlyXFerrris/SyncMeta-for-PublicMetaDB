@@ -361,6 +361,8 @@ def normalize_profile_options(options: dict | None) -> dict:
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
+        "trakt_sync_watched_history": bool(raw.get("trakt_sync_watched_history", False)),
+        "trakt_sync_resume_progress": bool(raw.get("trakt_sync_resume_progress", False)),
         "simkl_visibility": _normalize_visibility(raw.get("simkl_visibility"), "private"),
         "anilist_visibility": _normalize_visibility(raw.get("anilist_visibility"), "private"),
         "trakt_personal_visibility": _normalize_visibility(raw.get("trakt_personal_visibility"), "private"),

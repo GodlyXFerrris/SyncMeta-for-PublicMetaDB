@@ -81,6 +81,83 @@ class PublicMetaDBClient:
     def _delete(self, path: str) -> dict | None:
         return self._request("DELETE", path)
 
+    # Watch history
+
+    def get_watched_history(self) -> list[dict]:
+        resp = self._get("/api/external/watched")
+        if not resp:
+            return []
+        if isinstance(resp, dict):
+            return list(resp.get("items", []))
+        return list(resp)
+
+    def mark_watched(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        season: int | None = None,
+        episode: int | None = None,
+        watched_at: str | None = None,
+        dedupe: bool = False,
+    ) -> dict | None:
+        payload = {
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+        }
+        if season is not None:
+            payload["season"] = season
+        if episode is not None:
+            payload["episode"] = episode
+        if watched_at is not None:
+            payload["watched_at"] = watched_at
+        path = "/api/external/watched?dedupe=true" if dedupe else "/api/external/watched"
+        return self._post(path, payload)
+
+    # Resume / continue watching
+
+    def get_resume_points(self) -> list[dict]:
+        resp = self._get("/api/external/resume")
+        if not resp:
+            return []
+        if isinstance(resp, dict):
+            return list(resp.get("items", []))
+        return list(resp)
+
+    def save_resume_point(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        position_ms: int,
+        runtime_ms: int,
+        season: int | None = None,
+        episode: int | None = None,
+    ) -> dict | None:
+        payload = {
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "position_ms": position_ms,
+            "runtime_ms": runtime_ms,
+        }
+        if season is not None:
+            payload["season"] = season
+        if episode is not None:
+            payload["episode"] = episode
+        return self._post("/api/external/resume", payload)
+
+    def save_resume_points_batch(self, items: list[dict]) -> dict | None:
+        return self._post("/api/external/resume/batch", {"items": items})
+
+    def delete_resume_point(self, resume_id: str) -> bool:
+        try:
+            self._delete(f"/api/external/resume/{resume_id}")
+            logger.info("Deleted resume point %s", resume_id)
+            return True
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                logger.info("Resume point %s was already gone", resume_id)
+                return False
+            raise
+
     # ── Mapping lookups ────────────────────────────────────────────
 
     def lookup_by_external_id(self, id_type: str, id_value: str, media_type: str) -> int | None:

@@ -1,19 +1,23 @@
-# SyncMeta: Multi-Source List Sync for PublicMetaDB
+# SyncMeta: Multi-Source Sync for PublicMetaDB
 
-SyncMeta is a self-hostable sync dashboard for people who want their personal lists kept in sync across services without manually rebuilding them in PublicMetaDB.
+SyncMeta is a self-hostable sync dashboard for keeping selected SIMKL, AniList, Trakt, and MDBList lists mirrored into PublicMetaDB without rebuilding them by hand.
 
-It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly which lists or statuses should be mirrored, and keeps the selected catalogs updated in private PublicMetaDB lists. It also supports persistent profiles, background syncing, dry runs, and secure hosted multi-user use.
+It gives each user a persistent profile, lets them choose exactly which statuses or catalogs should sync, and keeps those selections updated in PublicMetaDB with background jobs, dry runs, inline delete controls, and source-based visibility settings.
 
 ## Features
 
-- Multi-source sync: Pull from SIMKL, AniList, Trakt, and MDBList, then push into private PublicMetaDB lists.
-- Fine-grained list selection: Choose SIMKL statuses per media type, AniList list states, specific Trakt catalogs including public lists, and selected MDBList account catalogs.
+- Multi-source sync: Pull from SIMKL, AniList, Trakt, and MDBList, then push into PublicMetaDB.
+- Fine-grained source selection: Choose SIMKL statuses per media type, AniList list states, specific Trakt catalogs including public lists, and selected MDBList account catalogs.
 - Background automation: Save a profile once and let the server keep it updated on a schedule, with a minimum interval of 300 seconds.
 - Multi-user profiles: Each user gets a UUID-backed profile with its own credentials, selections, sync history, and schedule.
 - Secure hosted mode: Passwords are hashed, saved credentials are encrypted at rest, browsers use server-side sessions, and login attempts are throttled.
 - Optional site-wide access gate: Set a shared site password if you want the whole instance behind a single private entry screen.
 - Built-in auth helpers: SIMKL PIN auth and Trakt device auth can be started directly from the Settings page.
+- Trakt activity sync: Optionally import Trakt watched history and continue-watching resume points into PublicMetaDB.
+- Source visibility controls: Set SIMKL, AniList, Trakt personal, Trakt public, and MDBList syncs to private or public based on the type of list.
 - Safe sync controls: Use dry runs, remove items missing from source lists, delete SyncMeta-managed PublicMetaDB lists when they are deselected, and delete user records from the dashboard when you want to wipe a profile.
+- Fast source cleanup: `Select All` and `Deselect All` are built into the Trakt and MDBList pickers.
+- Inline list management: Delete a synced list from the dashboard with an in-app `Delete -> Confirm / Cancel` flow that also clears the matching saved source selection so it will not be re-added on the next sync.
 - Docker-first deployment: Run the web dashboard with Docker Compose, or use the CLI for one-off sync jobs.
 
 ## Supported Sources
@@ -44,10 +48,12 @@ It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly
 ### Trakt
 
 - Watchlist catalogs
-- Default catalogs
+- Default personal catalogs
 - Liked lists
 - Selected public lists from Discover
 - Device auth flow in the web UI
+- Optional watched history import
+- Optional resume / continue-watching sync
 
 ### MDBList
 
@@ -56,7 +62,7 @@ It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly
 
 ### Destination
 
-- Private PublicMetaDB lists
+- PublicMetaDB lists with per-source visibility controls
 
 ## What SyncMeta Creates
 
@@ -65,7 +71,8 @@ SyncMeta creates clean PublicMetaDB list names without source prefixes. Examples
 - `Watching - Series`
 - `Plan to Watch - Movies`
 - `Planning - Anime`
-- `My Watchlist`
+- `Watchlist - Movies`
+- `Watchlist - Series`
 - `Popular Movies`
 - `Custom Trakt List Name`
 - `MDBList List Name`
@@ -93,7 +100,7 @@ If you are using a hosted SyncMeta instance:
 1. Open the web dashboard.
 2. Create a new profile or sign in with an existing UUID and password.
 3. Connect the services you want to use.
-4. Pick your SIMKL, AniList, Trakt, and MDBList lists.
+4. Pick your SIMKL, AniList, Trakt, and MDBList lists or statuses.
 5. Save the profile.
 6. Let the background scheduler keep it updated.
 
@@ -225,6 +232,12 @@ Security behavior:
 
 Secret fields are overwrite-only. If a field says `Stored securely for this profile`, leaving it blank keeps the current stored secret.
 
+The dashboard also lets users:
+
+- delete a synced PublicMetaDB list inline
+- clear the matching saved SyncMeta selection at the same time
+- bulk select or deselect Trakt and MDBList sources
+
 ## Docker Notes
 
 The default profile store path is:
@@ -341,11 +354,20 @@ This path usually does need environment variables, because it runs the CLI direc
 - Trakt: Create an app in Trakt's API settings, then use the built-in device auth helper
 - MDBList: Generate an API key from your MDBList account
 
+Notes:
+
+- SIMKL app setup may ask for a redirect URL, but SyncMeta uses PIN auth in the UI.
+- Trakt app setup may ask for a redirect URL, but SyncMeta uses device auth in the UI.
+
 ### Sync Options
 
 - Automatic background sync
 - Update interval in seconds, minimum `300`
 - Remove items no longer in source lists
+- Delete SyncMeta-managed PublicMetaDB lists when they are disabled
+- Sync Trakt watched history
+- Sync Trakt resume progress
+- Per-source private/public visibility controls
 - Dry run before a real sync if you want to preview changes
 
 ## API Endpoints
@@ -358,6 +380,7 @@ Main dashboard and API routes:
 - `/api/profile/save` - create or update a profile
 - `/api/profile/status` - load the current profile and dashboard state
 - `/api/profile/sync` - trigger a sync or dry run
+- `/api/profile/list/delete` - delete a synced PublicMetaDB list and clear the matching selection
 - `/api/simkl/pin/start` - start SIMKL PIN auth
 - `/api/simkl/pin/check` - poll SIMKL PIN auth
 - `/api/trakt/device/start` - start Trakt device auth
@@ -382,6 +405,8 @@ These matter mainly for CLI use, Docker overrides, and production hosting.
 | `TRAKT_CLIENT_SECRET` | No | Used for Trakt device auth |
 | `TRAKT_ACCESS_TOKEN` | No | Trakt access token |
 | `TRAKT_REFRESH_TOKEN` | No | Trakt refresh token |
+| `TRAKT_SYNC_WATCHED_HISTORY` | No | Enable Trakt watched history sync for CLI/config-driven runs |
+| `TRAKT_SYNC_RESUME_PROGRESS` | No | Enable Trakt resume-progress sync for CLI/config-driven runs |
 | `MDBLIST_API_KEY` | No | MDBList API key |
 | `PMDB_API_KEY` | CLI: Yes | PublicMetaDB API key |
 
@@ -456,6 +481,7 @@ Notes:
 - PublicMetaDB requests use retry logic and rate limiting
 - dry runs are recorded in history but do not advance the automatic schedule
 - the scheduler checks for due profiles in the web process and starts sync jobs in background threads
+- deleting a synced list from the dashboard also clears the matching saved source selection when it can be mapped back to the source profile data
 
 ## Current Limits
 

@@ -69,6 +69,8 @@ class SyncConfig:
     dry_run: bool = False
     interval_minutes: int = 0
     media_types: list[str] = field(default_factory=lambda: ["shows", "movies", "anime"])
+    trakt_sync_watched_history: bool = False
+    trakt_sync_resume_progress: bool = False
     simkl_visibility: str = "private"
     anilist_visibility: str = "private"
     trakt_personal_visibility: str = "private"
@@ -130,6 +132,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.remove_missing = os.getenv("SYNC_REMOVE_MISSING", "false").lower() == "true"
     cfg.sync.delete_disabled_lists = os.getenv("SYNC_DELETE_DISABLED_LISTS", "false").lower() == "true"
     cfg.sync.dry_run = os.getenv("SYNC_DRY_RUN", "false").lower() == "true"
+    cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
+    cfg.sync.trakt_sync_resume_progress = os.getenv("TRAKT_SYNC_RESUME_PROGRESS", "false").lower() == "true"
 
     interval = os.getenv("SYNC_INTERVAL_MINUTES", "0")
     cfg.sync.interval_minutes = int(interval) if interval.isdigit() else 0
@@ -208,6 +212,10 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.delete_disabled_lists = sync["delete_disabled_lists"]
     if "dry_run" in sync and not os.getenv("SYNC_DRY_RUN"):
         cfg.sync.dry_run = sync["dry_run"]
+    if "trakt_sync_watched_history" in sync and not os.getenv("TRAKT_SYNC_WATCHED_HISTORY"):
+        cfg.sync.trakt_sync_watched_history = bool(sync["trakt_sync_watched_history"])
+    if "trakt_sync_resume_progress" in sync and not os.getenv("TRAKT_SYNC_RESUME_PROGRESS"):
+        cfg.sync.trakt_sync_resume_progress = bool(sync["trakt_sync_resume_progress"])
     if "interval_minutes" in sync and not os.getenv("SYNC_INTERVAL_MINUTES"):
         cfg.sync.interval_minutes = sync["interval_minutes"]
     if "media_types" in sync and not os.getenv("SYNC_MEDIA_TYPES"):
@@ -259,8 +267,10 @@ def validate_config(cfg: AppConfig, sources: list[str] | None = None) -> list[st
             not cfg.trakt.sync_watchlist
             and not cfg.trakt.sync_liked_lists
             and not cfg.trakt.selected_lists
+            and not cfg.sync.trakt_sync_watched_history
+            and not cfg.sync.trakt_sync_resume_progress
         ):
-            errors.append("Enable at least one Trakt source: watchlist, liked lists, or selected public lists")
+            errors.append("Enable at least one Trakt source: watchlist, liked lists, selected public lists, watched history, or resume progress")
 
     if check_mdblist and cfg.mdblist.enabled:
         if not cfg.mdblist.api_key:

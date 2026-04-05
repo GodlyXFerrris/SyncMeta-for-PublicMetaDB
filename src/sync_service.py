@@ -102,6 +102,7 @@ class SyncService:
 
         if self._config.trakt.enabled:
             all_stats.extend(self._sync_trakt())
+            all_stats.extend(self._sync_trakt_activity())
 
         if self._config.mdblist.enabled:
             all_stats.extend(self._sync_mdblist())
@@ -152,6 +153,134 @@ class SyncService:
                     )
                 )
 
+        return stats
+
+    def _sync_trakt_activity(self) -> list[SyncStats]:
+        stats: list[SyncStats] = []
+
+        if self._config.sync.trakt_sync_watched_history:
+            stats.append(self._sync_trakt_watched_history())
+
+        if self._config.sync.trakt_sync_resume_progress:
+            stats.append(self._sync_trakt_resume_progress())
+
+        return stats
+
+    def _sync_trakt_watched_history(self) -> SyncStats:
+        stats = SyncStats(
+            list_name="",
+            display_name="Trakt Watch History",
+            source_name="Trakt",
+        )
+        self._set_status("Fetching Trakt watched history")
+        items = self._trakt.get_watched_history()
+        stats.items_fetched = len(items)
+
+        if self._config.sync.dry_run:
+            stats.items_resolved = len(items)
+            stats.items_added = len(items)
+            return stats
+
+        try:
+            existing_items = self._pmdb.get_watched_history()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            return stats
+
+        existing_keys = {
+            self._watched_key(item)
+            for item in existing_items
+            if self._watched_key(item)
+        }
+
+        for item in items:
+            key = self._watched_key(item)
+            if not key:
+                stats.items_skipped_unresolved += 1
+                continue
+            stats.items_resolved += 1
+            if key in existing_keys:
+                stats.items_skipped_duplicate += 1
+                continue
+            try:
+                self._set_status("Writing Trakt watched history to PublicMetaDB")
+                self._pmdb.mark_watched(
+                    tmdb_id=int(item["tmdb_id"]),
+                    media_type=item["media_type"],
+                    season=item.get("season"),
+                    episode=item.get("episode"),
+                    watched_at=item.get("watched_at"),
+                    dedupe=False,
+                )
+                existing_keys.add(key)
+                stats.items_added += 1
+            except Exception as exc:
+                stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+        return stats
+
+    def _sync_trakt_resume_progress(self) -> SyncStats:
+        stats = SyncStats(
+            list_name="",
+            display_name="Trakt Resume Progress",
+            source_name="Trakt",
+        )
+        self._set_status("Fetching Trakt playback progress")
+        items = self._trakt.get_playback_progress()
+        stats.items_fetched = len(items)
+
+        normalized_items: list[dict] = []
+        for item in items:
+            key = self._resume_key(item)
+            if not key:
+                stats.items_skipped_unresolved += 1
+                continue
+            normalized_items.append(item)
+            stats.items_resolved += 1
+
+        if self._config.sync.dry_run:
+            stats.items_added = len(normalized_items)
+            return stats
+
+        if not normalized_items:
+            return stats
+
+        try:
+            self._pmdb.get_resume_points()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
+            return stats
+
+        payloads: list[dict] = []
+        for item in normalized_items:
+            payload = {
+                "tmdb_id": int(item["tmdb_id"]),
+                "media_type": item["media_type"],
+                "position_ms": int(item["position_ms"]),
+                "runtime_ms": int(item["runtime_ms"]),
+            }
+            if item.get("season") is not None:
+                payload["season"] = int(item["season"])
+            if item.get("episode") is not None:
+                payload["episode"] = int(item["episode"])
+            payloads.append(payload)
+
+        for chunk in self._chunked(payloads, 50):
+            try:
+                self._set_status("Writing Trakt resume progress to PublicMetaDB")
+                response = self._pmdb.save_resume_points_batch(chunk) or {}
+                for result in response.get("results", []):
+                    action = str(result.get("action", "")).strip().lower()
+                    if action == "saved":
+                        stats.items_added += 1
+                    elif action == "completed":
+                        stats.items_removed += 1
+                stats.items_skipped_duplicate += max(0, len(chunk) - sum(
+                    1 for result in response.get("results", [])
+                    if str(result.get("action", "")).strip().lower() in {"saved", "completed"}
+                ))
+            except Exception as exc:
+                stats.errors.append(f"Failed to sync resume batch: {exc}")
+                continue
         return stats
 
     def _sync_anilist(self) -> list[SyncStats]:
@@ -557,6 +686,31 @@ class SyncService:
                 self._status_callback(status)
             except Exception:
                 logger.debug("Status callback failed", exc_info=True)
+
+    @staticmethod
+    def _watched_key(item: dict) -> str:
+        tmdb_id = item.get("tmdb_id")
+        media_type = item.get("media_type")
+        if not tmdb_id or not media_type:
+            return ""
+        season = item.get("season")
+        episode = item.get("episode")
+        watched_at = item.get("watched_at")
+        return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}:{watched_at if watched_at is not None else 'null'}"
+
+    @staticmethod
+    def _resume_key(item: dict) -> str:
+        tmdb_id = item.get("tmdb_id")
+        media_type = item.get("media_type")
+        if not tmdb_id or not media_type:
+            return ""
+        season = item.get("season")
+        episode = item.get("episode")
+        return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}"
+
+    @staticmethod
+    def _chunked(items: list[dict], size: int) -> list[list[dict]]:
+        return [items[index:index + size] for index in range(0, len(items), size)]
 
     @staticmethod
     def _normalize_managed_lists(items: list[dict] | None) -> dict[str, dict]:
