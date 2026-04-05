@@ -132,6 +132,15 @@ class RecordingSimklClient(SimklClient):
                             "number": 3,
                             "watched_at": "2026-04-03T12:00:00Z",
                         },
+                    },
+                    {
+                        "show": {
+                            "title": "Count Only Anime",
+                            "ids": {"tmdb": 7005},
+                        },
+                        "watched_episodes_count": 3,
+                        "total_episodes_count": 3,
+                        "last_watched_at": "2026-04-03T13:00:00Z",
                     }
                 ]
             }
@@ -202,7 +211,7 @@ class SimklClientTests(unittest.TestCase):
 
         history = client.get_watched_history()
 
-        self.assertEqual(len(history), 4)
+        self.assertEqual(len(history), 7)
         self.assertTrue(any(
             item["tmdb_id"] == 7001 and item["media_type"] == "movie" and item["watched_at"] == "2026-04-01T12:00:00Z" and item["title"] == "Completed Movie"
             for item in history
@@ -219,13 +228,21 @@ class SimklClientTests(unittest.TestCase):
             item["tmdb_id"] == 7003 and item["media_type"] == "tv" and item["season"] == 1 and item["episode"] == 3 and item["watched_at"] == "2026-04-03T12:00:00Z" and item["title"] == "Completed Anime"
             for item in history
         ))
+        self.assertEqual(
+            sorted(
+                (item["season"], item["episode"])
+                for item in history
+                if item["tmdb_id"] == 7005
+            ),
+            [(1, 1), (1, 2), (1, 3)],
+        )
 
     def test_get_watched_history_since_filters_older_entries_and_passes_date_from(self) -> None:
         client = RecordingSimklClient()
 
         history = client.get_watched_history(since="2026-04-02T12:30:00Z")
 
-        self.assertEqual(len(history), 2)
+        self.assertEqual(len(history), 5)
         self.assertTrue(all(item["watched_at"] > "2026-04-02T12:30:00Z" for item in history))
         self.assertTrue(any(
             params and params.get("date_from") == "2026-04-02T12:30:00Z"

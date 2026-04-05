@@ -422,6 +422,14 @@ class SimklClient:
                 episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
             )
 
+        if not history:
+            for episode in self._synthesize_episode_history_from_counts(entry, show, media_key):
+                add_episode(
+                    episode.get("season"),
+                    episode.get("number") or episode.get("episode"),
+                    episode.get("watched_at") or episode.get("last_watched_at"),
+                )
+
         return history
 
     def _normalize_playback_entry(self, entry: dict) -> dict | None:
@@ -594,6 +602,41 @@ class SimklClient:
             elif isinstance(candidate, list):
                 episodes.extend(item for item in candidate if isinstance(item, dict))
         return episodes
+
+    @staticmethod
+    def _synthesize_episode_history_from_counts(entry: dict, show: dict, media_key: str) -> list[dict]:
+        if media_key != "anime":
+            return []
+
+        watched_count = entry.get("watched_episodes_count")
+        total_count = entry.get("total_episodes_count")
+        try:
+            watched_total = int(watched_count or 0)
+        except (TypeError, ValueError):
+            return []
+        if watched_total <= 0:
+            return []
+
+        try:
+            total_episodes = int(total_count or watched_total)
+        except (TypeError, ValueError):
+            total_episodes = watched_total
+
+        watched_total = min(watched_total, total_episodes) if total_episodes > 0 else watched_total
+        if watched_total <= 0:
+            return []
+
+        watched_at = (
+            entry.get("last_watched_at")
+            or entry.get("last_watched")
+            or show.get("last_watched_at")
+            or show.get("last_watched")
+        )
+
+        return [
+            {"season": 1, "number": episode_number, "watched_at": watched_at}
+            for episode_number in range(1, watched_total + 1)
+        ]
 
     @staticmethod
     def _playback_progress_percent(entry: dict) -> float | None:
