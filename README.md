@@ -191,17 +191,71 @@ Default address:
 
 ### Docker
 
+Requirements:
+
+- Docker Desktop or Docker Engine with Compose support
+- A local `.env` file if you want to use the included `docker-compose.yml`
+
+Start by copying the example env file:
+
+```bash
+cp .env.example .env
+```
+
+Then fill in any values you want to provide up front for CLI use or container defaults.
+
+Start the web app with:
+
 ```bash
 docker compose up --build web
 ```
 
-The included Docker setup runs the web app on port `8080`.
+Open:
 
-Notes:
+- `http://127.0.0.1:8080`
+
+Run it in the background with:
+
+```bash
+docker compose up --build -d web
+```
+
+Stop it with:
+
+```bash
+docker compose down
+```
+
+The included Docker setup:
+
+- Builds from the local `Dockerfile`
+- Starts the Flask dashboard through Gunicorn
+- Exposes port `8080`
+- Uses a single web worker, which matches the built-in background scheduler model
+- Loads environment values from `.env`
+
+Data and persistence:
 
 - Profiles are stored in `data/profiles.json` by default.
 - You can override that path with `PROFILE_STORE_FILE`.
-- The background scheduler runs inside the web process.
+- The profile store lives inside the container unless you mount a volume or bind mount the project folder.
+- Automatic background syncing works in Docker because the scheduler runs inside the web process.
+
+CLI sync container:
+
+There is also a one-shot CLI service in `docker-compose.yml`:
+
+```bash
+docker compose run --rm sync
+```
+
+That service runs:
+
+```bash
+python main.py sync
+```
+
+It is useful for manual sync jobs or testing your `.env` configuration without opening the dashboard.
 
 ## Environment Variables
 
