@@ -595,20 +595,21 @@ class SyncService:
         selection: dict | None = None,
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
+        actual_list_name = self._resolve_managed_list_name(list_name, source_name or "", selection)
         stats = SyncStats(
-            list_name=list_name,
+            list_name=actual_list_name,
             display_name=display_name or list_name,
             source_name=source_name or "",
             items_fetched=len(source_items),
         )
-        self._set_status(f"Processing {list_name}")
-        logger.info("Syncing '%s': %d source items", list_name, len(source_items))
+        self._set_status(f"Processing {actual_list_name}")
+        logger.info("Syncing '%s': %d source items", actual_list_name, len(source_items))
 
         if not source_items:
-            logger.info("  No items for '%s', skipping", list_name)
+            logger.info("  No items for '%s', skipping", actual_list_name)
             return stats
 
-        self._set_status(f"Resolving IDs for {list_name}")
+        self._set_status(f"Resolving IDs for {actual_list_name}")
         resolved: list[dict] = []
         for item in source_items:
             self._check_cancelled()
@@ -620,13 +621,13 @@ class SyncService:
                 stats.items_skipped_unresolved += 1
 
         if self._config.sync.dry_run:
-            return self._dry_run_report(resolved, list_name, stats)
+            return self._dry_run_report(resolved, actual_list_name, stats)
 
         try:
-            self._set_status(f"Preparing PublicMetaDB list {list_name}")
-            pmdb_list = self._pmdb.get_or_create_list(list_name, list_description, is_public=is_public)
+            self._set_status(f"Preparing PublicMetaDB list {actual_list_name}")
+            pmdb_list = self._pmdb.get_or_create_list(actual_list_name, list_description, is_public=is_public)
             self._register_managed_list(
-                list_name,
+                actual_list_name,
                 str(pmdb_list.get("id", "")),
                 display_name or list_name,
                 source_name or "",
@@ -634,12 +635,12 @@ class SyncService:
             )
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
-            logger.error("Failed to get/create list '%s': %s", list_name, exc)
+            logger.error("Failed to get/create list '%s': %s", actual_list_name, exc)
             return stats
 
         list_id = pmdb_list["id"]
 
-        self._set_status(f"Loading existing items from {list_name}")
+        self._set_status(f"Loading existing items from {actual_list_name}")
         existing_items = self._pmdb.get_list_items(list_id)
         existing_map = self._build_existing_map(existing_items)
         desired_keys: set[str] = set()
@@ -656,7 +657,7 @@ class SyncService:
                 continue
 
             try:
-                self._set_status(f"Adding items to {list_name}")
+                self._set_status(f"Adding items to {actual_list_name}")
                 self._pmdb.add_item_to_list(list_id, tmdb_id, media_type)
                 stats.items_added += 1
             except Exception as exc:
@@ -665,7 +666,7 @@ class SyncService:
                 logger.error(message)
 
         if self._config.sync.remove_missing:
-            self._set_status(f"Removing stale items from {list_name}")
+            self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
 
         return stats
@@ -801,6 +802,82 @@ class SyncService:
                 "selection": dict(item.get("selection", {})) if isinstance(item.get("selection"), dict) else {},
             }
         return normalized
+
+    @staticmethod
+    def _selection_identity(selection: dict | None) -> str:
+        if not isinstance(selection, dict):
+            return ""
+        source = str(selection.get("source", "")).strip().lower()
+        if source == "simkl":
+            return f"simkl:{selection.get('media_type', '')}:{selection.get('status', '')}"
+        if source == "anilist":
+            return f"anilist:{selection.get('status', '')}"
+        if source == "mdblist":
+            return f"mdblist:{selection.get('id', '')}:{selection.get('mediatype', '')}"
+        if source == "trakt":
+            kind = str(selection.get("kind", "")).strip().lower()
+            if kind == "watchlist":
+                return f"trakt:watchlist:{selection.get('media_type', '')}"
+            if kind == "default":
+                return f"trakt:default:{selection.get('catalog_key', '')}"
+            return f"trakt:list:{selection.get('user', '')}:{selection.get('slug', '')}"
+        return ""
+
+    @staticmethod
+    def _selection_suffix(source_name: str, selection: dict | None) -> str:
+        if not isinstance(selection, dict):
+            return source_name or "SyncMeta"
+        source = str(selection.get("source", "")).strip().lower()
+        if source == "trakt":
+            kind = str(selection.get("kind", "")).strip().lower()
+            if kind == "watchlist":
+                media_type = str(selection.get("media_type", "")).strip().lower()
+                label = _TYPE_LABELS.get(media_type, media_type.title() or "Watchlist")
+                return f"Trakt {label}"
+            if kind == "default":
+                return "Trakt"
+            user = str(selection.get("user", "")).strip()
+            return f"Trakt {user}" if user else "Trakt"
+        if source == "mdblist":
+            return "MDBList"
+        if source == "anilist":
+            return "AniList"
+        if source == "simkl":
+            return "SIMKL"
+        return source_name or "SyncMeta"
+
+    def _resolve_managed_list_name(self, base_name: str, source_name: str, selection: dict | None) -> str:
+        identity = self._selection_identity(selection)
+        if identity:
+            for item in self._managed_lists.values():
+                if self._selection_identity(item.get("selection")) == identity:
+                    return str(item.get("list_name", "")).strip() or base_name
+
+        candidate = base_name
+        suffix = self._selection_suffix(source_name, selection)
+        attempt = 0
+
+        while True:
+            conflict = False
+            existing_managed = self._managed_lists.get(candidate)
+            if existing_managed and self._selection_identity(existing_managed.get("selection")) != identity:
+                conflict = True
+            elif attempt == 0:
+                try:
+                    existing_pmdb = self._pmdb.find_list_by_name(candidate)
+                except Exception:
+                    existing_pmdb = None
+                if existing_pmdb:
+                    existing_id = str(existing_pmdb.get("id", "")).strip()
+                    managed_match = any(str(item.get("list_id", "")).strip() == existing_id for item in self._managed_lists.values())
+                    if not managed_match:
+                        conflict = True
+
+            if not conflict:
+                return candidate
+
+            attempt += 1
+            candidate = f"{base_name} ({suffix})" if attempt == 1 else f"{base_name} ({suffix} {attempt})"
 
     def _register_managed_list(
         self,

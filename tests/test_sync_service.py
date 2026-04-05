@@ -264,6 +264,58 @@ class SyncServiceTests(unittest.TestCase):
         self.assertTrue(visibility_by_name["Discover Picks"])
         self.assertTrue(visibility_by_name["Popular Netflix Movies"])
 
+    def test_same_display_name_from_different_sources_gets_separate_pmdb_lists(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["movies"],
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+        config.trakt.selected_lists = [{
+            "name": "Trending Movies",
+            "user": "default",
+            "slug": "trending-movies",
+            "source": "default",
+            "catalog_key": "trending-movies",
+        }]
+        config.mdblist.api_key = "mdbl-key"
+        config.mdblist.enabled = True
+        config.mdblist.selected_lists = [{
+            "id": 22,
+            "name": "Trending Movies",
+            "mediatype": "movie",
+        }]
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._trakt = StubTraktClient()
+        service._mdblist = StubMdbListClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        self.assertEqual(len([row for row in results if row.display_name == "Trending Movies"]), 2)
+        self.assertEqual(
+            [item["name"] for item in pmdb.created_lists],
+            ["Watchlist - Movies", "Trending Movies", "Trending Movies (MDBList)"],
+        )
+        self.assertEqual(
+            [item["list_name"] for item in service.managed_lists],
+            ["Trending Movies", "Trending Movies (MDBList)", "Watchlist - Movies"],
+        )
+
     def test_syncs_trakt_watched_history_and_resume_when_enabled(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
