@@ -120,9 +120,10 @@ The included Docker setup:
 - serves the Flask dashboard through Gunicorn
 - exposes port `8080`
 - runs with one web worker, which matches the built-in background scheduler model
+- persists app data in `./data` by default so profiles survive rebuilds and updates
 - does not require a `.env` file for normal web use
 
-For production, a persistent data mount is strongly recommended so profiles, encrypted credentials, and the generated encryption key survive container recreation:
+The current Compose file already mounts persistent storage for safe updates:
 
 ```yaml
 services:
@@ -131,11 +132,27 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    volumes:
-      - ./data:/app/data
     environment:
       PROFILE_STORE_FILE: /app/data/profiles.json
+      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+      SITE_ACCESS_PASSWORD: ${SITE_ACCESS_PASSWORD:-}
+    volumes:
+      - ./data:/app/data
 ```
+
+That means normal updates like this keep user data:
+
+```bash
+docker compose pull
+docker compose up -d --build web
+```
+
+Your profiles stay intact as long as these are preserved:
+
+- `./data/profiles.json`
+- `./data/profiles.key` if you are not using `SYNCMETA_MASTER_KEY`
+
+If you want the most reliable setup across servers or fresh deploys, set a fixed `SYNCMETA_MASTER_KEY` in your environment. Then SyncMeta can still decrypt saved credentials even if the container is rebuilt elsewhere.
 
 Then run:
 
@@ -169,6 +186,7 @@ Important production note:
 - `PROFILE_STORE_FILE` controls where profiles are stored
 - `SYNCMETA_MASTER_KEY` lets you provide your own encryption key
 - if you do not set `SYNCMETA_MASTER_KEY`, SyncMeta creates a key file beside the profile store, usually `profiles.key`
+- `SITE_ACCESS_PASSWORD` enables the optional shared site access gate
 
 ### 4. Local Python Run
 
@@ -222,6 +240,30 @@ With the default layout, that means persisting both:
 
 - `data/profiles.json`
 - `data/profiles.key`
+
+## Updating Safely
+
+If you update SyncMeta with Docker, you should not lose data as long as the `data` folder stays mounted and the encryption key source stays the same.
+
+Safe update flow:
+
+```bash
+docker compose up -d --build web
+```
+
+If you use a remote registry image later, this also works:
+
+```bash
+docker compose pull
+docker compose up -d web
+```
+
+Avoid changing both of these at the same time unless you know what you are doing:
+
+- the mounted `data` folder
+- the `SYNCMETA_MASTER_KEY` or generated `profiles.key`
+
+If `profiles.json` survives but the key changes, SyncMeta may no longer be able to decrypt saved credentials.
 
 Automatic background syncing works in Docker because the scheduler runs inside the web process.
 

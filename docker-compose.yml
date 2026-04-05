@@ -4,6 +4,12 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
+    environment:
+      PROFILE_STORE_FILE: /app/data/profiles.json
+      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+      SITE_ACCESS_PASSWORD: ${SITE_ACCESS_PASSWORD:-}
+    volumes:
+      - ./data:/app/data
 
   # One-shot sync (run manually): docker compose run --rm sync
   sync:
@@ -11,3 +17,8 @@ services:
     command: python main.py sync
     profiles:
       - cli
+    environment:
+      PROFILE_STORE_FILE: /app/data/profiles.json
+      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+    volumes:
+      - ./data:/app/data
