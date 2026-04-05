@@ -350,7 +350,7 @@ def normalize_profile_options(options: dict | None) -> dict:
 
     return {
         "remove_missing": bool(raw.get("remove_missing", False)),
-        "delete_disabled_lists": bool(raw.get("delete_disabled_lists", False)),
+        "delete_disabled_lists": False,
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
@@ -687,6 +687,17 @@ class ProfileStore:
                 profile["sync_started_at"] = now
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
+
+    def delete_profile_by_id(self, profile_id: str) -> None:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles.get(normalized_id)
+            if not profile:
+                raise KeyError("Profile not found")
+            if profile.get("sync_running"):
+                raise RuntimeError("Cannot delete a profile while a sync is in progress")
+            del self._profiles[normalized_id]
+            self._save_locked()
 
     def _authenticate_locked(self, profile_id: str, password: str) -> dict:
         profile = self._get_profile_locked(profile_id)

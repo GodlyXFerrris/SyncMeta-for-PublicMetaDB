@@ -33,11 +33,18 @@ class WebTests(unittest.TestCase):
         self.assertIn("AniList Lists", html)
         self.assertIn("MDBList Lists", html)
         self.assertIn("dot-mdblist", html)
+        self.assertIn("If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
+        self.assertIn("If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
         self.assertIn("https://github.com/Febsho/SyncMeta-for-PublicMetaDB", html)
         self.assertIn("<h3>Options</h3>", html)
-        self.assertIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
+        self.assertIn("Delete User Records", html)
+        self.assertIn("Danger Zone", html)
+        self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
+        self.assertIn("selected public Trakt lists", html)
+        self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
         self.assertIn("choose which anime lists should sync into PublicMetaDB", html)
+        self.assertNotIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
         self.assertNotIn("Sync Series", html)
         self.assertNotIn("Sync Movies", html)
         self.assertNotIn("Sync Anime", html)
@@ -228,6 +235,58 @@ class WebTests(unittest.TestCase):
         self.assertEqual(status_data["profile"]["profile_id"], profile["profile_id"])
         self.assertTrue(status_data["profile"]["credentials"]["simkl"]["access_token_saved"])
         self.assertNotIn("access_token", status_data["profile"]["credentials"]["simkl"])
+
+    def test_delete_profile_endpoint_removes_signed_in_profile(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-secret",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 600,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        delete_response = self.client.post("/api/profile/delete", json={"confirm_text": "DELETE"})
+        delete_data = delete_response.get_json()
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_data["status"], "deleted")
+
+        with self.assertRaises(KeyError):
+            web._profile_store.get_private_profile_by_id(profile["profile_id"])
 
 
 if __name__ == "__main__":

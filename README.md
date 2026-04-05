@@ -7,12 +7,12 @@ It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly
 ## Features
 
 - Multi-source sync: Pull from SIMKL, AniList, Trakt, and MDBList, then push into private PublicMetaDB lists.
-- Fine-grained list selection: Choose SIMKL statuses per media type, AniList list states, specific Trakt catalogs, and selected MDBList account lists.
+- Fine-grained list selection: Choose SIMKL statuses per media type, AniList list states, specific Trakt catalogs including public lists, and selected MDBList account catalogs.
 - Background automation: Save a profile once and let the server keep it updated on a schedule, with a minimum interval of 300 seconds.
 - Multi-user profiles: Each user gets a UUID-backed profile with its own credentials, selections, sync history, and schedule.
 - Secure hosted mode: Passwords are hashed, saved credentials are encrypted at rest, browsers use server-side sessions, and login attempts are throttled.
 - Built-in auth helpers: SIMKL PIN auth and Trakt device auth can be started directly from the Settings page.
-- Safe sync controls: Use dry runs, remove items missing from source lists, and optionally delete SyncMeta-managed PublicMetaDB lists when they are deselected.
+- Safe sync controls: Use dry runs, remove items missing from source lists, and delete user records from the dashboard when you want to wipe a profile.
 - Docker-first deployment: Run the web dashboard with Docker Compose, or use the CLI for one-off sync jobs.
 
 ## Supported Sources
@@ -50,7 +50,7 @@ It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly
 
 ### MDBList
 
-- Your MDBList account lists
+- Your MDBList account lists and curated catalog selections
 - Per-list selection in the web UI
 
 ### Destination
@@ -68,8 +68,6 @@ SyncMeta creates clean PublicMetaDB list names without source prefixes. Examples
 - `Popular Movies`
 - `Custom Trakt List Name`
 - `MDBList List Name`
-
-If you enable list deletion for disabled sources, SyncMeta can also remove previously managed PublicMetaDB lists that are no longer selected.
 
 ## How Matching Works
 
@@ -206,7 +204,7 @@ Security behavior:
 - the browser uses a server-side session after login instead of storing the password locally
 - login attempts are throttled
 
-Secret fields are overwrite-only. If a field says `Saved on server`, leaving it blank keeps the current stored secret.
+Secret fields are overwrite-only. If a field says `Stored securely for this profile`, leaving it blank keeps the current stored secret.
 
 ## Docker Notes
 
@@ -305,7 +303,6 @@ This path usually does need environment variables, because it runs the CLI direc
 - Automatic background sync
 - Update interval in seconds, minimum `300`
 - Remove items no longer in source lists
-- Delete SyncMeta-managed PublicMetaDB lists when they are disabled
 - Dry run before a real sync if you want to preview changes
 
 ## API Endpoints

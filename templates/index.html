@@ -89,6 +89,10 @@
     .status-list-btn{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:12px 14px;border:1px solid var(--z800);border-radius:8px;background:var(--z950);color:var(--z400);font-size:13px;font-weight:700;cursor:pointer;text-align:left}
     .status-list-btn:hover{border-color:var(--z600);color:var(--z100)}
     .status-list-btn.active{border-color:rgba(124,109,247,.55);background:rgba(124,109,247,.18);color:var(--white)}
+    .danger-zone{border-color:rgba(248,113,113,.3)}
+    .danger-zone h3{color:var(--red)}
+    .danger-btn{width:100%;justify-content:center;background:rgba(127,29,29,.9);border-color:rgba(248,113,113,.35);color:var(--white);font-weight:700}
+    .danger-btn:hover{background:rgba(153,27,27,.95);border-color:rgba(248,113,113,.55)}
     @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}}
   </style>
 </head>
@@ -169,7 +173,7 @@
           <div class="form-section">
             <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
             <p class="desc">Connect SIMKL and choose exactly which movie, show, and anime statuses should sync.</p>
-            <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID</div></div>
+            <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID. If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses PIN auth, so the redirect is not used directly.</div></div>
             <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
             <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
             <div class="actions-bar" style="margin-top:0">
@@ -194,9 +198,9 @@
           </div>
           <div class="form-section">
             <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-            <p class="desc">Sync your Trakt watchlist and liked Trakt lists into PublicMetaDB.</p>
+            <p class="desc">Sync your Trakt watchlist, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
             <input type="checkbox" id="trakt-watchlist-toggle" checked class="hidden">
-            <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"></div>
+            <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses device auth here, so the redirect is only a dashboard requirement.</div></div>
             <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
             <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
             <div class="form-row"><label>Refresh Token</label><input type="password" id="trakt-refresh-token" placeholder="Saved for future refresh support" autocomplete="off"></div>
@@ -216,7 +220,7 @@
           </div>
           <div class="form-section">
             <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-            <p class="desc">Load your MDBList account lists and choose which ones should sync into PublicMetaDB.</p>
+            <p class="desc">Load your MDBList account lists and choose which personal or public-style catalog lists should sync into PublicMetaDB.</p>
             <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> to get your API key</div></div>
           </div>
           <div class="form-section">
@@ -224,8 +228,7 @@
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
             <div class="form-row" style="margin-top:14px"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
-            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
-            <div class="hint">Source selections above now decide what gets synced. Turn on list deletion only if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next sync.</div>
+            <div class="hint">Source selections above decide what gets synced. Right now SyncMeta only removes items inside active lists when that source no longer contains them.</div>
           </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
@@ -264,7 +267,7 @@
           </div>
           <div class="form-section full">
             <h3>MDBList Lists</h3>
-            <p class="desc">Refresh your MDBList lists, then select the ones you want to sync.</p>
+            <p class="desc">Refresh your MDBList lists, then select the personal or public-style catalogs you want to sync.</p>
             <div class="catalog-toolbar">
               <span class="actions-meta" id="mdblist-status">Enter your MDBList API key, then refresh your lists.</span>
               <div class="actions-bar" style="margin-top:0">
@@ -273,6 +276,14 @@
               </div>
             </div>
             <div class="catalog-list" id="mdblist-list"></div>
+          </div>
+          <div class="form-section full danger-zone">
+            <h3>Danger Zone</h3>
+            <p class="desc">Irreversible actions that affect this profile and its stored data.</p>
+            <div class="form-row">
+              <button class="btn danger-btn" type="button" onclick="deleteProfileData()">Delete User Records</button>
+              <div class="hint">Permanently deletes this profile, saved credentials, sync history, and local draft data from this browser. Type <span class="mono">DELETE</span> when asked to confirm.</div>
+            </div>
           </div>
         </div>
         <div class="actions-bar">
@@ -391,7 +402,7 @@
     function setSecretInputState(inputId, section, key, defaultPlaceholder) {
       const input = el(inputId);
       input.value = '';
-      input.placeholder = hasSavedSecret(section, key) ? 'Saved on server. Leave blank to keep it.' : defaultPlaceholder;
+      input.placeholder = hasSavedSecret(section, key) ? 'Stored securely for this profile. Leave blank to keep it.' : defaultPlaceholder;
     }
 
     function loadSimklPinState() {
@@ -559,7 +570,7 @@
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
-        delete_disabled_lists: el('opt-delete-disabled-lists').checked,
+        delete_disabled_lists: false,
         media_types: ['shows', 'movies', 'anime'],
       };
     }
@@ -649,7 +660,6 @@
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
-      el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
@@ -657,11 +667,11 @@
       renderMdbListLists();
       if (!loadSimklPinState()) {
         setSimklAuthCode('');
-        setSimklAuthStatus(hasSavedSecret('simkl', 'access_token_saved') ? 'SIMKL access token is saved on the server.' : 'Start PIN auth here if you do not have an access token yet.', false);
+        setSimklAuthStatus(hasSavedSecret('simkl', 'access_token_saved') ? 'SIMKL access token is stored securely for this profile.' : 'Start PIN auth here if you do not have an access token yet.', false);
       }
       if (!loadTraktDeviceState()) {
         setTraktAuthCode('');
-        setTraktAuthStatus(hasSavedSecret('trakt', 'access_token_saved') ? 'Trakt access token is saved on the server.' : 'Start Trakt device auth here if you do not have a token yet.', false);
+        setTraktAuthStatus(hasSavedSecret('trakt', 'access_token_saved') ? 'Trakt access token is stored securely for this profile.' : 'Start Trakt device auth here if you do not have a token yet.', false);
       }
     }
 
@@ -1723,6 +1733,43 @@
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       showToast('Logged out.', false, true);
+    }
+
+    async function deleteProfileData() {
+      if (!sessionProfileId) {
+        showToast('Sign into a profile first.', true, false);
+        return;
+      }
+
+      const confirmText = window.prompt('Type DELETE to permanently remove this profile and its stored records.');
+      if (confirmText === null) return;
+
+      try {
+        const result = await apiPost('/api/profile/delete', { confirm_text: confirmText });
+        if (!result.ok) {
+          showToast(formatApiError(result.data, 'Unable to delete this profile.'), true, false);
+          return;
+        }
+      } catch (error) {
+        showToast(error.message || 'Unable to delete this profile.', true, false);
+        return;
+      }
+
+      sessionProfileId = '';
+      secretState = emptySecretState();
+      localStorage.removeItem(CREDS_KEY);
+      localStorage.removeItem(OPTIONS_KEY);
+      localStorage.removeItem(ENTERED_KEY);
+      clearSimklPinState();
+      clearTraktDeviceState();
+      populateForm({
+        simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
+        anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
+        trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+        mdblist: { selected_lists: [] },
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] }, {});
+      renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
+      showToast('Profile data deleted.', false, true);
     }
 
     const draftCreds = loadJson(CREDS_KEY, {

@@ -401,6 +401,27 @@ def api_profile_logout():
     return _clear_session_cookie(make_response(jsonify({"status": "logged_out"})))
 
 
+@app.route("/api/profile/delete", methods=["POST"])
+def api_profile_delete():
+    body = request.get_json(silent=True) or {}
+    confirm_text = str(body.get("confirm_text", "")).strip().upper()
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    if confirm_text != "DELETE":
+        return _json_error("Type DELETE to confirm profile deletion", 400)
+
+    try:
+        _profile_store.delete_profile_by_id(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    except RuntimeError as exc:
+        return _json_error(str(exc), 409)
+
+    _session_store.destroy(_session_token())
+    return _clear_session_cookie(make_response(jsonify({"status": "deleted"})))
+
+
 @app.route("/api/simkl/pin/start", methods=["POST"])
 def api_simkl_pin_start():
     body = request.get_json(silent=True) or {}

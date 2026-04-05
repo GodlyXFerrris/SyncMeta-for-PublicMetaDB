@@ -49,7 +49,7 @@ class ProfileStoreTests(unittest.TestCase):
             "auto_sync": True,
             "interval_seconds": 600,
             "remove_missing": False,
-            "delete_disabled_lists": True,
+            "delete_disabled_lists": False,
             "media_types": ["shows", "movies"],
         }
 
@@ -69,7 +69,7 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIn("credentials_encrypted", payload["profiles"][created["profile_id"]])
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
         self.assertEqual(loaded["options"]["interval_seconds"], 600)
-        self.assertTrue(loaded["options"]["delete_disabled_lists"])
+        self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(loaded["credentials"]["simkl"]["selected_statuses"]["shows"], ["watching", "completed"])
         self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], ["CURRENT", "COMPLETED"])
         self.assertEqual(loaded["credentials"]["mdblist"]["selected_lists"][0]["id"], 11)
@@ -110,8 +110,16 @@ class ProfileStoreTests(unittest.TestCase):
         loaded = reloaded_store.get_profile(created["profile_id"], "secret", include_credentials=True)
 
         self.assertEqual(loaded["last_results"][0]["list_name"], "Watching - Series")
-        self.assertTrue(loaded["options"]["delete_disabled_lists"])
+        self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(reloaded_store._profiles[created["profile_id"]]["managed_lists"][0]["list_id"], "pmdb-1")
+
+    def test_delete_profile_by_id_removes_records(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+
+        self.store.delete_profile_by_id(created["profile_id"])
+
+        with self.assertRaises(KeyError):
+            self.store.get_private_profile_by_id(created["profile_id"])
 
     def test_update_by_id_keeps_saved_secrets_when_fields_are_blank(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
