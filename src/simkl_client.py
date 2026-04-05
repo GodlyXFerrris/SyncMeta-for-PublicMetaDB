@@ -45,6 +45,14 @@ SIMKL_NORMALIZED_STATUS_MAP = {
     "dropped": SIMKL_STATUS_DROPPED,
 }
 
+SIMKL_HISTORY_STATUS_SCAN_ORDER = [
+    SIMKL_STATUS_WATCHING,
+    SIMKL_STATUS_COMPLETED,
+    SIMKL_STATUS_ON_HOLD,
+    SIMKL_STATUS_DROPPED,
+    SIMKL_STATUS_PLAN_TO_WATCH,
+]
+
 
 class SimklClient:
     """Client for the SIMKL API v2."""
@@ -235,10 +243,22 @@ class SimklClient:
     def get_watched_history(self) -> list[dict]:
         """Fetch SIMKL completed history as watched-once records."""
         history: list[dict] = []
-        history.extend(self._get_completed_movie_history())
-        history.extend(self._get_completed_show_history("shows"))
-        history.extend(self._get_completed_show_history("anime"))
-        return history
+        movie_history = self._get_completed_movie_history()
+        show_history = self._get_show_history("shows")
+        anime_history = self._get_show_history("anime")
+        history.extend(movie_history)
+        history.extend(show_history)
+        history.extend(anime_history)
+        deduped = self._dedupe_watched_history(history)
+        logger.info(
+            "SIMKL watched history summary: movies=%d shows=%d anime=%d total=%d deduped=%d",
+            len(movie_history),
+            len(show_history),
+            len(anime_history),
+            len(history),
+            len(deduped),
+        )
+        return deduped
 
     def get_playback_progress(self) -> list[dict]:
         """Fetch SIMKL playback progress records."""
@@ -286,10 +306,16 @@ class SimklClient:
             })
         return history
 
-    def _get_completed_show_history(self, media_key: str) -> list[dict]:
+    def _get_show_history(self, media_key: str) -> list[dict]:
+        history: list[dict] = []
+        for status in SIMKL_HISTORY_STATUS_SCAN_ORDER:
+            history.extend(self._get_show_history_for_status(media_key, status))
+        return history
+
+    def _get_show_history_for_status(self, media_key: str, status: str) -> list[dict]:
         api_type = self._api_type(media_key)
         raw = self._get(
-            f"/sync/all-items/{api_type}/completed",
+            f"/sync/all-items/{api_type}/{quote(self._api_status(status), safe='')}",
             params={"extended": "full", "episode_watched_at": "yes"},
         )
         items = []
@@ -302,13 +328,31 @@ class SimklClient:
                 items = raw.get("anime", [])
             elif media_key == "anime" and isinstance(raw.get("shows"), list):
                 items = raw.get("shows", [])
+        logger.info(
+            "SIMKL %s history status '%s': raw_items=%d",
+            media_key,
+            status,
+            len(items),
+        )
+        if items:
+            logger.info(
+                "SIMKL %s history sample for '%s': %s",
+                media_key,
+                status,
+                self._describe_history_entry(items[0]),
+            )
         history: list[dict] = []
         for entry in items:
             show = self._show_payload(entry)
             if not isinstance(show, dict):
                 continue
-            ids = show.get("ids", {}) or {}
             history.extend(self._extract_episode_history(entry, show, media_key))
+        logger.info(
+            "SIMKL %s history status '%s' yielded %d normalized episode entries",
+            media_key,
+            status,
+            len(history),
+        )
         return history
 
     def _extract_episode_history(self, entry: dict, show: dict, media_key: str) -> list[dict]:
@@ -421,6 +465,44 @@ class SimklClient:
             }
 
         return None
+
+    @staticmethod
+    def _watched_history_key(item: dict) -> tuple:
+        return (
+            item.get("tmdb_id"),
+            item.get("media_type"),
+            item.get("season"),
+            item.get("episode"),
+            item.get("title"),
+            item.get("watched_at"),
+        )
+
+    def _dedupe_watched_history(self, history: list[dict]) -> list[dict]:
+        deduped: list[dict] = []
+        seen: set[tuple] = set()
+        for item in history:
+            key = self._watched_history_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
+
+    @staticmethod
+    def _describe_history_entry(entry: dict) -> dict:
+        show = SimklClient._show_payload(entry) if isinstance(entry, dict) else None
+        return {
+            "entry_keys": sorted(entry.keys()) if isinstance(entry, dict) else [],
+            "show_keys": sorted(show.keys()) if isinstance(show, dict) else [],
+            "title": show.get("title") if isinstance(show, dict) else None,
+            "status": entry.get("status") if isinstance(entry, dict) else None,
+            "has_seasons": bool(entry.get("seasons")) if isinstance(entry, dict) else False,
+            "season_count": len(entry.get("seasons", []) or []) if isinstance(entry, dict) else 0,
+            "has_episodes": bool(entry.get("episodes")) if isinstance(entry, dict) else False,
+            "episode_count": len(entry.get("episodes", []) or []) if isinstance(entry, dict) else 0,
+            "first_season_keys": sorted((entry.get("seasons", [{}]) or [{}])[0].keys()) if isinstance(entry, dict) and entry.get("seasons") else [],
+            "first_episode_keys": sorted((entry.get("episodes", [{}]) or [{}])[0].keys()) if isinstance(entry, dict) and entry.get("episodes") else [],
+        }
 
     @staticmethod
     def _show_payload(entry: dict) -> dict | None:

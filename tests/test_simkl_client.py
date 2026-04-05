@@ -21,6 +21,14 @@ class RecordingSimklClient(SimklClient):
                             "ids": {"tmdb": 1234},
                         },
                         "status": "watching",
+                        "seasons": [
+                            {
+                                "number": 1,
+                                "episodes": [
+                                    {"number": 1, "watched_at": "2026-04-04T12:00:00Z"},
+                                ],
+                            }
+                        ],
                     },
                     {
                         "show": {
@@ -57,6 +65,25 @@ class RecordingSimklClient(SimklClient):
                     }
                 ]
             }
+        if path == "/sync/all-items/tv/watching":
+            return {
+                "shows": [
+                    {
+                        "show": {
+                            "title": "Watching Show",
+                            "ids": {"tmdb": 7004},
+                        },
+                        "seasons": [
+                            {
+                                "number": 1,
+                                "episodes": [
+                                    {"number": 1, "watched_at": "2026-04-04T12:00:00Z"},
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            }
         if path == "/sync/all-items/tv/completed":
             return {
                 "shows": [
@@ -76,6 +103,22 @@ class RecordingSimklClient(SimklClient):
                     }
                 ]
             }
+        if path == "/sync/all-items/tv/on%20hold":
+            return {
+                "shows": []
+            }
+        if path == "/sync/all-items/tv/dropped":
+            return {
+                "shows": []
+            }
+        if path == "/sync/all-items/tv/plan%20to%20watch":
+            return {
+                "shows": []
+            }
+        if path == "/sync/all-items/anime/watching":
+            return {
+                "anime": []
+            }
         if path == "/sync/all-items/anime/completed":
             return {
                 "anime": [
@@ -89,6 +132,18 @@ class RecordingSimklClient(SimklClient):
                         ],
                     }
                 ]
+            }
+        if path == "/sync/all-items/anime/on%20hold":
+            return {
+                "anime": []
+            }
+        if path == "/sync/all-items/anime/dropped":
+            return {
+                "anime": []
+            }
+        if path == "/sync/all-items/anime/plan%20to%20watch":
+            return {
+                "anime": []
             }
         if path == "/sync/playback":
             return {
@@ -145,9 +200,13 @@ class SimklClientTests(unittest.TestCase):
 
         history = client.get_watched_history()
 
-        self.assertEqual(len(history), 3)
+        self.assertEqual(len(history), 4)
         self.assertTrue(any(
             item["tmdb_id"] == 7001 and item["media_type"] == "movie" and item["watched_at"] == "2026-04-01T12:00:00Z" and item["title"] == "Completed Movie"
+            for item in history
+        ))
+        self.assertTrue(any(
+            item["tmdb_id"] == 1234 and item["media_type"] == "tv" and item["season"] == 1 and item["episode"] == 1 and item["watched_at"] == "2026-04-04T12:00:00Z" and item["title"] == "Demo Show"
             for item in history
         ))
         self.assertTrue(any(
