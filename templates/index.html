@@ -279,12 +279,26 @@
                 <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-sync-watched-history"><span class="slider"></span></label><label>Sync SIMKL watched history</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-sync-resume-progress"><span class="slider"></span></label><label>Sync SIMKL resume progress</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-watched-history"><span class="slider"></span></label><label>Sync Trakt watched history</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-resume-progress"><span class="slider"></span></label><label>Sync Trakt resume progress</label></div>
+                <div class="form-row">
+                  <label>Watch History Source</label>
+                  <select id="opt-activity-history-source">
+                    <option value="off">Off</option>
+                    <option value="simkl">SIMKL</option>
+                    <option value="trakt">Trakt</option>
+                  </select>
+                  <div class="hint">Choose which service should import watched history when you press the dashboard button.</div>
+                </div>
+                <div class="form-row">
+                  <label>Resume Progress Source</label>
+                  <select id="opt-activity-resume-source">
+                    <option value="off">Off</option>
+                    <option value="simkl">SIMKL</option>
+                    <option value="trakt">Trakt</option>
+                  </select>
+                  <div class="hint">Choose which service should import continue-watching progress when you press the dashboard button.</div>
+                </div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">SIMKL and Trakt activity sync only run from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
+                <div class="hint">Activity sync only runs from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -473,6 +487,7 @@
     let traktDiscoverLists = [];
     let traktSelectedLists = [];
     let traktSyncAllLikedLists = false;
+    let traktDefaultCatalogsInitialized = false;
     let mdblistLists = [];
     let mdblistSelectedLists = [];
     let sessionProfileId = '';
@@ -702,6 +717,7 @@
           username: '',
           sync_watchlist: el('trakt-watchlist-toggle').checked,
           sync_liked_lists: traktSyncAllLikedLists,
+          default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
         },
         mdblist: {
@@ -719,11 +735,9 @@
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
-        simkl_sync_watched_history: el('opt-simkl-sync-watched-history').checked,
-        simkl_sync_resume_progress: el('opt-simkl-sync-resume-progress').checked,
-        trakt_sync_watched_history: el('opt-trakt-sync-watched-history').checked,
+        activity_history_source: el('opt-activity-history-source').value,
+        activity_resume_source: el('opt-activity-resume-source').value,
         trakt_watched_history_interval_seconds: 43200,
-        trakt_sync_resume_progress: el('opt-trakt-sync-resume-progress').checked,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
         trakt_personal_visibility: el('opt-trakt-personal-visibility').value,
@@ -748,6 +762,7 @@
           username: '',
           sync_watchlist: el('trakt-watchlist-toggle').checked,
           sync_liked_lists: traktSyncAllLikedLists,
+          default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
         },
         mdblist: {
@@ -809,6 +824,10 @@
       el('trakt-watchlist-toggle').checked = trakt.sync_watchlist !== false;
       traktSelectedLists = normalizeTraktSelectedLists(trakt.selected_lists || []);
       traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
+      traktDefaultCatalogsInitialized = !!trakt.default_catalogs_initialized;
+      if (!traktDefaultCatalogsInitialized) {
+        traktSelectedLists = traktSelectedLists.filter(item => item.source !== 'default');
+      }
       traktLikedLists = [];
       traktDiscoverLists = [];
       setSecretInputState('mdblist-api-key', 'mdblist', 'api_key_saved', 'From mdblist.com settings');
@@ -819,10 +838,8 @@
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
-      el('opt-simkl-sync-watched-history').checked = !!options.simkl_sync_watched_history;
-      el('opt-simkl-sync-resume-progress').checked = !!options.simkl_sync_resume_progress;
-      el('opt-trakt-sync-watched-history').checked = !!options.trakt_sync_watched_history;
-      el('opt-trakt-sync-resume-progress').checked = !!options.trakt_sync_resume_progress;
+      el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
+      el('opt-activity-resume-source').value = options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
       el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
@@ -855,9 +872,9 @@
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
       const opts = gatherOptions();
-      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.simkl_sync_watched_history || opts.simkl_sync_resume_progress)));
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.activity_history_source === 'simkl' || opts.activity_resume_source === 'simkl')));
       setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
-      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.trakt_sync_watched_history || opts.trakt_sync_resume_progress)));
+      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.activity_history_source === 'trakt' || opts.activity_resume_source === 'trakt')));
       setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
     }
@@ -1064,6 +1081,7 @@
     }
 
     function toggleTraktWatchlist() {
+      traktDefaultCatalogsInitialized = true;
       el('trakt-watchlist-toggle').checked = !el('trakt-watchlist-toggle').checked;
       renderTraktCatalogs();
       updateDots();
@@ -1083,6 +1101,7 @@
     }
 
     function toggleTraktListSelection(key) {
+      traktDefaultCatalogsInitialized = true;
       const selected = traktSelectedLists.slice();
       const index = selected.findIndex(item => traktListKey(item) === key);
       if (index >= 0) {
@@ -1100,6 +1119,7 @@
     }
 
     function enableAllLikedTraktLists() {
+      traktDefaultCatalogsInitialized = true;
       if (!isTraktConnected()) {
         showToast('Connect Trakt first so SyncMeta can read your liked lists.', true, false);
         return;
@@ -1113,6 +1133,7 @@
     }
 
     function selectAllVisibleTraktLists() {
+      traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
         el('trakt-watchlist-toggle').checked = true;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(TRAKT_DEFAULT_CATALOGS));
@@ -1131,6 +1152,7 @@
     }
 
     function deselectAllVisibleTraktLists() {
+      traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
         el('trakt-watchlist-toggle').checked = false;
         const defaultKeys = new Set(TRAKT_DEFAULT_CATALOGS.map(item => traktListKey(item)));
@@ -1855,8 +1877,8 @@
       const activityResults = profile.activity_results || {};
       const watchRow = activityResults.watch_history ? activityResults.watch_history.row : findResultByDisplayName(profile.last_results || [], 'Watch History');
       const resumeRow = activityResults.resume_progress ? activityResults.resume_progress.row : findResultByDisplayName(profile.last_results || [], 'Resume Progress');
-      const watchEnabled = !!(options.simkl_sync_watched_history || options.trakt_sync_watched_history);
-      const resumeEnabled = !!(options.simkl_sync_resume_progress || options.trakt_sync_resume_progress);
+      const watchEnabled = !!((options.activity_history_source || 'off') !== 'off');
+      const resumeEnabled = !!((options.activity_resume_source || 'off') !== 'off');
       const watchSubtitle = describeActivitySources(options, 'history');
       const resumeSubtitle = describeActivitySources(options, 'resume');
       const showPanel = !!(watchRow || resumeRow || watchEnabled || resumeEnabled);
@@ -1879,17 +1901,12 @@
       }
 
     function describeActivitySources(options, mode) {
-      const sources = [];
-      if (mode === 'history') {
-        if (options.simkl_sync_watched_history) sources.push('SIMKL');
-        if (options.trakt_sync_watched_history) sources.push('Trakt');
-      } else {
-        if (options.simkl_sync_resume_progress) sources.push('SIMKL');
-        if (options.trakt_sync_resume_progress) sources.push('Trakt');
-      }
-      if (!sources.length) return 'Run this manually from the button above.';
-      if (mode === 'history') return `${sources.join(' + ')} watched imports`;
-      return `${sources.join(' + ')} continue watching sync`;
+      const source = mode === 'history'
+        ? (options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off')))
+        : (options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off')));
+      if (!source || source === 'off') return 'Run this manually from the button above.';
+      if (mode === 'history') return `${source.toUpperCase()} watched imports`;
+      return `${source.toUpperCase()} continue watching sync`;
     }
 
     function updateClearHistoryButtons(show, canUse) {
@@ -2212,9 +2229,9 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       showToast('Logged out.', false, true);
     }
@@ -2249,9 +2266,9 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       showToast('Profile data deleted.', false, true);
     }
@@ -2301,10 +2318,10 @@
     const draftCreds = loadJson(CREDS_KEY, {
       simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
       anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-      trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
+      trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
     populateForm(draftCreds, draftOptions, {});
     resumeSimklPinState();
     resumeTraktDeviceState();

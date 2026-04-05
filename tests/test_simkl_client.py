@@ -21,7 +21,15 @@ class RecordingSimklClient(SimklClient):
                             "ids": {"tmdb": 1234},
                         },
                         "status": "watching",
-                    }
+                    },
+                    {
+                        "show": {
+                            "title": "Completed Leak",
+                            "year": 2022,
+                            "ids": {"tmdb": 9999},
+                        },
+                        "status": "completed",
+                    },
                 ]
             }
         if path == "/sync/all-items/anime/plan%20to%20watch":
@@ -119,6 +127,7 @@ class SimklClientTests(unittest.TestCase):
         grouped = client.get_status("watching", ["shows"])
 
         self.assertEqual(client.paths, ["/sync/all-items/tv/watching"])
+        self.assertEqual(len(grouped["shows"]), 1)
         self.assertEqual(grouped["shows"][0]["title"], "Demo Show")
         self.assertEqual(grouped["shows"][0]["media_type"], "tv")
 
@@ -137,18 +146,18 @@ class SimklClientTests(unittest.TestCase):
         history = client.get_watched_history()
 
         self.assertEqual(len(history), 3)
-        self.assertIn(
-            {"tmdb_id": 7001, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Completed Movie"},
-            history,
-        )
-        self.assertIn(
-            {"tmdb_id": 7002, "media_type": "tv", "season": 1, "episode": 2, "watched_at": "2026-04-02T12:00:00Z", "title": "Completed Show"},
-            history,
-        )
-        self.assertIn(
-            {"tmdb_id": 7003, "media_type": "tv", "season": 1, "episode": 3, "watched_at": "2026-04-03T12:00:00Z", "title": "Completed Anime"},
-            history,
-        )
+        self.assertTrue(any(
+            item["tmdb_id"] == 7001 and item["media_type"] == "movie" and item["watched_at"] == "2026-04-01T12:00:00Z" and item["title"] == "Completed Movie"
+            for item in history
+        ))
+        self.assertTrue(any(
+            item["tmdb_id"] == 7002 and item["media_type"] == "tv" and item["season"] == 1 and item["episode"] == 2 and item["watched_at"] == "2026-04-02T12:00:00Z" and item["title"] == "Completed Show"
+            for item in history
+        ))
+        self.assertTrue(any(
+            item["tmdb_id"] == 7003 and item["media_type"] == "tv" and item["season"] == 1 and item["episode"] == 3 and item["watched_at"] == "2026-04-03T12:00:00Z" and item["title"] == "Completed Anime"
+            for item in history
+        ))
 
     def test_get_playback_progress_parses_movie_and_episode(self) -> None:
         client = RecordingSimklClient()
@@ -156,14 +165,14 @@ class SimklClientTests(unittest.TestCase):
         progress = client.get_playback_progress()
 
         self.assertEqual(len(progress), 2)
-        self.assertIn(
-            {"tmdb_id": 8001, "media_type": "movie", "position_ms": 3_600_000, "runtime_ms": 7_200_000, "progress": 50.0, "paused_at": None, "title": "Paused Movie"},
-            progress,
-        )
-        self.assertIn(
-            {"tmdb_id": 8002, "media_type": "tv", "season": 2, "episode": 4, "position_ms": 1_080_000, "runtime_ms": 2_700_000, "progress": 40.0, "paused_at": None, "title": "Paused Show"},
-            progress,
-        )
+        self.assertTrue(any(
+            item["tmdb_id"] == 8001 and item["media_type"] == "movie" and item["position_ms"] == 3_600_000 and item["runtime_ms"] == 7_200_000 and item["progress"] == 50.0 and item["paused_at"] is None and item["title"] == "Paused Movie"
+            for item in progress
+        ))
+        self.assertTrue(any(
+            item["tmdb_id"] == 8002 and item["media_type"] == "tv" and item["season"] == 2 and item["episode"] == 4 and item["position_ms"] == 1_080_000 and item["runtime_ms"] == 2_700_000 and item["progress"] == 40.0 and item["paused_at"] is None and item["title"] == "Paused Show"
+            for item in progress
+        ))
 
 
 if __name__ == "__main__":

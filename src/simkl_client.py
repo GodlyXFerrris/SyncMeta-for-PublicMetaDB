@@ -34,6 +34,17 @@ SIMKL_API_TYPE_MAP = {
     "anime": "anime",
 }
 
+SIMKL_NORMALIZED_STATUS_MAP = {
+    "watching": SIMKL_STATUS_WATCHING,
+    "plantowatch": SIMKL_STATUS_PLAN_TO_WATCH,
+    "plan to watch": SIMKL_STATUS_PLAN_TO_WATCH,
+    "planning": SIMKL_STATUS_PLAN_TO_WATCH,
+    "completed": SIMKL_STATUS_COMPLETED,
+    "hold": SIMKL_STATUS_ON_HOLD,
+    "on hold": SIMKL_STATUS_ON_HOLD,
+    "dropped": SIMKL_STATUS_DROPPED,
+}
+
 
 class SimklClient:
     """Client for the SIMKL API v2."""
@@ -135,6 +146,7 @@ class SimklClient:
         grouped: dict[str, list[dict]] = {}
         types_to_process = media_types or ["shows", "movies", "anime"]
         api_status = self._api_status(status)
+        requested_status = self._normalize_status(status)
 
         for media_type in types_to_process:
             api_type = self._api_type(media_type)
@@ -147,6 +159,16 @@ class SimklClient:
             for entry in raw_items:
                 normalized = self._normalize_item(entry, media_type)
                 if normalized:
+                    item_status = self._normalize_status(normalized.get("status"))
+                    if item_status and item_status != requested_status:
+                        logger.info(
+                            "Skipping SIMKL %s entry '%s' because it reported status '%s' during '%s' sync",
+                            media_type,
+                            normalized.get("title", "Unknown"),
+                            normalized.get("status"),
+                            status,
+                        )
+                        continue
                     items.append(normalized)
             if items:
                 grouped[media_type] = items
@@ -158,6 +180,10 @@ class SimklClient:
     @staticmethod
     def _api_status(status: str) -> str:
         return SIMKL_API_STATUS_MAP.get(status, status.replace("_", " "))
+
+    @staticmethod
+    def _normalize_status(status: object) -> str:
+        return SIMKL_NORMALIZED_STATUS_MAP.get(str(status or "").strip().lower(), "")
 
     @staticmethod
     def _api_type(media_type: str) -> str:
@@ -243,9 +269,6 @@ class SimklClient:
             if not isinstance(movie, dict):
                 continue
             ids = movie.get("ids", {}) or {}
-            tmdb_id = ids.get("tmdb")
-            if not tmdb_id:
-                continue
             watched_at = (
                 entry.get("watched_at")
                 or entry.get("last_watched_at")
@@ -253,10 +276,13 @@ class SimklClient:
                 or movie.get("watched_at")
             )
             history.append({
-                "tmdb_id": int(tmdb_id),
+                "tmdb_id": int(ids["tmdb"]) if ids.get("tmdb") else None,
                 "media_type": "movie",
                 "watched_at": watched_at,
                 "title": movie.get("title", "Unknown"),
+                "year": movie.get("year"),
+                "imdb_id": ids.get("imdb"),
+                "ids": ids,
             })
         return history
 
@@ -266,22 +292,31 @@ class SimklClient:
             f"/sync/all-items/{api_type}/completed",
             params={"extended": "full", "episode_watched_at": "yes"},
         )
-        items = raw.get(media_key, []) if isinstance(raw, dict) else []
+        items = []
+        if isinstance(raw, dict):
+            if isinstance(raw.get(media_key), list):
+                items = raw.get(media_key, [])
+            elif media_key == "shows" and isinstance(raw.get("shows"), list):
+                items = raw.get("shows", [])
+            elif media_key == "anime" and isinstance(raw.get("anime"), list):
+                items = raw.get("anime", [])
+            elif media_key == "anime" and isinstance(raw.get("shows"), list):
+                items = raw.get("shows", [])
         history: list[dict] = []
         for entry in items:
-            show = entry.get("show") if isinstance(entry, dict) else None
+            show = self._show_payload(entry)
             if not isinstance(show, dict):
                 continue
             ids = show.get("ids", {}) or {}
-            tmdb_id = ids.get("tmdb")
-            if not tmdb_id:
-                continue
-            history.extend(self._extract_episode_history(entry, int(tmdb_id), show.get("title", "Unknown")))
+            history.extend(self._extract_episode_history(entry, show, media_key))
         return history
 
-    def _extract_episode_history(self, entry: dict, tmdb_id: int, title: str) -> list[dict]:
+    def _extract_episode_history(self, entry: dict, show: dict, media_key: str) -> list[dict]:
         history: list[dict] = []
         seen: set[tuple[int, int]] = set()
+        ids = show.get("ids", {}) or {}
+        title = show.get("title", "Unknown")
+        tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
 
         def add_episode(season: int | None, episode: int | None, watched_at: str | None) -> None:
             if season is None or episode is None:
@@ -297,6 +332,14 @@ class SimklClient:
                 "episode": int(episode),
                 "watched_at": watched_at,
                 "title": title,
+                "year": show.get("year"),
+                "simkl_type": media_key,
+                "imdb_id": ids.get("imdb"),
+                "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+                "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+                "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+                "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+                "ids": ids,
             })
 
         for season_entry in entry.get("seasons", []) or []:
@@ -322,7 +365,7 @@ class SimklClient:
             return None
 
         movie = entry.get("movie")
-        show = entry.get("show")
+        show = self._show_payload(entry)
         episode = entry.get("episode")
 
         if isinstance(movie, dict):
@@ -335,13 +378,16 @@ class SimklClient:
             runtime_ms = int(float(runtime_minutes) * 60_000)
             position_ms = int(round(runtime_ms * (progress / 100.0)))
             return {
-                "tmdb_id": int(tmdb_id),
+                "tmdb_id": int(tmdb_id) if tmdb_id else None,
                 "media_type": "movie",
                 "position_ms": position_ms,
                 "runtime_ms": runtime_ms,
                 "progress": progress,
                 "paused_at": entry.get("updated_at") or entry.get("paused_at"),
                 "title": movie.get("title", "Unknown"),
+                "year": movie.get("year"),
+                "imdb_id": ids.get("imdb"),
+                "ids": ids,
             }
 
         if isinstance(show, dict) and isinstance(episode, dict):
@@ -351,12 +397,12 @@ class SimklClient:
             progress = self._playback_progress_percent(entry)
             season = episode.get("season")
             number = episode.get("number") or episode.get("episode")
-            if not tmdb_id or runtime_minutes in (None, 0) or progress is None or season is None or number is None:
+            if runtime_minutes in (None, 0) or progress is None or season is None or number is None:
                 return None
             runtime_ms = int(float(runtime_minutes) * 60_000)
             position_ms = int(round(runtime_ms * (progress / 100.0)))
             return {
-                "tmdb_id": int(tmdb_id),
+                "tmdb_id": int(tmdb_id) if tmdb_id else None,
                 "media_type": "tv",
                 "season": int(season),
                 "episode": int(number),
@@ -365,8 +411,23 @@ class SimklClient:
                 "progress": progress,
                 "paused_at": entry.get("updated_at") or entry.get("paused_at"),
                 "title": show.get("title", "Unknown"),
+                "year": show.get("year"),
+                "imdb_id": show_ids.get("imdb"),
+                "mal_id": str(show_ids["mal"]) if show_ids.get("mal") else None,
+                "anilist_id": str(show_ids["anilist"]) if show_ids.get("anilist") else None,
+                "anidb_id": str(show_ids["anidb"]) if show_ids.get("anidb") else None,
+                "tvdb_id": str(show_ids["tvdb"]) if show_ids.get("tvdb") else None,
+                "ids": show_ids,
             }
 
+        return None
+
+    @staticmethod
+    def _show_payload(entry: dict) -> dict | None:
+        for key in ("show", "anime", "series", "tv_show"):
+            value = entry.get(key)
+            if isinstance(value, dict):
+                return value
         return None
 
     @staticmethod

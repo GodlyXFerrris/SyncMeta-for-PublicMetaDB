@@ -250,6 +250,32 @@ class ProfileStoreTests(unittest.TestCase):
         })
         self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], [])
 
+    def test_legacy_default_trakt_catalogs_are_cleared_until_user_opts_in(self) -> None:
+        created = self.store.create_profile("secret", {
+            **self.credentials,
+            "trakt": {
+                "client_id": "trakt-client",
+                "client_secret": "",
+                "access_token": "trakt-token",
+                "refresh_token": "",
+                "username": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [{
+                    "name": "Trending Movies",
+                    "user": "default",
+                    "slug": "trending-movies",
+                    "source": "default",
+                    "catalog_key": "trending-movies",
+                }],
+            },
+        }, self.options)
+
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+
+        self.assertFalse(loaded["credentials"]["trakt"]["default_catalogs_initialized"])
+        self.assertEqual(loaded["credentials"]["trakt"]["selected_lists"], [])
+
     def test_activity_sync_is_manual_only_even_when_enabled(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,

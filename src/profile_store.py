@@ -25,6 +25,7 @@ MAX_HISTORY_ITEMS = 20
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"}
 ALLOWED_VISIBILITIES = {"private", "public"}
+ALLOWED_ACTIVITY_SOURCES = {"off", "simkl", "trakt"}
 DEFAULT_KEY_FILE_NAME = "profiles.key"
 
 ACTIVITY_RESULT_NAMES = {
@@ -105,6 +106,10 @@ def normalize_credentials(credentials: dict | None) -> dict:
     trakt = raw.get("trakt", {})
     mdblist = raw.get("mdblist", {})
     pmdb = raw.get("pmdb", {})
+    trakt_default_catalogs_initialized = bool(trakt.get("default_catalogs_initialized", False))
+    trakt_selected_lists = _normalize_trakt_selected_lists(trakt.get("selected_lists", []))
+    if not trakt_default_catalogs_initialized:
+        trakt_selected_lists = [item for item in trakt_selected_lists if item.get("source") != "default"]
     return {
         "simkl": {
             "client_id": str(simkl.get("client_id", "")).strip(),
@@ -125,7 +130,8 @@ def normalize_credentials(credentials: dict | None) -> dict:
             "username": str(trakt.get("username", "")).strip(),
             "sync_watchlist": bool(trakt.get("sync_watchlist", True)),
             "sync_liked_lists": bool(trakt.get("sync_liked_lists", True)),
-            "selected_lists": _normalize_trakt_selected_lists(trakt.get("selected_lists", [])),
+            "default_catalogs_initialized": trakt_default_catalogs_initialized,
+            "selected_lists": trakt_selected_lists,
         },
         "mdblist": {
             "api_key": str(mdblist.get("api_key", "")).strip(),
@@ -159,6 +165,7 @@ def public_credentials(credentials: dict | None) -> dict:
             "username": raw["trakt"]["username"],
             "sync_watchlist": raw["trakt"]["sync_watchlist"],
             "sync_liked_lists": raw["trakt"]["sync_liked_lists"],
+            "default_catalogs_initialized": raw["trakt"]["default_catalogs_initialized"],
             "selected_lists": copy.deepcopy(raw["trakt"]["selected_lists"]),
         },
         "mdblist": {
@@ -336,6 +343,7 @@ def merge_credentials(existing: dict | None, updates: dict | None) -> dict:
             "username": incoming["trakt"]["username"],
             "sync_watchlist": incoming["trakt"]["sync_watchlist"],
             "sync_liked_lists": incoming["trakt"]["sync_liked_lists"],
+            "default_catalogs_initialized": incoming["trakt"]["default_catalogs_initialized"],
             "selected_lists": incoming["trakt"]["selected_lists"],
         },
         "mdblist": {
@@ -351,6 +359,17 @@ def merge_credentials(existing: dict | None, updates: dict | None) -> dict:
 def _normalize_visibility(value: object, default: str) -> str:
     candidate = str(value or "").strip().lower()
     return candidate if candidate in ALLOWED_VISIBILITIES else default
+
+
+def _normalize_activity_source(value: object, simkl_enabled: bool, trakt_enabled: bool) -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate in ALLOWED_ACTIVITY_SOURCES:
+        return candidate
+    if simkl_enabled:
+        return "simkl"
+    if trakt_enabled:
+        return "trakt"
+    return "off"
 
 
 def normalize_profile_options(options: dict | None) -> dict:
@@ -388,19 +407,32 @@ def normalize_profile_options(options: dict | None) -> dict:
     if not media_types:
         raise ValueError("Select at least one media type to sync")
 
+    history_source = _normalize_activity_source(
+        raw.get("activity_history_source"),
+        bool(raw.get("simkl_sync_watched_history", False)),
+        bool(raw.get("trakt_sync_watched_history", False)),
+    )
+    resume_source = _normalize_activity_source(
+        raw.get("activity_resume_source"),
+        bool(raw.get("simkl_sync_resume_progress", False)),
+        bool(raw.get("trakt_sync_resume_progress", False)),
+    )
+
     return {
         "remove_missing": bool(raw.get("remove_missing", False)),
         "delete_disabled_lists": bool(raw.get("delete_disabled_lists", False)),
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
-        "simkl_sync_watched_history": bool(raw.get("simkl_sync_watched_history", False)),
-        "simkl_sync_resume_progress": bool(raw.get("simkl_sync_resume_progress", False)),
-        "trakt_sync_watched_history": bool(raw.get("trakt_sync_watched_history", False)),
+        "activity_history_source": history_source,
+        "activity_resume_source": resume_source,
+        "simkl_sync_watched_history": history_source == "simkl",
+        "simkl_sync_resume_progress": resume_source == "simkl",
+        "trakt_sync_watched_history": history_source == "trakt",
         "trakt_watched_history_interval_seconds": watched_history_interval_seconds,
         "trakt_sync_full_watch_counts": False,
         "trakt_reconcile_watched_history": False,
-        "trakt_sync_resume_progress": bool(raw.get("trakt_sync_resume_progress", False)),
+        "trakt_sync_resume_progress": resume_source == "trakt",
         "simkl_visibility": _normalize_visibility(raw.get("simkl_visibility"), "private"),
         "anilist_visibility": _normalize_visibility(raw.get("anilist_visibility"), "private"),
         "trakt_personal_visibility": _normalize_visibility(raw.get("trakt_personal_visibility"), "private"),
