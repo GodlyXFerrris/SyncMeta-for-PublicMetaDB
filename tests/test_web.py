@@ -55,11 +55,13 @@ class WebTests(unittest.TestCase):
         self.assertIn("selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Sync Trakt watched history", html)
-        self.assertIn("Match repeated Trakt watches", html)
-        self.assertIn("Reconcile PMDB watched count to Trakt", html)
+        self.assertIn("Watch History Update Every (Seconds)", html)
         self.assertIn("Sync Trakt resume progress", html)
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)
+        self.assertIn("Sync Watch History", html)
+        self.assertIn("Sync Resume Progress", html)
+        self.assertIn("Refreshes automatically every hour", html)
         self.assertIn('id="btn-stop"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
@@ -415,6 +417,62 @@ class WebTests(unittest.TestCase):
         self.assertEqual(stop_data["profile"]["sync_status"], "Stopping...")
         private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
         self.assertTrue(private_profile["sync_cancel_requested"])
+
+    def test_activity_sync_endpoint_starts_history_only_run(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "trakt-client",
+                "client_secret": "trakt-secret",
+                "access_token": "trakt-token",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-key",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+            "trakt_sync_watched_history": True,
+            "trakt_watched_history_interval_seconds": 43200,
+            "trakt_sync_resume_progress": False,
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        with patch("web.threading.Thread") as mock_thread:
+            response = self.client.post("/api/profile/activity/sync", json={"mode": "history"})
+            data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["status"], "started")
+        self.assertEqual(data["mode"], "history")
+        thread_args = mock_thread.call_args.kwargs["args"]
+        self.assertEqual(thread_args[2], {"lists": False, "history": True, "resume": False})
 
     @patch("web.PublicMetaDBClient.delete_list")
     def test_delete_managed_list_endpoint_removes_mdblist_selection(self, mock_delete_list) -> None:

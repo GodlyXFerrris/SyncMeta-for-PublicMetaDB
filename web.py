@@ -160,11 +160,20 @@ def _stats_to_dict(stats: SyncStats) -> dict:
     return data
 
 
-def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
+def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict | None = None) -> AppConfig:
     credentials = normalize_credentials(profile.get("credentials"))
     options = normalize_profile_options(profile.get("options"))
     anilist_username = credentials["anilist"]["username"]
     trakt_username = credentials["trakt"]["username"]
+    modes = {
+        "lists": True,
+        "history": options["trakt_sync_watched_history"],
+        "resume": options["trakt_sync_resume_progress"],
+    }
+    if isinstance(sync_modes, dict):
+        modes["lists"] = bool(sync_modes.get("lists", False))
+        modes["history"] = bool(sync_modes.get("history", False)) and options["trakt_sync_watched_history"]
+        modes["resume"] = bool(sync_modes.get("resume", False)) and options["trakt_sync_resume_progress"]
 
     return AppConfig(
         simkl=SimklConfig(
@@ -201,10 +210,11 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
             delete_disabled_lists=options["delete_disabled_lists"],
             dry_run=dry_run,
             media_types=options["media_types"],
-            trakt_sync_watched_history=options["trakt_sync_watched_history"],
-            trakt_sync_full_watch_counts=options["trakt_sync_full_watch_counts"],
-            trakt_reconcile_watched_history=options["trakt_reconcile_watched_history"],
-            trakt_sync_resume_progress=options["trakt_sync_resume_progress"],
+            trakt_sync_watched_history=modes["history"],
+            trakt_watched_history_interval_seconds=options["trakt_watched_history_interval_seconds"],
+            trakt_sync_full_watch_counts=modes["history"],
+            trakt_reconcile_watched_history=modes["history"],
+            trakt_sync_resume_progress=modes["resume"],
             simkl_visibility=options["simkl_visibility"],
             anilist_visibility=options["anilist_visibility"],
             trakt_personal_visibility=options["trakt_personal_visibility"],
@@ -356,12 +366,13 @@ def _clear_access_cookie(response):
     return response
 
 
-def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
+def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | None = None) -> None:
     profile_id = profile["profile_id"]
+    modes = sync_modes or profile.get("pending_sync_modes") or {"lists": True, "history": False, "resume": False}
     try:
         _profile_store.update_sync_status(profile_id, "Starting sync")
         service = SyncService(
-            _config_from_profile(profile, dry_run=dry_run),
+            _config_from_profile(profile, dry_run=dry_run, sync_modes=modes),
             status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
             managed_lists=profile.get("managed_lists", []),
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
@@ -373,13 +384,14 @@ def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
             result_dicts,
             dry_run=dry_run,
             managed_lists=service.managed_lists,
+            sync_modes=modes,
         )
     except SyncCancelled:
         logger.info("Sync stopped for profile %s", profile_id[:8])
-        _profile_store.record_sync_cancelled(profile_id, dry_run=dry_run)
+        _profile_store.record_sync_cancelled(profile_id, dry_run=dry_run, sync_modes=modes)
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
-        _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run)
+        _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run, sync_modes=modes)
 
 
 def _find_managed_list(profile: dict, list_name: str) -> dict | None:
@@ -584,7 +596,7 @@ class ProfileScheduler:
             for profile in self._store.claim_due_profiles():
                 threading.Thread(
                     target=_run_profile_sync,
-                    args=(profile, False),
+                    args=(profile, False, profile.get("pending_sync_modes")),
                     name=f"sync-{profile['profile_id'][:8]}",
                     daemon=True,
                 ).start()
@@ -1011,7 +1023,11 @@ def api_profile_sync():
         return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
     try:
-        profile = _profile_store.claim_profile_for_sync_by_id(profile_id)
+        profile = _profile_store.claim_profile_for_sync_by_id(profile_id, sync_modes={
+            "lists": True,
+            "history": False,
+            "resume": False,
+        })
     except KeyError:
         return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
     except RuntimeError:
@@ -1019,12 +1035,55 @@ def api_profile_sync():
 
     thread = threading.Thread(
         target=_run_profile_sync,
-        args=(profile, dry_run),
+        args=(profile, dry_run, {"lists": True, "history": False, "resume": False}),
         name=f"manual-sync-{profile['profile_id'][:8]}",
         daemon=True,
     )
     thread.start()
     return jsonify({"status": "started", "dry_run": dry_run})
+
+
+@app.route("/api/profile/activity/sync", methods=["POST"])
+def api_profile_activity_sync():
+    body = request.get_json(silent=True) or {}
+    mode = str(body.get("mode", "")).strip().lower()
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    if mode not in {"history", "resume"}:
+        return _json_error("Activity sync mode must be 'history' or 'resume'", 400)
+
+    profile = _current_private_profile()
+    if not profile:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+
+    options = normalize_profile_options(profile.get("options"))
+    if mode == "history" and not options["trakt_sync_watched_history"]:
+        return _json_error("Enable Trakt watched history sync in Settings first", 409)
+    if mode == "resume" and not options["trakt_sync_resume_progress"]:
+        return _json_error("Enable Trakt resume progress sync in Settings first", 409)
+
+    sync_modes = {
+        "lists": False,
+        "history": mode == "history",
+        "resume": mode == "resume",
+    }
+
+    try:
+        claimed = _profile_store.claim_profile_for_sync_by_id(profile_id, sync_modes=sync_modes)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    except RuntimeError:
+        return _json_error("Sync already in progress", 409)
+
+    thread = threading.Thread(
+        target=_run_profile_sync,
+        args=(claimed, False, sync_modes),
+        name=f"activity-sync-{mode}-{claimed['profile_id'][:8]}",
+        daemon=True,
+    )
+    thread.start()
+    return jsonify({"status": "started", "mode": mode})
 
 
 @app.route("/api/profile/sync/stop", methods=["POST"])

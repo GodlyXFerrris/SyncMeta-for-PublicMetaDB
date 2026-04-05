@@ -161,13 +161,19 @@
       <div id="view-dashboard" style="display:none">
         <div class="cards" id="cards"></div>
         <div class="actions-bar" style="margin-bottom:20px">
-          <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Now</span></button>
-          <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run</button>
+          <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Lists</span></button>
+          <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run Lists</button>
           <button class="btn btn-danger hidden" id="btn-stop" onclick="stopSync()">Stop</button>
           <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
         </div>
         <div class="panel hidden" id="activity-panel">
-          <div class="panel-header">Activity Sync</div>
+          <div class="panel-header">
+            <span>Activity Sync</span>
+            <div class="actions-bar" style="margin-top:0">
+              <button class="btn btn-sm" id="btn-sync-history" type="button" onclick="triggerActivitySync('history')">Sync Watch History</button>
+              <button class="btn btn-sm" id="btn-sync-resume" type="button" onclick="triggerActivitySync('resume')">Sync Resume Progress</button>
+            </div>
+          </div>
           <div class="panel-body">
             <div class="cards activity-cards" id="activity-cards"></div>
           </div>
@@ -271,11 +277,10 @@
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-watched-history"><span class="slider"></span></label><label>Sync Trakt watched history</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-full-watch-counts"><span class="slider"></span></label><label>Match repeated Trakt watches</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-reconcile-watched-history"><span class="slider"></span></label><label>Reconcile PMDB watched count to Trakt</label></div>
+                <div class="form-row"><label>Watch History Update Every (Seconds)</label><input type="number" id="opt-trakt-history-interval-seconds" min="43200" step="1" value="43200"><div class="hint">Minimum 43200 seconds (12 hours). This applies only to the automatic Trakt watch history sync.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-resume-progress"><span class="slider"></span></label><label>Sync Trakt resume progress</label></div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Trakt watch history imports dated plays into PublicMetaDB. Turn on repeated watches if you want SyncMeta to add missing extra watch counts instead of stopping at watched once. Turn on reconciliation if you want SyncMeta to also delete extra PMDB watched entries and match Trakt exactly. Trakt resume sync saves continue-watching positions and clears them when Trakt reports completed playback.</div>
+                <div class="hint">Trakt watch history always matches repeated plays and reconciles PublicMetaDB back down when needed. Trakt resume sync refreshes automatically every hour and can also be forced from the dashboard.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -703,14 +708,14 @@
 
     function gatherOptions() {
       const intervalSeconds = parseInt(el('opt-interval-seconds').value || '1800', 10);
+      const historyIntervalSeconds = parseInt(el('opt-trakt-history-interval-seconds').value || '43200', 10);
       return {
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         trakt_sync_watched_history: el('opt-trakt-sync-watched-history').checked,
-        trakt_sync_full_watch_counts: el('opt-trakt-sync-full-watch-counts').checked,
-        trakt_reconcile_watched_history: el('opt-trakt-reconcile-watched-history').checked,
+        trakt_watched_history_interval_seconds: Number.isFinite(historyIntervalSeconds) ? historyIntervalSeconds : 43200,
         trakt_sync_resume_progress: el('opt-trakt-sync-resume-progress').checked,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
@@ -808,8 +813,7 @@
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-trakt-sync-watched-history').checked = !!options.trakt_sync_watched_history;
-      el('opt-trakt-sync-full-watch-counts').checked = !!options.trakt_sync_full_watch_counts;
-      el('opt-trakt-reconcile-watched-history').checked = !!options.trakt_reconcile_watched_history;
+      el('opt-trakt-history-interval-seconds').value = options.trakt_watched_history_interval_seconds || 43200;
       el('opt-trakt-sync-resume-progress').checked = !!options.trakt_sync_resume_progress;
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
@@ -1737,7 +1741,9 @@
       el('btn-stop').disabled = true;
       el('btn-stop').classList.add('hidden');
       el('btn-stop').textContent = 'Stop';
-      el('sync-label').textContent = 'Sync Now';
+      el('sync-label').textContent = 'Sync Lists';
+      el('btn-sync-history').disabled = true;
+      el('btn-sync-resume').disabled = true;
       if (polling) {
         clearInterval(polling);
         polling = null;
@@ -1783,7 +1789,7 @@
         <div class="card"><div class="card-label">Issues</div><div class="card-value" style="color:${totals.unresolved + totals.errors > 0 ? 'var(--orange)' : 'var(--z600)'}">${totals.unresolved + totals.errors}</div><div class="card-sub">${totals.unresolved} unresolved, ${totals.errors} errors</div></div>
       `;
 
-      renderActivityPanel(results, options);
+      renderActivityPanel(profile);
 
       const nextSyncText = options.auto_sync === false
         ? 'Auto sync is off'
@@ -1830,27 +1836,33 @@
       el('btn-stop').disabled = !profile.sync_running || stopping;
       el('btn-stop').classList.toggle('hidden', !profile.sync_running);
       el('btn-stop').textContent = stopping ? 'Stopping...' : 'Stop';
-      el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Now';
+      el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Lists';
       if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
       else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; }
     }
 
-    function renderActivityPanel(results, options) {
-      const watchRow = findResultByDisplayName(results, 'Trakt Watch History');
-      const resumeRow = findResultByDisplayName(results, 'Trakt Resume Progress');
+    function renderActivityPanel(profile) {
+      const options = profile.options || {};
+      const activityResults = profile.activity_results || {};
+      const watchRow = activityResults.watch_history ? activityResults.watch_history.row : findResultByDisplayName(profile.last_results || [], 'Trakt Watch History');
+      const resumeRow = activityResults.resume_progress ? activityResults.resume_progress.row : findResultByDisplayName(profile.last_results || [], 'Trakt Resume Progress');
       const showPanel = !!(watchRow || resumeRow || options.trakt_sync_watched_history || options.trakt_sync_resume_progress);
       if (!showPanel) {
         el('activity-panel').classList.add('hidden');
         el('activity-cards').innerHTML = '';
+        el('btn-sync-history').disabled = true;
+        el('btn-sync-resume').disabled = true;
         return;
       }
 
       const watchEnabled = !!options.trakt_sync_watched_history;
       const resumeEnabled = !!options.trakt_sync_resume_progress;
+      el('btn-sync-history').disabled = !!profile.sync_running || !watchEnabled;
+      el('btn-sync-resume').disabled = !!profile.sync_running || !resumeEnabled;
       el('activity-panel').classList.remove('hidden');
       el('activity-cards').innerHTML = [
-        buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors'),
-        buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors'),
+        buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', profile.next_history_sync_at, activityResults.watch_history && activityResults.watch_history.timestamp),
+        buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', profile.next_resume_sync_at, activityResults.resume_progress && activityResults.resume_progress.timestamp),
       ].join('');
     }
 
@@ -1858,7 +1870,7 @@
       return (results || []).find(row => (row.display_name || '') === displayName) || null;
     }
 
-    function buildActivityCard(title, subtitle, row, enabled, primaryLabel, secondaryLabel, tertiaryLabel, quaternaryLabel) {
+    function buildActivityCard(title, subtitle, row, enabled, primaryLabel, secondaryLabel, tertiaryLabel, quaternaryLabel, nextRunAt, lastRunAt) {
       let statusText = enabled ? 'Waiting for the next sync run.' : 'Turned off in Settings.';
       let primaryValue = 0;
       let secondaryValue = 0;
@@ -1873,13 +1885,24 @@
         statusText = quaternaryValue > 0
           ? `${quaternaryValue} issue${quaternaryValue === 1 ? '' : 's'} in the latest run.`
           : 'Latest sync completed cleanly.';
+      } else if (enabled && nextRunAt) {
+        statusText = `Next automatic refresh ${timeUntil(nextRunAt)}.`;
+      }
+
+      if (enabled && !row && title === 'Resume Progress') {
+        statusText = nextRunAt ? `Refreshes automatically every hour. Next run ${timeUntil(nextRunAt)}.` : 'Refreshes automatically every hour.';
+      }
+
+      let metaText = subtitle;
+      if (lastRunAt) {
+        metaText = `${subtitle} · Updated ${timeAgo(lastRunAt)}`;
       }
 
       return `
         <div class="card activity-card">
           <div class="card-label">${esc(title)}</div>
           <div class="card-value">${primaryValue}<span class="card-sub">${esc(primaryLabel.toLowerCase())}</span></div>
-          <div class="activity-meta">${esc(subtitle)}</div>
+          <div class="activity-meta">${esc(metaText)}</div>
           <div class="card-sub">${esc(statusText)}</div>
           <div class="activity-stats">
             <div class="activity-stat"><div class="activity-stat-label">${esc(primaryLabel)}</div><div class="activity-stat-value ${primaryValue > 0 ? 'c-green' : ''}">${primaryValue}</div></div>
@@ -2025,12 +2048,32 @@
           return;
         }
 
-        showToast(dryRun ? 'Dry run started.' : 'Sync started.', false, true);
+        showToast(dryRun ? 'List dry run started.' : 'List sync started.', false, true);
         switchView('dashboard');
         fetchStatus();
         if (!polling) polling = setInterval(fetchStatus, 2000);
       } catch {
         showToast('Network error while starting sync.', true, false);
+      }
+    }
+
+    async function triggerActivitySync(mode) {
+      const savedProfile = await saveProfile(false);
+      if (!savedProfile) return;
+
+      try {
+        const result = await apiPost('/api/profile/activity/sync', { mode });
+        if (!result.ok) {
+          showToast(formatApiError(result.data, 'Unable to start activity sync.'), true, false);
+          return;
+        }
+
+        showToast(mode === 'history' ? 'Watch history sync started.' : 'Resume progress sync started.', false, true);
+        switchView('dashboard');
+        fetchStatus();
+        if (!polling) polling = setInterval(fetchStatus, 2000);
+      } catch {
+        showToast('Network error while starting activity sync.', true, false);
       }
     }
 
@@ -2071,7 +2114,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_sync_full_watch_counts: false, trakt_reconcile_watched_history: false, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       showToast('Logged out.', false, true);
     }
@@ -2108,7 +2151,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_sync_full_watch_counts: false, trakt_reconcile_watched_history: false, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       showToast('Profile data deleted.', false, true);
     }
@@ -2161,7 +2204,7 @@
       trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_sync_full_watch_counts: false, trakt_reconcile_watched_history: false, trakt_sync_resume_progress: false });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false });
     populateForm(draftCreds, draftOptions, {});
     resumeSimklPinState();
     resumeTraktDeviceState();

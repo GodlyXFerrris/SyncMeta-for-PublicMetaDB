@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.profile_store import MIN_SYNC_INTERVAL_SECONDS, ProfileStore
+from src.profile_store import MIN_SYNC_INTERVAL_SECONDS, MIN_WATCHED_HISTORY_INTERVAL_SECONDS, ProfileStore
 
 
 class ProfileStoreTests(unittest.TestCase):
@@ -74,6 +74,7 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIn("credentials_encrypted", payload["profiles"][created["profile_id"]])
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
         self.assertEqual(loaded["options"]["interval_seconds"], 600)
+        self.assertEqual(loaded["options"]["trakt_watched_history_interval_seconds"], 43200)
         self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(loaded["options"]["simkl_visibility"], "private")
         self.assertEqual(loaded["options"]["trakt_public_visibility"], "public")
@@ -87,6 +88,13 @@ class ProfileStoreTests(unittest.TestCase):
             self.store.create_profile("secret", self.credentials, {
                 **self.options,
                 "interval_seconds": MIN_SYNC_INTERVAL_SECONDS - 1,
+            })
+
+    def test_rejects_watched_history_interval_below_minimum(self) -> None:
+        with self.assertRaises(ValueError):
+            self.store.create_profile("secret", self.credentials, {
+                **self.options,
+                "trakt_watched_history_interval_seconds": MIN_WATCHED_HISTORY_INTERVAL_SECONDS - 1,
             })
 
     def test_manual_dry_run_does_not_advance_schedule(self) -> None:
