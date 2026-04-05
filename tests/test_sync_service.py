@@ -572,6 +572,54 @@ class SyncServiceTests(unittest.TestCase):
             [(1, 1), (1, 2), (2, 1)],
         )
 
+    def test_simkl_history_skips_unsafe_aggregate_anime_mapping(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        class UnsafeAggregateAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "title": "Unsafe Aggregate Anime",
+                    "anilist_id": "555",
+                    "ids": {"anilist": 555},
+                    "watched_at": "2026-04-01T13:00:00Z",
+                    "aggregate_watched_count": 38,
+                }]
+
+            def expand_aggregate_history_item(self, item: dict) -> list[dict]:
+                return []
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = UnsafeAggregateAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 0)
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(pmdb.watched, [])
+
     def test_history_sync_passes_existing_source_cursor_to_clients(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(

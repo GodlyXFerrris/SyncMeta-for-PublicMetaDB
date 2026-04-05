@@ -268,8 +268,12 @@ class SyncService:
                 aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
                 if aggregate_rows:
                     expanded.extend(aggregate_rows)
-                    continue
-                item = resolved
+                else:
+                    logger.info(
+                        "Skipping aggregate SIMKL anime history for '%s' because it could not be safely mapped to concrete seasons/episodes",
+                        resolved.get("title", "Unknown"),
+                    )
+                continue
             expanded.append(item)
         return self._dedupe_activity_history_items(expanded)
 

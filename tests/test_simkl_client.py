@@ -189,6 +189,8 @@ class RecordingSimklClient(SimklClient):
     def _fetch_tmdb_season_plan(tmdb_id: int) -> list[tuple[int, int]]:
         if tmdb_id == 7005:
             return [(1, 2), (2, 1)]
+        if tmdb_id == 7006:
+            return [(1, 28)]
         return []
 
 
@@ -286,6 +288,20 @@ class SimklClientTests(unittest.TestCase):
             [(item["season"], item["episode"]) for item in expanded],
             [(1, 1), (1, 2), (2, 1)],
         )
+
+    def test_expand_aggregate_history_item_skips_incomplete_tmdb_season_plan(self) -> None:
+        client = RecordingSimklClient()
+
+        expanded = client.expand_aggregate_history_item({
+            "tmdb_id": 7006,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "title": "Future Season Anime",
+            "aggregate_watched_count": 38,
+            "watched_at": "2026-04-03T13:00:00Z",
+        })
+
+        self.assertEqual(expanded, [])
 
 
 if __name__ == "__main__":

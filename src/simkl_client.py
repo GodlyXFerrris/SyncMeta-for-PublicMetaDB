@@ -705,6 +705,14 @@ class SimklClient:
             remaining -= take
             if remaining <= 0:
                 break
+        if remaining > 0:
+            logger.info(
+                "Skipping aggregate SIMKL anime history for TMDB %s because TMDB season plan only covered %d/%d episodes",
+                tmdb_id,
+                watched_total - remaining,
+                watched_total,
+            )
+            return []
         return episodes
 
     @classmethod
