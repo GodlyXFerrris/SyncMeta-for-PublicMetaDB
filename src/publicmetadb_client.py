@@ -144,6 +144,18 @@ class PublicMetaDBClient:
             return existing
         return self.create_list(name, description)
 
+    def delete_list(self, list_id: str) -> bool:
+        """Delete a list by ID. Returns False if it is already gone."""
+        try:
+            self._delete(f"/api/external/lists/{list_id}")
+            logger.info("Deleted list %s", list_id)
+            return True
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                logger.info("List %s was already gone", list_id)
+                return False
+            raise
+
     # ── List items ─────────────────────────────────────────────────
 
     def get_list_items(self, list_id: str) -> list[dict]:

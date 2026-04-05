@@ -56,6 +56,26 @@ class MdbListClientTests(unittest.TestCase):
         self.assertEqual(items[0]["media_type"], "movie")
         self.assertEqual(items[1]["media_type"], "tv")
 
+    def test_get_list_items_supports_wrapped_payload(self) -> None:
+        client = MdbListClient(MdbListConfig(api_key="key"))
+        response = Mock()
+        response.json.return_value = {
+            "items": [{
+                "title": "Wrapped Movie",
+                "release_year": 2022,
+                "mediatype": "movie",
+                "ids": {"tmdb": 404, "imdb": "tt0404"},
+            }]
+        }
+        response.headers = {}
+
+        with patch.object(client, "_get", return_value=response):
+            items = client.get_list_items(44)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["title"], "Wrapped Movie")
+        self.assertEqual(items[0]["media_type"], "movie")
+
 
 if __name__ == "__main__":
     unittest.main()

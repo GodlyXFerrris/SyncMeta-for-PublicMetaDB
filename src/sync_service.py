@@ -35,11 +35,11 @@ _STATUS_LABELS = {
 }
 
 
-def _list_name(source: str, media_type: str, status: str) -> str:
-    """Build a PMDB list name like 'SIMKL - Anime - Watching'."""
+def _status_list_name(media_type: str, status: str) -> str:
+    """Build a PMDB list name like 'Plan to Watch - Anime'."""
     type_label = _TYPE_LABELS.get(media_type, media_type.title())
     status_label = _STATUS_LABELS.get(status, status.replace("_", " ").title())
-    return f"{source} - {type_label} - {status_label}"
+    return f"{status_label} - {type_label}"
 
 
 def _display_status_name(media_type: str, status: str) -> str:
@@ -67,7 +67,7 @@ class SyncStats:
 class SyncService:
     """Orchestrates one-way sync into PublicMetaDB."""
 
-    def __init__(self, config: AppConfig, status_callback=None):
+    def __init__(self, config: AppConfig, status_callback=None, managed_lists: list[dict] | None = None):
         self._config = config
         self._simkl = SimklClient(config.simkl)
         self._trakt = TraktClient(config.trakt)
@@ -75,10 +75,15 @@ class SyncService:
         self._pmdb = PublicMetaDBClient(config.pmdb)
         self._matcher = ItemMatcher(self._pmdb)
         self._status_callback = status_callback
+        self._managed_lists = self._normalize_managed_lists(managed_lists)
 
     @property
     def simkl(self) -> SimklClient:
         return self._simkl
+
+    @property
+    def managed_lists(self) -> list[dict]:
+        return [dict(item) for item in sorted(self._managed_lists.values(), key=lambda item: item["list_name"])]
 
     def run(self) -> list[SyncStats]:
         """Execute a full sync cycle. Returns stats per synced list."""
@@ -101,6 +106,10 @@ class SyncService:
         if self._config.mdblist.enabled:
             all_stats.extend(self._sync_mdblist())
 
+        if not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
+            desired_names = {stats.list_name for stats in all_stats if stats.list_name}
+            self._delete_disabled_lists(desired_names)
+
         self._set_status("Finalizing sync results")
         self._log_results(all_stats)
         return all_stats
@@ -121,7 +130,7 @@ class SyncService:
                 self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
-                name = _list_name("SIMKL", simkl_type, status_key)
+                name = _status_list_name(simkl_type, status_key)
                 display_name = _display_status_name(simkl_type, status_key)
                 description = (
                     f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
@@ -144,7 +153,7 @@ class SyncService:
         for status_key in self._config.anilist.selected_statuses:
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
             items = client.get_status(status_key)
-            name = _list_name("AniList", "anime", status_key)
+            name = _status_list_name("anime", status_key)
             display_name = _display_status_name("anime", status_key)
             description = f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' anime from AniList"
             stats.append(self._sync_list(items, name, description, display_name=display_name, source_name="AniList"))
@@ -166,7 +175,7 @@ class SyncService:
                 if media_type not in {"shows", "movies"}:
                     continue
                 items = grouped.get(media_type, [])
-                name = _list_name("Trakt", media_type, "watchlist")
+                name = _status_list_name(media_type, "watchlist")
                 display_name = _display_status_name(media_type, "watchlist")
                 description = f"Auto-synced Trakt watchlist {_TYPE_LABELS.get(media_type, media_type)}"
                 stats.append(self._sync_list(items, name, description, display_name=display_name, source_name="Trakt"))
@@ -182,7 +191,7 @@ class SyncService:
             items = self._filter_trakt_items(
                 self._trakt.get_default_catalog(trakt_list.get("catalog_key") or trakt_list.get("slug", ""))
             )
-            name = f"Trakt Default - {trakt_list['name']}"
+            name = trakt_list["name"]
             description = f"Auto-synced Trakt default catalog '{trakt_list['name']}'"
             stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name="Trakt"))
 
@@ -190,7 +199,7 @@ class SyncService:
             self._set_status("Fetching Trakt liked lists")
             for liked_list in self._trakt.get_liked_lists():
                 items = self._filter_trakt_items(liked_list["items"])
-                name = f"Trakt List - {liked_list['user']} - {liked_list['name']}"
+                name = liked_list["name"]
                 description = f"Auto-synced liked Trakt list '{liked_list['name']}'"
                 stats.append(self._sync_list(items, name, description, display_name=liked_list["name"], source_name=f"Trakt by {liked_list['user']}"))
         else:
@@ -199,7 +208,7 @@ class SyncService:
                 items = self._filter_trakt_items(
                     self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
                 )
-                name = f"Trakt List - {trakt_list['user']} - {trakt_list['name']}"
+                name = trakt_list["name"]
                 description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
                 stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name=f"Trakt by {trakt_list['user']}"))
 
@@ -208,7 +217,7 @@ class SyncService:
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
             )
-            name = f"Trakt List - {trakt_list['user']} - {trakt_list['name']}"
+            name = trakt_list["name"]
             description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
             stats.append(self._sync_list(items, name, description, display_name=trakt_list["name"], source_name=f"Trakt by {trakt_list['user']}"))
 
@@ -222,7 +231,7 @@ class SyncService:
             self._set_status(f"Fetching MDBList {mdblist['name']}")
             items = self._filter_mdblist_items(self._mdblist.get_list_items(mdblist["id"]))
             media_type = "movies" if mdblist["mediatype"] == "movie" else "shows"
-            name = f"MDBList - {_TYPE_LABELS.get(media_type, media_type.title())} - {mdblist['name']}"
+            name = mdblist["name"]
             description = f"Auto-synced MDBList '{mdblist['name']}'"
             stats.append(self._sync_list(items, name, description, display_name=mdblist["name"], source_name="MDBList"))
 
@@ -323,6 +332,12 @@ class SyncService:
         try:
             self._set_status(f"Preparing PublicMetaDB list {list_name}")
             pmdb_list = self._pmdb.get_or_create_list(list_name, list_description)
+            self._register_managed_list(
+                list_name,
+                str(pmdb_list.get("id", "")),
+                display_name or list_name,
+                source_name or "",
+            )
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
             logger.error("Failed to get/create list '%s': %s", list_name, exc)
@@ -418,3 +433,54 @@ class SyncService:
                 self._status_callback(status)
             except Exception:
                 logger.debug("Status callback failed", exc_info=True)
+
+    @staticmethod
+    def _normalize_managed_lists(items: list[dict] | None) -> dict[str, dict]:
+        normalized: dict[str, dict] = {}
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            list_name = str(item.get("list_name", "")).strip()
+            if not list_name:
+                continue
+            normalized[list_name] = {
+                "list_name": list_name,
+                "list_id": str(item.get("list_id", "")).strip(),
+                "display_name": str(item.get("display_name", "")).strip(),
+                "source_name": str(item.get("source_name", "")).strip(),
+            }
+        return normalized
+
+    def _register_managed_list(
+        self,
+        list_name: str,
+        list_id: str,
+        display_name: str,
+        source_name: str,
+    ) -> None:
+        self._managed_lists[list_name] = {
+            "list_name": list_name,
+            "list_id": list_id,
+            "display_name": display_name,
+            "source_name": source_name,
+        }
+
+    def _delete_disabled_lists(self, desired_names: set[str]) -> None:
+        stale_names = [list_name for list_name in self._managed_lists if list_name not in desired_names]
+        for list_name in stale_names:
+            entry = self._managed_lists.get(list_name, {})
+            list_id = str(entry.get("list_id", "")).strip()
+            try:
+                self._set_status(f"Deleting disabled PublicMetaDB list {list_name}")
+                if not list_id:
+                    existing = self._pmdb.find_list_by_name(list_name)
+                    if not existing:
+                        logger.info("Managed list '%s' no longer exists in PublicMetaDB", list_name)
+                        self._managed_lists.pop(list_name, None)
+                        continue
+                    list_id = str(existing.get("id", "")).strip()
+                self._pmdb.delete_list(list_id)
+                logger.info("Deleted disabled PublicMetaDB list '%s' (id=%s)", list_name, list_id)
+                self._managed_lists.pop(list_name, None)
+            except Exception as exc:
+                logger.error("Failed to delete disabled PublicMetaDB list '%s': %s", list_name, exc)

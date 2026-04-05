@@ -67,16 +67,50 @@ class MdbListClient:
                 },
             )
             payload = response.json() or []
-            normalized = [self._normalize_item(item) for item in payload]
+            batch = self._extract_items(payload)
+            normalized = [self._normalize_item(item) for item in batch]
             items.extend(item for item in normalized if item)
 
-            has_more = str(response.headers.get("X-Has-More", "")).strip().lower() == "true"
-            if not has_more or not payload:
+            has_more = self._has_more(response, payload)
+            if not has_more or not batch:
                 break
             offset += limit
 
         logger.info("MDBList: fetched %d items for list %s", len(items), list_id)
         return items
+
+    @staticmethod
+    def _extract_items(payload: list | dict) -> list[dict]:
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+
+        if isinstance(payload.get("items"), list):
+            return payload["items"]
+
+        combined: list[dict] = []
+        for key in ["movies", "shows", "tv", "results"]:
+            values = payload.get(key)
+            if isinstance(values, list):
+                combined.extend(values)
+        return combined
+
+    @staticmethod
+    def _has_more(response: requests.Response, payload: list | dict) -> bool:
+        header = str(response.headers.get("X-Has-More", "")).strip().lower()
+        if header:
+            return header == "true"
+        if isinstance(payload, dict):
+            for key in ["has_more", "hasMore", "next", "next_page"]:
+                value = payload.get(key)
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, (int, float)):
+                    return bool(value)
+                if isinstance(value, str) and value.strip():
+                    return value.strip().lower() not in {"0", "false", "none", "null"}
+        return False
 
     @staticmethod
     def _normalize_list_metadata(item: dict) -> dict | None:

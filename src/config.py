@@ -65,6 +65,7 @@ class PublicMetaDBConfig:
 @dataclass
 class SyncConfig:
     remove_missing: bool = False
+    delete_disabled_lists: bool = False
     dry_run: bool = False
     interval_minutes: int = 0
     media_types: list[str] = field(default_factory=lambda: ["shows", "movies", "anime"])
@@ -122,6 +123,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
 
     cfg.pmdb.api_key = os.getenv("PMDB_API_KEY", "")
     cfg.sync.remove_missing = os.getenv("SYNC_REMOVE_MISSING", "false").lower() == "true"
+    cfg.sync.delete_disabled_lists = os.getenv("SYNC_DELETE_DISABLED_LISTS", "false").lower() == "true"
     cfg.sync.dry_run = os.getenv("SYNC_DRY_RUN", "false").lower() == "true"
 
     interval = os.getenv("SYNC_INTERVAL_MINUTES", "0")
@@ -197,6 +199,8 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
     sync = data.get("sync", {})
     if "remove_missing" in sync and not os.getenv("SYNC_REMOVE_MISSING"):
         cfg.sync.remove_missing = sync["remove_missing"]
+    if "delete_disabled_lists" in sync and not os.getenv("SYNC_DELETE_DISABLED_LISTS"):
+        cfg.sync.delete_disabled_lists = sync["delete_disabled_lists"]
     if "dry_run" in sync and not os.getenv("SYNC_DRY_RUN"):
         cfg.sync.dry_run = sync["dry_run"]
     if "interval_minutes" in sync and not os.getenv("SYNC_INTERVAL_MINUTES"):

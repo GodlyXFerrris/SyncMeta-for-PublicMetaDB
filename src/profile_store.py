@@ -192,6 +192,28 @@ def _normalize_mdblist_selected_lists(raw_lists: list | None) -> list[dict]:
     return selected
 
 
+def _normalize_managed_lists(raw_lists: list | None) -> list[dict]:
+    if not isinstance(raw_lists, list):
+        return []
+
+    selected: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_lists:
+        if not isinstance(item, dict):
+            continue
+        list_name = str(item.get("list_name", "")).strip()
+        if not list_name or list_name in seen:
+            continue
+        seen.add(list_name)
+        selected.append({
+            "list_name": list_name,
+            "list_id": str(item.get("list_id", "")).strip(),
+            "display_name": str(item.get("display_name", "")).strip(),
+            "source_name": str(item.get("source_name", "")).strip(),
+        })
+    return selected
+
+
 def normalize_profile_options(options: dict | None) -> dict:
     raw = options or {}
     interval_raw = raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL_SECONDS)
@@ -218,6 +240,7 @@ def normalize_profile_options(options: dict | None) -> dict:
 
     return {
         "remove_missing": bool(raw.get("remove_missing", False)),
+        "delete_disabled_lists": bool(raw.get("delete_disabled_lists", False)),
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
@@ -277,6 +300,7 @@ class ProfileStore:
             "sync_updated_at": raw_profile.get("sync_updated_at"),
             "history": list(raw_profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": next_sync_at,
+            "managed_lists": _normalize_managed_lists(raw_profile.get("managed_lists", [])),
         }
 
     def _save_locked(self) -> None:
@@ -307,6 +331,7 @@ class ProfileStore:
             "sync_updated_at": profile.get("sync_updated_at"),
             "history": copy.deepcopy(profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": profile.get("next_sync_at"),
+            "managed_lists": copy.deepcopy(profile.get("managed_lists", [])),
         }
 
     @staticmethod
@@ -364,6 +389,7 @@ class ProfileStore:
             "sync_updated_at": None,
             "history": [],
             "next_sync_at": now if normalized_options["auto_sync"] else None,
+            "managed_lists": [],
         }
 
         with self._lock:
@@ -436,12 +462,20 @@ class ProfileStore:
 
         return due_profiles
 
-    def record_sync_success(self, profile_id: str, results: list[dict], dry_run: bool = False) -> dict:
+    def record_sync_success(
+        self,
+        profile_id: str,
+        results: list[dict],
+        dry_run: bool = False,
+        managed_lists: list[dict] | None = None,
+    ) -> dict:
         with self._lock:
             normalized_id = self._normalize_profile_id(profile_id)
             profile = self._profiles[normalized_id]
             now = utc_now_iso()
             profile["last_results"] = copy.deepcopy(results)
+            if managed_lists is not None:
+                profile["managed_lists"] = _normalize_managed_lists(managed_lists)
             profile["sync_error"] = None
             profile["sync_running"] = False
             profile["sync_status"] = "Completed"

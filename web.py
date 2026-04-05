@@ -91,6 +91,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False) -> AppConfig:
         pmdb=PublicMetaDBConfig(api_key=credentials["pmdb"]["api_key"]),
         sync=SyncConfig(
             remove_missing=options["remove_missing"],
+            delete_disabled_lists=options["delete_disabled_lists"],
             dry_run=dry_run,
             media_types=options["media_types"],
         ),
@@ -160,10 +161,16 @@ def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
         service = SyncService(
             _config_from_profile(profile, dry_run=dry_run),
             status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
+            managed_lists=profile.get("managed_lists", []),
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]
-        _profile_store.record_sync_success(profile_id, result_dicts, dry_run=dry_run)
+        _profile_store.record_sync_success(
+            profile_id,
+            result_dicts,
+            dry_run=dry_run,
+            managed_lists=service.managed_lists,
+        )
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
         _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run)
