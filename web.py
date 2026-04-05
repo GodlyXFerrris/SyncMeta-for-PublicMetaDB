@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import threading
+import time
 from dataclasses import asdict
 from pathlib import Path
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, make_response, render_template, request
 
 from src.config import (
     AniListConfig,
@@ -22,7 +24,7 @@ from src.config import (
     validate_config,
 )
 from src.mdblist_client import MdbListClient
-from src.profile_store import ProfileStore, normalize_credentials, normalize_profile_options
+from src.profile_store import ProfileStore, merge_credentials, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
 from src.sync_service import SyncService, SyncStats
 from src.trakt_client import TraktClient
@@ -41,10 +43,92 @@ PROFILE_STORE_FILE = Path(
     os.getenv("PROFILE_STORE_FILE", str(Path(__file__).resolve().parent / "data" / "profiles.json"))
 )
 SCHEDULER_POLL_SECONDS = 5
+SESSION_COOKIE_NAME = "syncmeta_session"
+SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))
+LOGIN_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_LOGIN_MAX_ATTEMPTS", "10"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("SYNCMETA_LOGIN_WINDOW_SECONDS", "900"))
 
 _profile_store = ProfileStore(PROFILE_STORE_FILE)
 _scheduler_lock = threading.Lock()
 _scheduler_started = False
+
+
+class ServerSessionStore:
+    """Simple in-memory session store keyed by opaque cookies."""
+
+    def __init__(self, ttl_seconds: int = SESSION_TTL_SECONDS):
+        self._ttl_seconds = ttl_seconds
+        self._lock = threading.RLock()
+        self._sessions: dict[str, dict] = {}
+
+    def create(self, profile_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        with self._lock:
+            self._sessions[token] = {
+                "profile_id": profile_id,
+                "expires_at": now + self._ttl_seconds,
+            }
+        return token
+
+    def get_profile_id(self, token: str | None) -> str | None:
+        if not token:
+            return None
+        now = time.time()
+        with self._lock:
+            session = self._sessions.get(token)
+            if not session:
+                return None
+            if session["expires_at"] <= now:
+                self._sessions.pop(token, None)
+                return None
+            session["expires_at"] = now + self._ttl_seconds
+            return session["profile_id"]
+
+    def destroy(self, token: str | None) -> None:
+        if not token:
+            return
+        with self._lock:
+            self._sessions.pop(token, None)
+
+
+class LoginAttemptLimiter:
+    """Sliding-window limiter for profile login attempts."""
+
+    def __init__(self, max_attempts: int = LOGIN_MAX_ATTEMPTS, window_seconds: int = LOGIN_WINDOW_SECONDS):
+        self._max_attempts = max_attempts
+        self._window_seconds = window_seconds
+        self._lock = threading.RLock()
+        self._attempts: dict[str, list[float]] = {}
+
+    def is_limited(self, key: str) -> bool:
+        with self._lock:
+            attempts = self._prune_locked(key)
+            return len(attempts) >= self._max_attempts
+
+    def record_failure(self, key: str) -> None:
+        now = time.time()
+        with self._lock:
+            attempts = self._prune_locked(key)
+            attempts.append(now)
+            self._attempts[key] = attempts
+
+    def clear(self, key: str) -> None:
+        with self._lock:
+            self._attempts.pop(key, None)
+
+    def _prune_locked(self, key: str) -> list[float]:
+        now = time.time()
+        attempts = [stamp for stamp in self._attempts.get(key, []) if now - stamp < self._window_seconds]
+        if attempts:
+            self._attempts[key] = attempts
+        else:
+            self._attempts.pop(key, None)
+        return attempts
+
+
+_session_store = ServerSessionStore()
+_login_limiter = LoginAttemptLimiter()
 
 
 def _stats_to_dict(stats: SyncStats) -> dict:
@@ -154,6 +238,63 @@ def _profile_response(profile: dict, include_credentials: bool = False):
     return jsonify({"profile": payload})
 
 
+def _request_client_key() -> str:
+    forwarded = str(request.headers.get("X-Forwarded-For", "")).split(",")[0].strip()
+    return forwarded or request.remote_addr or "unknown"
+
+
+def _session_token() -> str | None:
+    return request.cookies.get(SESSION_COOKIE_NAME)
+
+
+def _current_profile_id() -> str | None:
+    return _session_store.get_profile_id(_session_token())
+
+
+def _current_public_profile(include_credentials: bool = False) -> dict | None:
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return None
+    try:
+        return _profile_store.get_profile_by_id(profile_id, include_credentials=include_credentials)
+    except KeyError:
+        _session_store.destroy(_session_token())
+        return None
+
+
+def _current_private_profile() -> dict | None:
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return None
+    try:
+        return _profile_store.get_private_profile_by_id(profile_id)
+    except KeyError:
+        _session_store.destroy(_session_token())
+        return None
+
+
+def _cookie_secure() -> bool:
+    forwarded_proto = str(request.headers.get("X-Forwarded-Proto", "")).split(",")[0].strip().lower()
+    return request.is_secure or forwarded_proto == "https"
+
+
+def _with_session_cookie(response, session_token: str):
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="Lax",
+        secure=_cookie_secure(),
+    )
+    return response
+
+
+def _clear_session_cookie(response):
+    response.delete_cookie(SESSION_COOKIE_NAME, httponly=True, samesite="Lax", secure=_cookie_secure())
+    return response
+
+
 def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
     profile_id = profile["profile_id"]
     try:
@@ -232,23 +373,41 @@ def api_profile_login():
     body = request.get_json(silent=True) or {}
     profile_id = body.get("profile_id", "")
     password = body.get("password", "")
+    client_key = _request_client_key()
+
+    if _login_limiter.is_limited(client_key):
+        return _json_error("Too many login attempts. Please wait and try again.", 429)
 
     try:
         profile = _profile_store.get_profile(profile_id, password, include_credentials=True)
     except KeyError:
+        _login_limiter.record_failure(client_key)
         return _json_error("Profile not found", 404)
     except PermissionError:
+        _login_limiter.record_failure(client_key)
         return _json_error("Invalid profile password", 401)
     except ValueError as exc:
+        _login_limiter.record_failure(client_key)
         return _json_error(str(exc), 400)
 
-    return _profile_response(profile, include_credentials=True)
+    _login_limiter.clear(client_key)
+    session_token = _session_store.create(profile["profile_id"])
+    return _with_session_cookie(_profile_response(profile, include_credentials=True), session_token)
+
+
+@app.route("/api/profile/logout", methods=["POST"])
+def api_profile_logout():
+    _session_store.destroy(_session_token())
+    return _clear_session_cookie(make_response(jsonify({"status": "logged_out"})))
 
 
 @app.route("/api/simkl/pin/start", methods=["POST"])
 def api_simkl_pin_start():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     client_id = str(body.get("client_id", "")).strip()
+    if not client_id and private_profile:
+        client_id = private_profile["credentials"]["simkl"]["client_id"]
 
     if not client_id:
         return _json_error("SIMKL client ID is required", 400)
@@ -272,8 +431,11 @@ def api_simkl_pin_start():
 @app.route("/api/simkl/pin/check", methods=["POST"])
 def api_simkl_pin_check():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     client_id = str(body.get("client_id", "")).strip()
     user_code = str(body.get("user_code", "")).strip()
+    if not client_id and private_profile:
+        client_id = private_profile["credentials"]["simkl"]["client_id"]
 
     if not client_id:
         return _json_error("SIMKL client ID is required", 400)
@@ -302,8 +464,12 @@ def api_simkl_pin_check():
 @app.route("/api/trakt/device/start", methods=["POST"])
 def api_trakt_device_start():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     client_id = str(body.get("client_id", "")).strip()
     client_secret = str(body.get("client_secret", "")).strip()
+    if private_profile:
+        client_id = client_id or private_profile["credentials"]["trakt"]["client_id"]
+        client_secret = client_secret or private_profile["credentials"]["trakt"]["client_secret"]
 
     if not client_id:
         return _json_error("Trakt client ID is required", 400)
@@ -329,9 +495,13 @@ def api_trakt_device_start():
 @app.route("/api/trakt/device/check", methods=["POST"])
 def api_trakt_device_check():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     client_id = str(body.get("client_id", "")).strip()
     client_secret = str(body.get("client_secret", "")).strip()
     device_code = str(body.get("device_code", "")).strip()
+    if private_profile:
+        client_id = client_id or private_profile["credentials"]["trakt"]["client_id"]
+        client_secret = client_secret or private_profile["credentials"]["trakt"]["client_secret"]
 
     if not client_id:
         return _json_error("Trakt client ID is required", 400)
@@ -363,9 +533,13 @@ def api_trakt_device_check():
 @app.route("/api/trakt/catalogs", methods=["POST"])
 def api_trakt_catalogs():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     client_id = str(body.get("client_id", "")).strip()
     access_token = str(body.get("access_token", "")).strip()
     query = str(body.get("query", "")).strip()
+    if private_profile:
+        client_id = client_id or private_profile["credentials"]["trakt"]["client_id"]
+        access_token = access_token or private_profile["credentials"]["trakt"]["access_token"]
 
     if not client_id:
         return _json_error("Trakt client ID is required", 400)
@@ -385,7 +559,10 @@ def api_trakt_catalogs():
 @app.route("/api/mdblist/lists", methods=["POST"])
 def api_mdblist_lists():
     body = request.get_json(silent=True) or {}
+    private_profile = _current_private_profile()
     api_key = str(body.get("api_key", "")).strip()
+    if not api_key and private_profile:
+        api_key = private_profile["credentials"]["mdblist"]["api_key"]
 
     if not api_key:
         return _json_error("MDBList API key is required", 400)
@@ -407,18 +584,38 @@ def api_profile_save():
     options = body.get("options", {})
     password = body.get("password", "")
     profile_id = str(body.get("profile_id", "")).strip()
+    session_profile_id = _current_profile_id()
+    validation_credentials = credentials
 
-    _, errors = _validate_profile_configuration(credentials, options)
+    try:
+        if session_profile_id:
+            existing_profile = _profile_store.get_private_profile_by_id(session_profile_id)
+            validation_credentials = merge_credentials(existing_profile.get("credentials"), credentials)
+        elif profile_id and password:
+            existing_profile = _profile_store.get_private_profile_by_id(profile_id)
+            validation_credentials = merge_credentials(existing_profile.get("credentials"), credentials)
+    except KeyError:
+        pass
+
+    _, errors = _validate_profile_configuration(validation_credentials, options)
     if errors:
         return _json_error("Configuration errors", 400, errors)
 
     try:
-        if profile_id:
+        if session_profile_id:
+            if profile_id and profile_id != session_profile_id:
+                return _json_error("You are already signed into a different profile", 409)
+            profile = _profile_store.update_profile_by_id(session_profile_id, credentials, options)
+            created = False
+            session_token = _session_token()
+        elif profile_id:
             profile = _profile_store.update_profile(profile_id, password, credentials, options)
             created = False
+            session_token = _session_store.create(profile["profile_id"])
         else:
             profile = _profile_store.create_profile(password, credentials, options)
             created = True
+            session_token = _session_store.create(profile["profile_id"])
     except KeyError:
         return _json_error("Profile not found", 404)
     except PermissionError:
@@ -427,42 +624,32 @@ def api_profile_save():
         return _json_error(str(exc), 400)
 
     response = {"profile": profile, "created": created}
-    return jsonify(response)
+    return _with_session_cookie(make_response(jsonify(response)), session_token)
 
 
 @app.route("/api/profile/status", methods=["POST"])
 def api_profile_status():
     body = request.get_json(silent=True) or {}
-    profile_id = body.get("profile_id", "")
-    password = body.get("password", "")
+    include_credentials = bool(body.get("include_credentials", False))
+    profile = _current_public_profile(include_credentials=include_credentials)
+    if not profile:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
-    try:
-        profile = _profile_store.get_profile(profile_id, password, include_credentials=False)
-    except KeyError:
-        return _json_error("Profile not found", 404)
-    except PermissionError:
-        return _json_error("Invalid profile password", 401)
-    except ValueError as exc:
-        return _json_error(str(exc), 400)
-
-    return _profile_response(profile, include_credentials=False)
+    return _profile_response(profile, include_credentials=include_credentials)
 
 
 @app.route("/api/profile/sync", methods=["POST"])
 def api_profile_sync():
     body = request.get_json(silent=True) or {}
-    profile_id = body.get("profile_id", "")
-    password = body.get("password", "")
     dry_run = bool(body.get("dry_run", False))
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
     try:
-        profile = _profile_store.claim_profile_for_sync(profile_id, password)
+        profile = _profile_store.claim_profile_for_sync_by_id(profile_id)
     except KeyError:
-        return _json_error("Profile not found", 404)
-    except PermissionError:
-        return _json_error("Invalid profile password", 401)
-    except ValueError as exc:
-        return _json_error(str(exc), 400)
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
     except RuntimeError:
         return _json_error("Sync already in progress", 409)
 

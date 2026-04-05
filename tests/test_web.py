@@ -1,5 +1,7 @@
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 os.environ["DISABLE_PROFILE_SCHEDULER"] = "1"
@@ -9,19 +11,33 @@ import web  # noqa: E402
 
 class WebTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.tmpdir = tempfile.TemporaryDirectory()
+        web._profile_store = web.ProfileStore(Path(self.tmpdir.name) / "profiles.json")
+        web._session_store = web.ServerSessionStore(ttl_seconds=3600)
+        web._login_limiter = web.LoginAttemptLimiter(max_attempts=5, window_seconds=60)
         self.client = web.app.test_client()
+
+    def tearDown(self) -> None:
+        self.tmpdir.cleanup()
 
     def test_index_contains_new_source_sections(self) -> None:
         response = self.client.get("/")
         html = response.get_data(as_text=True)
 
         self.assertEqual(response.status_code, 200)
+        self.assertIn("Sync Your Lists.<br>Keep Them Fresh.", html)
+        self.assertIn("Connect SIMKL, AniList, Trakt, and MDBList", html)
+        self.assertIn(">Trakt</div>", html)
+        self.assertIn(">MDBList</div>", html)
         self.assertIn("SIMKL Lists", html)
         self.assertIn("AniList Lists", html)
         self.assertIn("MDBList Lists", html)
         self.assertIn("dot-mdblist", html)
         self.assertIn("https://github.com/Febsho/SyncMeta-for-PublicMetaDB", html)
         self.assertIn("<h3>Options</h3>", html)
+        self.assertIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
+        self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
+        self.assertIn("choose which anime lists should sync into PublicMetaDB", html)
         self.assertNotIn("Sync Series", html)
         self.assertNotIn("Sync Movies", html)
         self.assertNotIn("Sync Anime", html)
@@ -155,6 +171,63 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(data["items"][0]["id"], 7)
+
+    def test_login_uses_session_and_masks_saved_secrets(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "super-secret",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-secret",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 600,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        login_data = login_response.get_json()
+
+        self.assertEqual(login_response.status_code, 200)
+        self.assertIn("Set-Cookie", login_response.headers)
+        self.assertTrue(login_data["profile"]["credentials"]["simkl"]["client_secret_saved"])
+        self.assertTrue(login_data["profile"]["credentials"]["pmdb"]["api_key_saved"])
+        self.assertNotIn("api_key", login_data["profile"]["credentials"]["pmdb"])
+
+        status_response = self.client.post("/api/profile/status", json={"include_credentials": True})
+        status_data = status_response.get_json()
+
+        self.assertEqual(status_response.status_code, 200)
+        self.assertEqual(status_data["profile"]["profile_id"], profile["profile_id"])
+        self.assertTrue(status_data["profile"]["credentials"]["simkl"]["access_token_saved"])
+        self.assertNotIn("access_token", status_data["profile"]["credentials"]["simkl"])
 
 
 if __name__ == "__main__":

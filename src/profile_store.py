@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from cryptography.fernet import Fernet, InvalidToken
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from .config import ANILIST_DEFAULT_SELECTED_STATUSES, SIMKL_DEFAULT_SELECTED_STATUSES
@@ -20,6 +22,7 @@ MIN_SYNC_INTERVAL_SECONDS = 300
 MAX_HISTORY_ITEMS = 20
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED"}
+DEFAULT_KEY_FILE_NAME = "profiles.key"
 
 
 def utc_now() -> datetime:
@@ -37,6 +40,39 @@ def parse_iso_datetime(value: str | None) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
+
+
+class CredentialCipher:
+    """Encrypts stored source credentials with a Fernet key."""
+
+    def __init__(self, storage_dir: str | Path):
+        self._storage_dir = Path(storage_dir)
+        self._fernet = Fernet(self._load_or_create_key())
+
+    def _load_or_create_key(self) -> bytes:
+        env_key = str(os.getenv("SYNCMETA_MASTER_KEY", "")).strip()
+        if env_key:
+            return env_key.encode("utf-8")
+
+        key_file = Path(os.getenv("SYNCMETA_MASTER_KEY_FILE", self._storage_dir / DEFAULT_KEY_FILE_NAME))
+        if key_file.exists():
+            return key_file.read_text(encoding="utf-8").strip().encode("utf-8")
+
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        key = Fernet.generate_key()
+        key_file.write_text(key.decode("utf-8"), encoding="utf-8")
+        return key
+
+    def encrypt(self, payload: dict) -> str:
+        serialized = json.dumps(payload, sort_keys=True).encode("utf-8")
+        return self._fernet.encrypt(serialized).decode("utf-8")
+
+    def decrypt(self, token: str) -> dict:
+        try:
+            data = self._fernet.decrypt(token.encode("utf-8"))
+        except InvalidToken as exc:
+            raise ValueError("Stored credentials could not be decrypted") from exc
+        return json.loads(data.decode("utf-8"))
 
 
 def normalize_credentials(credentials: dict | None) -> dict:
@@ -74,6 +110,40 @@ def normalize_credentials(credentials: dict | None) -> dict:
         },
         "pmdb": {
             "api_key": str(pmdb.get("api_key", "")).strip(),
+        },
+    }
+
+
+def public_credentials(credentials: dict | None) -> dict:
+    raw = normalize_credentials(credentials)
+    return {
+        "simkl": {
+            "client_id": raw["simkl"]["client_id"],
+            "client_secret_saved": bool(raw["simkl"]["client_secret"]),
+            "access_token_saved": bool(raw["simkl"]["access_token"]),
+            "selected_statuses": copy.deepcopy(raw["simkl"]["selected_statuses"]),
+        },
+        "anilist": {
+            "username": raw["anilist"]["username"],
+            "access_token_saved": bool(raw["anilist"]["access_token"]),
+            "selected_statuses": list(raw["anilist"]["selected_statuses"]),
+        },
+        "trakt": {
+            "client_id": raw["trakt"]["client_id"],
+            "client_secret_saved": bool(raw["trakt"]["client_secret"]),
+            "access_token_saved": bool(raw["trakt"]["access_token"]),
+            "refresh_token_saved": bool(raw["trakt"]["refresh_token"]),
+            "username": raw["trakt"]["username"],
+            "sync_watchlist": raw["trakt"]["sync_watchlist"],
+            "sync_liked_lists": raw["trakt"]["sync_liked_lists"],
+            "selected_lists": copy.deepcopy(raw["trakt"]["selected_lists"]),
+        },
+        "mdblist": {
+            "api_key_saved": bool(raw["mdblist"]["api_key"]),
+            "selected_lists": copy.deepcopy(raw["mdblist"]["selected_lists"]),
+        },
+        "pmdb": {
+            "api_key_saved": bool(raw["pmdb"]["api_key"]),
         },
     }
 
@@ -214,6 +284,46 @@ def _normalize_managed_lists(raw_lists: list | None) -> list[dict]:
     return selected
 
 
+def merge_credentials(existing: dict | None, updates: dict | None) -> dict:
+    current = normalize_credentials(existing)
+    incoming = normalize_credentials(updates)
+
+    def keep_secret(section: str, key: str) -> str:
+        value = incoming[section][key]
+        return value if value else current[section][key]
+
+    return {
+        "simkl": {
+            "client_id": incoming["simkl"]["client_id"],
+            "client_secret": keep_secret("simkl", "client_secret"),
+            "access_token": keep_secret("simkl", "access_token"),
+            "selected_statuses": incoming["simkl"]["selected_statuses"],
+        },
+        "anilist": {
+            "username": incoming["anilist"]["username"],
+            "access_token": keep_secret("anilist", "access_token"),
+            "selected_statuses": incoming["anilist"]["selected_statuses"],
+        },
+        "trakt": {
+            "client_id": incoming["trakt"]["client_id"],
+            "client_secret": keep_secret("trakt", "client_secret"),
+            "access_token": keep_secret("trakt", "access_token"),
+            "refresh_token": keep_secret("trakt", "refresh_token"),
+            "username": incoming["trakt"]["username"],
+            "sync_watchlist": incoming["trakt"]["sync_watchlist"],
+            "sync_liked_lists": incoming["trakt"]["sync_liked_lists"],
+            "selected_lists": incoming["trakt"]["selected_lists"],
+        },
+        "mdblist": {
+            "api_key": keep_secret("mdblist", "api_key"),
+            "selected_lists": incoming["mdblist"]["selected_lists"],
+        },
+        "pmdb": {
+            "api_key": keep_secret("pmdb", "api_key"),
+        },
+    }
+
+
 def normalize_profile_options(options: dict | None) -> dict:
     raw = options or {}
     interval_raw = raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL_SECONDS)
@@ -252,6 +362,7 @@ class ProfileStore:
 
     def __init__(self, path: str | Path):
         self._path = Path(path)
+        self._cipher = CredentialCipher(self._path.parent)
         self._lock = threading.RLock()
         self._profiles: dict[str, dict] = {}
         self._load()
@@ -264,16 +375,21 @@ class ProfileStore:
                 data = {"profiles": {}}
 
             profiles: dict[str, dict] = {}
+            changed = False
             for profile_id, raw_profile in data.get("profiles", {}).items():
                 if not raw_profile.get("password_hash"):
                     continue
                 try:
                     normalized_id = self._normalize_profile_id(profile_id)
-                    profiles[normalized_id] = self._hydrate_profile(normalized_id, raw_profile)
                 except ValueError:
                     continue
+                profiles[normalized_id] = self._hydrate_profile(normalized_id, raw_profile)
+                if "credentials" in raw_profile and "credentials_encrypted" not in raw_profile:
+                    changed = True
 
             self._profiles = profiles
+            if changed:
+                self._save_locked()
 
     def _hydrate_profile(self, profile_id: str, raw_profile: dict) -> dict:
         created_at = raw_profile.get("created_at") or utc_now_iso()
@@ -287,7 +403,7 @@ class ProfileStore:
         return {
             "profile_id": profile_id,
             "password_hash": raw_profile["password_hash"],
-            "credentials": normalize_credentials(raw_profile.get("credentials")),
+            "credentials": self._load_credentials(raw_profile),
             "options": options,
             "created_at": created_at,
             "updated_at": raw_profile.get("updated_at") or created_at,
@@ -315,11 +431,10 @@ class ProfileStore:
         tmp_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         tmp_path.replace(self._path)
 
-    @staticmethod
-    def _serialize_profile(profile: dict) -> dict:
+    def _serialize_profile(self, profile: dict) -> dict:
         return {
             "password_hash": profile["password_hash"],
-            "credentials": copy.deepcopy(profile["credentials"]),
+            "credentials_encrypted": self._cipher.encrypt(profile["credentials"]),
             "options": copy.deepcopy(profile["options"]),
             "created_at": profile.get("created_at"),
             "updated_at": profile.get("updated_at"),
@@ -333,6 +448,12 @@ class ProfileStore:
             "next_sync_at": profile.get("next_sync_at"),
             "managed_lists": copy.deepcopy(profile.get("managed_lists", [])),
         }
+
+    def _load_credentials(self, raw_profile: dict) -> dict:
+        encrypted = str(raw_profile.get("credentials_encrypted", "")).strip()
+        if encrypted:
+            return normalize_credentials(self._cipher.decrypt(encrypted))
+        return normalize_credentials(raw_profile.get("credentials"))
 
     @staticmethod
     def _normalize_profile_id(profile_id: str) -> str:
@@ -362,7 +483,7 @@ class ProfileStore:
             "options": copy.deepcopy(profile.get("options", {})),
         }
         if include_credentials:
-            result["credentials"] = copy.deepcopy(profile.get("credentials", {}))
+            result["credentials"] = public_credentials(profile.get("credentials", {}))
         return result
 
     def create_profile(self, password: str, credentials: dict, options: dict) -> dict:
@@ -402,13 +523,21 @@ class ProfileStore:
             profile = self._authenticate_locked(profile_id, password)
             return self._public_profile(profile, include_credentials=include_credentials)
 
+    def get_profile_by_id(self, profile_id: str, include_credentials: bool = True) -> dict:
+        with self._lock:
+            profile = self._get_profile_locked(profile_id)
+            return self._public_profile(profile, include_credentials=include_credentials)
+
+    def get_private_profile_by_id(self, profile_id: str) -> dict:
+        with self._lock:
+            return copy.deepcopy(self._get_profile_locked(profile_id))
+
     def update_profile(self, profile_id: str, password: str, credentials: dict, options: dict) -> dict:
-        normalized_credentials = normalize_credentials(credentials)
         normalized_options = normalize_profile_options(options)
 
         with self._lock:
             profile = self._authenticate_locked(profile_id, password)
-            profile["credentials"] = normalized_credentials
+            profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
             profile["options"] = normalized_options
             profile["updated_at"] = utc_now_iso()
             profile["sync_error"] = None
@@ -420,9 +549,38 @@ class ProfileStore:
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 
+    def update_profile_by_id(self, profile_id: str, credentials: dict, options: dict) -> dict:
+        normalized_options = normalize_profile_options(options)
+
+        with self._lock:
+            profile = self._get_profile_locked(profile_id)
+            profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
+            profile["options"] = normalized_options
+            profile["updated_at"] = utc_now_iso()
+            profile["sync_error"] = None
+            profile["sync_status"] = "Idle"
+            if not profile["sync_running"]:
+                profile["next_sync_at"] = utc_now_iso() if normalized_options["auto_sync"] else None
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
     def claim_profile_for_sync(self, profile_id: str, password: str) -> dict:
         with self._lock:
             profile = self._authenticate_locked(profile_id, password)
+            if profile["sync_running"]:
+                raise RuntimeError("Sync already in progress")
+            now = utc_now_iso()
+            profile["sync_running"] = True
+            profile["sync_error"] = None
+            profile["sync_status"] = "Queued"
+            profile["sync_started_at"] = now
+            profile["sync_updated_at"] = now
+            self._save_locked()
+            return copy.deepcopy(profile)
+
+    def claim_profile_for_sync_by_id(self, profile_id: str) -> dict:
+        with self._lock:
+            profile = self._get_profile_locked(profile_id)
             if profile["sync_running"]:
                 raise RuntimeError("Sync already in progress")
             now = utc_now_iso()
@@ -531,10 +689,14 @@ class ProfileStore:
             return self._public_profile(profile, include_credentials=True)
 
     def _authenticate_locked(self, profile_id: str, password: str) -> dict:
+        profile = self._get_profile_locked(profile_id)
+        if not password or not check_password_hash(profile["password_hash"], password):
+            raise PermissionError("Invalid profile password")
+        return profile
+
+    def _get_profile_locked(self, profile_id: str) -> dict:
         normalized_id = self._normalize_profile_id(profile_id)
         profile = self._profiles.get(normalized_id)
         if not profile:
             raise KeyError("Profile not found")
-        if not password or not check_password_hash(profile["password_hash"], password):
-            raise PermissionError("Invalid profile password")
         return profile

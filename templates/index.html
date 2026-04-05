@@ -113,11 +113,13 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M17 14v3a2 2 0 01-2 2h-1"/><path d="M14 17h6"/></svg>
         SyncMeta
       </div>
-      <h1>Sync Your World.<br>Seamlessly.</h1>
-      <p>Effortlessly synchronize your watchlist from SIMKL or AniList to PublicMetaDB. Keep your collection updated across all platforms with a single tool.</p>
+      <h1>Sync Your Lists.<br>Keep Them Fresh.</h1>
+      <p>Connect SIMKL, AniList, Trakt, and MDBList, then sync the catalogs you choose into PublicMetaDB with secure profiles and background updates.</p>
       <div class="hero-services">
         <div class="service-pill"><svg viewBox="0 0 24 24" fill="none" stroke="var(--orange)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12l3 3 5-5"/></svg>SIMKL</div>
         <div class="service-pill"><svg viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>AniList</div>
+        <div class="service-pill"><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><path d="M4 7c2.5-1 5.2-1.5 8-1.5S17.5 6 20 7"/><path d="M6 12c1.9-.7 3.9-1 6-1s4.1.3 6 1"/><path d="M8 17c1.2-.3 2.6-.5 4-.5s2.8.2 4 .5"/></svg>Trakt</div>
+        <div class="service-pill"><svg viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8"/><path d="M8 13h5"/></svg>MDBList</div>
         <div class="service-pill"><svg viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>PublicMetaDB</div>
       </div>
       <button class="hero-cta" onclick="enterApp()">Get Started</button>
@@ -156,7 +158,7 @@
             <div class="form-row">
               <label>Profile Password</label>
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
-              <div class="hint">The password is hashed on the server. Source API credentials are stored server-side so automatic sync can keep running.</div>
+              <div class="hint">Needed to create a profile or sign in on a new device. After that, this browser uses a secure server-side session.</div>
             </div>
           </div>
           <div class="form-section">
@@ -166,7 +168,7 @@
           </div>
           <div class="form-section">
             <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
-            <p class="desc">Syncs Series, Movies, and Anime when AniList is off.</p>
+            <p class="desc">Connect SIMKL and choose exactly which movie, show, and anime statuses should sync.</p>
             <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID</div></div>
             <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
             <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
@@ -186,7 +188,7 @@
           </div>
           <div class="form-section">
             <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-            <p class="desc">When set, anime syncs from AniList instead of SIMKL.</p>
+            <p class="desc">Connect AniList and choose which anime lists should sync into PublicMetaDB.</p>
             <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty to sync anime from SIMKL</div></div>
             <div class="form-row"><label>Access Token</label><input type="password" id="anilist-access-token" placeholder="Only for private lists" autocomplete="off"></div>
           </div>
@@ -222,7 +224,8 @@
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
             <div class="form-row" style="margin-top:14px"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
-            <div class="hint">Source selections above now decide what gets synced, so you do not need separate global type toggles here anymore.</div>
+            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
+            <div class="hint">Source selections above now decide what gets synced. Turn on list deletion only if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next sync.</div>
           </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
@@ -275,7 +278,7 @@
         <div class="actions-bar">
           <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
           <button class="btn" onclick="loadProfile()">Load Profile</button>
-          <button class="btn btn-ghost btn-sm" onclick="clearLocalData()">Forget Local Data</button>
+          <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
           <span class="save-flash" id="save-flash">Saved</span>
         </div>
       </div>
@@ -287,7 +290,6 @@
   <script>
     const CREDS_KEY = 'sync_credentials';
     const OPTIONS_KEY = 'sync_options';
-    const PROFILE_AUTH_KEY = 'sync_profile_auth';
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
     const TRAKT_DEVICE_KEY = 'trakt_device_state';
@@ -346,8 +348,20 @@
     let traktSyncAllLikedLists = false;
     let mdblistLists = [];
     let mdblistSelectedLists = [];
+    let sessionProfileId = '';
+    let secretState = emptySecretState();
 
     function el(id) { return document.getElementById(id); }
+
+    function emptySecretState() {
+      return {
+        simkl: { client_secret_saved: false, access_token_saved: false },
+        anilist: { access_token_saved: false },
+        trakt: { client_secret_saved: false, access_token_saved: false, refresh_token_saved: false },
+        mdblist: { api_key_saved: false },
+        pmdb: { api_key_saved: false },
+      };
+    }
 
     function loadJson(key, fallback) {
       try {
@@ -366,16 +380,18 @@
       return { profile_id: el('profile-id').value.trim(), password: el('profile-password').value };
     }
 
-    function loadProfileAuth() {
-      return loadJson(PROFILE_AUTH_KEY, {});
+    function hasSavedSecret(section, key) {
+      return !!(secretState[section] && secretState[section][key]);
     }
 
-    function saveProfileAuth(auth) {
-      saveJson(PROFILE_AUTH_KEY, auth);
+    function hasSecretInputOrSaved(inputId, section, key) {
+      return !!el(inputId).value.trim() || hasSavedSecret(section, key);
     }
 
-    function clearProfileAuth() {
-      localStorage.removeItem(PROFILE_AUTH_KEY);
+    function setSecretInputState(inputId, section, key, defaultPlaceholder) {
+      const input = el(inputId);
+      input.value = '';
+      input.placeholder = hasSavedSecret(section, key) ? 'Saved on server. Leave blank to keep it.' : defaultPlaceholder;
     }
 
     function loadSimklPinState() {
@@ -503,7 +519,7 @@
     }
 
     function isTraktConnected() {
-      return !!(el('trakt-client-id').value.trim() && el('trakt-access-token').value.trim());
+      return !!(el('trakt-client-id').value.trim() && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved'));
     }
 
     function gatherCreds() {
@@ -543,17 +559,42 @@
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
+        delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         media_types: ['shows', 'movies', 'anime'],
       };
     }
 
+    function gatherDraftCreds() {
+      return {
+        simkl: {
+          client_id: el('simkl-client-id').value.trim(),
+          selected_statuses: cloneSimklStatuses(simklSelectedStatuses),
+        },
+        anilist: {
+          username: el('anilist-username').value.trim(),
+          selected_statuses: anilistSelectedStatuses.slice(),
+        },
+        trakt: {
+          client_id: el('trakt-client-id').value.trim(),
+          username: '',
+          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_liked_lists: traktSyncAllLikedLists,
+          selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
+        },
+        mdblist: {
+          selected_lists: normalizeMdbListSelectedLists(mdblistSelectedLists),
+        },
+        pmdb: {},
+      };
+    }
+
     function saveDraft() {
-      saveJson(CREDS_KEY, gatherCreds());
+      saveJson(CREDS_KEY, gatherDraftCreds());
       saveJson(OPTIONS_KEY, gatherOptions());
     }
 
-    function populateForm(creds, opts, auth) {
-      const profileAuth = auth || {};
+    function populateForm(creds, opts, profileMeta) {
+      const meta = profileMeta || {};
       const simkl = creds && creds.simkl ? creds.simkl : {};
       const anilist = creds && creds.anilist ? creds.anilist : {};
       const trakt = creds && creds.trakt ? creds.trakt : {};
@@ -561,31 +602,54 @@
       const pmdb = creds && creds.pmdb ? creds.pmdb : {};
       const options = opts || {};
 
-      el('profile-id').value = profileAuth.profile_id || '';
-      el('profile-password').value = profileAuth.password || '';
+      sessionProfileId = meta.profile_id || '';
+      secretState = {
+        simkl: {
+          client_secret_saved: !!simkl.client_secret_saved,
+          access_token_saved: !!simkl.access_token_saved,
+        },
+        anilist: {
+          access_token_saved: !!anilist.access_token_saved,
+        },
+        trakt: {
+          client_secret_saved: !!trakt.client_secret_saved,
+          access_token_saved: !!trakt.access_token_saved,
+          refresh_token_saved: !!trakt.refresh_token_saved,
+        },
+        mdblist: {
+          api_key_saved: !!mdblist.api_key_saved,
+        },
+        pmdb: {
+          api_key_saved: !!pmdb.api_key_saved,
+        },
+      };
+
+      el('profile-id').value = meta.profile_id || '';
+      el('profile-password').value = '';
       el('simkl-client-id').value = simkl.client_id || '';
-      el('simkl-client-secret').value = simkl.client_secret || '';
-      el('simkl-access-token').value = simkl.access_token || '';
+      setSecretInputState('simkl-client-secret', 'simkl', 'client_secret_saved', 'Optional');
+      setSecretInputState('simkl-access-token', 'simkl', 'access_token_saved', 'From PIN auth or OAuth');
       simklSelectedStatuses = normalizeSimklSelectedStatuses(simkl.selected_statuses);
       el('anilist-username').value = anilist.username || '';
-      el('anilist-access-token').value = anilist.access_token || '';
+      setSecretInputState('anilist-access-token', 'anilist', 'access_token_saved', 'Only for private lists');
       anilistSelectedStatuses = normalizeAniListSelectedStatuses(anilist.selected_statuses);
       el('trakt-client-id').value = trakt.client_id || '';
-      el('trakt-client-secret').value = trakt.client_secret || '';
-      el('trakt-access-token').value = trakt.access_token || '';
-      el('trakt-refresh-token').value = trakt.refresh_token || '';
+      setSecretInputState('trakt-client-secret', 'trakt', 'client_secret_saved', 'Required for device auth');
+      setSecretInputState('trakt-access-token', 'trakt', 'access_token_saved', 'Filled after Trakt auth');
+      setSecretInputState('trakt-refresh-token', 'trakt', 'refresh_token_saved', 'Saved for future refresh support');
       el('trakt-watchlist-toggle').checked = trakt.sync_watchlist !== false;
       traktSelectedLists = normalizeTraktSelectedLists(trakt.selected_lists || []);
       traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
       traktLikedLists = [];
       traktDiscoverLists = [];
-      el('mdblist-api-key').value = mdblist.api_key || '';
+      setSecretInputState('mdblist-api-key', 'mdblist', 'api_key_saved', 'From mdblist.com settings');
       mdblistSelectedLists = normalizeMdbListSelectedLists(mdblist.selected_lists || []);
       mdblistLists = [];
-      el('pmdb-api-key').value = pmdb.api_key || '';
+      setSecretInputState('pmdb-api-key', 'pmdb', 'api_key_saved', 'pm-...');
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
+      el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
@@ -593,11 +657,11 @@
       renderMdbListLists();
       if (!loadSimklPinState()) {
         setSimklAuthCode('');
-        setSimklAuthStatus(simkl.access_token ? 'SIMKL access token is already set.' : 'Start PIN auth here if you do not have an access token yet.', false);
+        setSimklAuthStatus(hasSavedSecret('simkl', 'access_token_saved') ? 'SIMKL access token is saved on the server.' : 'Start PIN auth here if you do not have an access token yet.', false);
       }
       if (!loadTraktDeviceState()) {
         setTraktAuthCode('');
-        setTraktAuthStatus(trakt.access_token ? 'Trakt access token is already set.' : 'Start Trakt device auth here if you do not have a token yet.', false);
+        setTraktAuthStatus(hasSavedSecret('trakt', 'access_token_saved') ? 'Trakt access token is saved on the server.' : 'Start Trakt device auth here if you do not have a token yet.', false);
       }
     }
 
@@ -610,11 +674,11 @@
     function updateDots() {
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
-      setDot('dot-simkl', !!(creds.simkl.client_id && creds.simkl.access_token && simklHasStatuses));
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && simklHasStatuses));
       setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
-      setDot('dot-trakt', !!(creds.trakt.client_id && creds.trakt.access_token && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length)));
-      setDot('dot-mdblist', !!(creds.mdblist.api_key && creds.mdblist.selected_lists.length));
-      setDot('dot-pmdb', !!creds.pmdb.api_key);
+      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length)));
+      setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
+      setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
     }
 
     function setDot(id, ok) {
@@ -1016,10 +1080,10 @@
       }
       setTraktCatalogStatus('Loading your liked Trakt lists...', false);
       try {
-        const result = await apiPost('/api/trakt/catalogs', {
-          client_id: el('trakt-client-id').value.trim(),
-          access_token: el('trakt-access-token').value.trim(),
-        });
+        const payload = { client_id: el('trakt-client-id').value.trim() };
+        const token = el('trakt-access-token').value.trim();
+        if (token) payload.access_token = token;
+        const result = await apiPost('/api/trakt/catalogs', payload);
         if (!result.ok) {
           setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt liked lists.'), true);
           return;
@@ -1046,11 +1110,13 @@
       }
       setTraktCatalogStatus(`Searching Trakt for "${query}"...`, false);
       try {
-        const result = await apiPost('/api/trakt/catalogs', {
+        const payload = {
           client_id: el('trakt-client-id').value.trim(),
-          access_token: el('trakt-access-token').value.trim(),
           query: query,
-        });
+        };
+        const token = el('trakt-access-token').value.trim();
+        if (token) payload.access_token = token;
+        const result = await apiPost('/api/trakt/catalogs', payload);
         if (!result.ok) {
           setTraktCatalogStatus(formatApiError(result.data, 'Could not search Trakt lists.'), true);
           return;
@@ -1097,7 +1163,7 @@
     }
 
     function renderMdbListLists() {
-      if (!el('mdblist-api-key').value.trim()) {
+      if (!hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved')) {
         setMdbListStatus('Enter your MDBList API key, then refresh your lists.', false);
       } else if (mdblistSelectedLists.length) {
         setMdbListStatus(`${mdblistSelectedLists.length} MDBList list${mdblistSelectedLists.length === 1 ? '' : 's'} selected.`, false);
@@ -1149,14 +1215,15 @@
 
     async function refreshMdbListLists(silent) {
       const apiKey = el('mdblist-api-key').value.trim();
-      if (!apiKey) {
+      if (!apiKey && !hasSavedSecret('mdblist', 'api_key_saved')) {
         if (!silent) showToast('Enter your MDBList API key first.', true, false);
         renderMdbListLists();
         return;
       }
       setMdbListStatus('Loading MDBList lists...', false);
       try {
-        const result = await apiPost('/api/mdblist/lists', { api_key: apiKey });
+        const payload = apiKey ? { api_key: apiKey } : {};
+        const result = await apiPost('/api/mdblist/lists', payload);
         if (!result.ok) {
           setMdbListStatus(formatApiError(result.data, 'Could not load MDBList lists.'), true);
           return;
@@ -1262,7 +1329,7 @@
     async function startTraktAuth() {
       const clientId = el('trakt-client-id').value.trim();
       const clientSecret = el('trakt-client-secret').value.trim();
-      if (!clientId || !clientSecret) {
+      if (!clientId || (!clientSecret && !hasSavedSecret('trakt', 'client_secret_saved'))) {
         showToast('Enter your Trakt client ID and client secret first.', true, false);
         return;
       }
@@ -1271,10 +1338,9 @@
       setTraktAuthStatus('Requesting Trakt device code...', false);
 
       try {
-        const result = await apiPost('/api/trakt/device/start', {
-          client_id: clientId,
-          client_secret: clientSecret,
-        });
+        const payload = { client_id: clientId };
+        if (clientSecret) payload.client_secret = clientSecret;
+        const result = await apiPost('/api/trakt/device/start', payload);
         if (!result.ok) {
           setTraktAuthStatus(formatApiError(result.data, 'Could not start Trakt auth.'), true);
           return;
@@ -1529,18 +1595,20 @@
       const announce = showSuccess !== false;
       saveDraft();
       const auth = gatherProfileAuth();
-      if (!auth.password) {
-        showToast('Profile password required.', true, false);
+      const needsPassword = !sessionProfileId;
+      if (needsPassword && !auth.password) {
+        showToast(auth.profile_id ? 'Profile password required to load that profile.' : 'Profile password required to create a profile.', true, false);
         return null;
       }
 
       try {
-        const result = await apiPost('/api/profile/save', {
+        const payload = {
           profile_id: auth.profile_id,
-          password: auth.password,
           credentials: gatherCreds(),
           options: gatherOptions(),
-        });
+        };
+        if (auth.password) payload.password = auth.password;
+        const result = await apiPost('/api/profile/save', payload);
 
         if (!result.ok) {
           showToast(formatApiError(result.data, 'Unable to save profile.'), true, false);
@@ -1548,14 +1616,13 @@
         }
 
         const profile = result.data.profile;
-        saveProfileAuth({ profile_id: profile.profile_id, password: auth.password });
-        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id, password: auth.password });
+        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         renderDashboard(profile);
         flashSaved();
-        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
+        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
-        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key) {
+        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
           refreshMdbListLists(true);
         }
         if (announce) showToast(result.data.created ? 'Profile created.' : 'Profile updated.', false, true);
@@ -1578,19 +1645,17 @@
         const result = await apiPost('/api/profile/login', auth);
         if (!result.ok) {
           if (!silent) showToast(formatApiError(result.data, 'Unable to load profile.'), true, false);
-          if (result.status === 401 || result.status === 404) clearProfileAuth();
           return null;
         }
 
         const profile = result.data.profile;
-        saveProfileAuth(auth);
-        populateForm(profile.credentials, profile.options, auth);
+        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         renderDashboard(profile);
         saveDraft();
-        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token) {
+        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
-        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key) {
+        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
           refreshMdbListLists(true);
         }
         if (!silent) showToast('Profile loaded.', false, true);
@@ -1601,23 +1666,22 @@
       }
     }
 
-    async function fetchStatus() {
-      const auth = loadProfileAuth();
-      if (!auth.profile_id || !auth.password) {
-        renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
-        return;
-      }
-
+    async function fetchStatus(includeCredentials) {
       try {
-        const result = await apiPost('/api/profile/status', auth);
+        const result = await apiPost('/api/profile/status', { include_credentials: !!includeCredentials });
         if (!result.ok) {
-          renderEmptyDashboard('Load your profile in Settings to resume status updates.');
-          if (result.status === 401 || result.status === 404) clearProfileAuth();
+          if (!includeCredentials) renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
           return;
         }
-        renderDashboard(result.data.profile);
+        const profile = result.data.profile;
+        if (includeCredentials) {
+          populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
+        }
+        renderDashboard(profile);
+        return profile;
       } catch {
-        renderEmptyDashboard('Status is temporarily unavailable.');
+        if (!includeCredentials) renderEmptyDashboard('Status is temporarily unavailable.');
+        return null;
       }
     }
 
@@ -1625,13 +1689,8 @@
       const savedProfile = await saveProfile(false);
       if (!savedProfile) return;
 
-      const auth = loadProfileAuth();
       try {
-        const result = await apiPost('/api/profile/sync', {
-          profile_id: auth.profile_id,
-          password: auth.password,
-          dry_run: dryRun,
-        });
+        const result = await apiPost('/api/profile/sync', { dry_run: dryRun });
 
         if (!result.ok) {
           showToast(formatApiError(result.data, 'Unable to start sync.'), true, false);
@@ -1647,19 +1706,23 @@
       }
     }
 
-    function clearLocalData() {
-      if (!confirm('Forget the saved UUID, password, and local draft data on this browser?')) return;
+    async function logoutProfile() {
+      if (!confirm('Log out on this browser and clear local draft data?')) return;
+      try {
+        await apiPost('/api/profile/logout', {});
+      } catch {}
+      sessionProfileId = '';
+      secretState = emptySecretState();
       localStorage.removeItem(CREDS_KEY);
       localStorage.removeItem(OPTIONS_KEY);
-      clearProfileAuth();
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] }, {});
-      renderEmptyDashboard('Local profile data cleared. Your server-side profile still exists.');
-      showToast('Local data cleared.', false, true);
+      renderEmptyDashboard('Signed out. Your server-side profile still exists.');
+      showToast('Logged out.', false, true);
     }
 
     const draftCreds = loadJson(CREDS_KEY, {
@@ -1669,20 +1732,24 @@
       mdblist: { selected_lists: [] },
     });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'] });
-    const savedAuth = loadProfileAuth();
-    populateForm(draftCreds, draftOptions, savedAuth);
+    populateForm(draftCreds, draftOptions, {});
     resumeSimklPinState();
     resumeTraktDeviceState();
-    if (draftCreds.trakt && draftCreds.trakt.client_id && draftCreds.trakt.access_token) {
-      refreshTraktLists(true);
-    }
-    if (draftCreds.mdblist && draftCreds.mdblist.api_key) {
-      refreshMdbListLists(true);
-    }
 
-    if (localStorage.getItem(ENTERED_KEY)) enterApp(savedAuth.profile_id ? 'dashboard' : 'settings');
-    if (savedAuth.profile_id && savedAuth.password) loadProfile(true).then(() => fetchStatus());
-    else renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
+    if (localStorage.getItem(ENTERED_KEY)) enterApp('settings');
+    fetchStatus(true).then(profile => {
+      if (profile) {
+        if (localStorage.getItem(ENTERED_KEY)) switchView('dashboard');
+        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
+          refreshTraktLists(true);
+        }
+        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
+          refreshMdbListLists(true);
+        }
+      } else {
+        renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
+      }
+    });
 
     setInterval(fetchStatus, 30000);
     document.querySelectorAll('.form-section input').forEach(input => {
