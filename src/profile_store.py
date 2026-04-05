@@ -768,7 +768,12 @@ class ProfileStore:
             profile = self._profiles[normalized_id]
             now = utc_now_iso()
             normalized_modes = self._normalize_sync_modes(sync_modes)
-            profile["last_results"] = copy.deepcopy(results)
+            if normalized_modes["lists"]:
+                profile["last_results"] = [
+                    copy.deepcopy(row)
+                    for row in results
+                    if str(row.get("list_name", "")).strip()
+                ]
             if managed_lists is not None:
                 profile["managed_lists"] = _normalize_managed_lists(managed_lists)
             self._merge_activity_results(profile, results, now)
