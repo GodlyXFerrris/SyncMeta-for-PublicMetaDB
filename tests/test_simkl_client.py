@@ -295,6 +295,42 @@ class SimklClientTests(unittest.TestCase):
             [(1, 1), (1, 2), (2, 1)],
         )
 
+    def test_partial_explicit_anime_history_is_supplemented_from_watched_count(self) -> None:
+        client = RecordingSimklClient()
+
+        history = client._extract_episode_history(
+            {
+                "show": {
+                    "title": "Partial Anime",
+                    "year": 2025,
+                    "ids": {"tmdb": 7005, "anilist": 77},
+                },
+                "status": "watching",
+                "seasons": [
+                    {
+                        "number": 1,
+                        "episodes": [
+                            {"number": 1, "watched_at": "2026-04-03T13:00:00Z"},
+                        ],
+                    }
+                ],
+                "watched_episodes_count": 3,
+                "total_episodes_count": 3,
+                "last_watched_at": "2026-04-03T13:00:00Z",
+            },
+            {
+                "title": "Partial Anime",
+                "year": 2025,
+                "ids": {"tmdb": 7005, "anilist": 77},
+            },
+            "anime",
+        )
+
+        self.assertEqual(
+            [(item["season"], item["episode"]) for item in history],
+            [(1, 1), (1, 2), (2, 1)],
+        )
+
     def test_expand_aggregate_history_item_overflows_into_season_one_when_only_season_one_is_known(self) -> None:
         client = RecordingSimklClient()
 

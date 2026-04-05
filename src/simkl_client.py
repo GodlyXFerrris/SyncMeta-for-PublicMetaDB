@@ -431,8 +431,9 @@ class SimklClient:
                 episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
             )
 
+        synthesized = self._synthesize_episode_history_from_counts(entry, show, media_key)
         if not history:
-            for episode in self._synthesize_episode_history_from_counts(entry, show, media_key):
+            for episode in synthesized:
                 if episode.get("aggregate_watched_count"):
                     history.append(episode)
                     continue
@@ -440,6 +441,15 @@ class SimklClient:
                     episode.get("season"),
                     episode.get("number") or episode.get("episode"),
                     episode.get("watched_at") or episode.get("last_watched_at"),
+                )
+        elif media_key == "anime":
+            for episode in synthesized:
+                if episode.get("aggregate_watched_count"):
+                    continue
+                add_episode(
+                    episode.get("season"),
+                    episode.get("number") or episode.get("episode"),
+                    episode.get("watched_at") or episode.get("last_watched_at") or fallback_watched_at,
                 )
 
         return history
