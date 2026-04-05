@@ -42,12 +42,26 @@ class WebTests(unittest.TestCase):
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
         self.assertIn("selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
+        self.assertIn('href="/impressum"', html)
+        self.assertIn('href="/datenschutz"', html)
+        self.assertIn("SyncMeta uses an essential session cookie", html)
+        self.assertIn("cookie_notice_ack", html)
         self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
         self.assertIn("choose which anime lists should sync into PublicMetaDB", html)
         self.assertNotIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
         self.assertNotIn("Sync Series", html)
         self.assertNotIn("Sync Movies", html)
         self.assertNotIn("Sync Anime", html)
+
+    def test_legal_pages_render(self) -> None:
+        impressum = self.client.get("/impressum")
+        privacy = self.client.get("/datenschutz")
+
+        self.assertEqual(impressum.status_code, 200)
+        self.assertEqual(privacy.status_code, 200)
+        self.assertIn("Impressum", impressum.get_data(as_text=True))
+        self.assertIn("Datenschutz", privacy.get_data(as_text=True))
+        self.assertIn("LEGAL_NAME", privacy.get_data(as_text=True))
 
     @patch("web.SimklClient.request_pin")
     def test_simkl_pin_start(self, mock_request_pin) -> None:

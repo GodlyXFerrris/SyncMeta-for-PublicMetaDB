@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title }} - SyncMeta</title>
+  <style>
+    :root{--black:#000;--z950:#0a0a0b;--z900:#18181b;--z800:#27272a;--z700:#3f3f46;--z600:#52525b;--z500:#71717a;--z400:#a1a1aa;--z300:#d4d4d8;--z100:#f4f4f5;--white:#fff;--accent:#7c6df7;--red:#f87171}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:var(--black);color:var(--z300);min-height:100vh;-webkit-font-smoothing:antialiased}
+    nav{position:sticky;top:0;z-index:20;background:rgba(0,0,0,.82);backdrop-filter:blur(24px);border-bottom:1px solid rgba(255,255,255,.1);padding:0 24px}
+    .nav-inner{max-width:900px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:56px}
+    .nav-logo{font-size:18px;font-weight:700;color:var(--z100);letter-spacing:-.5px;text-decoration:none;display:flex;align-items:center;gap:8px}
+    .nav-logo svg{width:22px;height:22px}
+    .nav-links{display:flex;gap:16px;flex-wrap:wrap}
+    .nav-links a{font-size:14px;color:var(--z400);text-decoration:none}
+    .nav-links a:hover{color:var(--white)}
+    .page{max-width:900px;margin:0 auto;padding:36px 24px 56px}
+    .card{background:var(--z950);border:1px solid var(--z900);border-radius:12px;padding:28px}
+    h1{font-size:32px;font-weight:800;color:var(--white);letter-spacing:-1px;margin-bottom:10px}
+    .lead{font-size:14px;line-height:1.6;color:var(--z500);margin-bottom:28px}
+    .notice{margin-bottom:24px;padding:14px 16px;border-radius:10px;border:1px solid rgba(248,113,113,.25);background:rgba(127,29,29,.16);color:var(--z300);font-size:13px;line-height:1.5}
+    section{margin-bottom:24px}
+    h2{font-size:14px;font-weight:700;color:var(--z100);text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+    p{font-size:14px;line-height:1.7;color:var(--z300);margin-bottom:10px}
+    .muted{color:var(--z500)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    a{color:var(--z300)}
+    a:hover{color:var(--white)}
+    .site-footer{border-top:1px solid rgba(255,255,255,.08)}
+    .footer-inner{max-width:900px;margin:0 auto;padding:18px 24px 28px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .footer-copy{font-size:12px;color:var(--z600)}
+    .footer-links{display:flex;gap:16px;flex-wrap:wrap}
+    .footer-links a{font-size:12px;color:var(--z500);text-decoration:none}
+    .footer-links a:hover{color:var(--white)}
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <a class="nav-logo" href="/">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h6v6H4z"/><path d="M14 4h6v6h-6z"/><path d="M4 14h6v6H4z"/><path d="M17 14v3a2 2 0 01-2 2h-1"/><path d="M14 17h6"/></svg>
+        SyncMeta
+      </a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/impressum">Impressum</a>
+        <a href="/datenschutz">Datenschutz</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page">
+    <div class="card">
+      <h1>{{ page_title }}</h1>
+      <p class="lead">
+        {% if legal_type == "impressum" %}
+        Angaben gemaess den Anforderungen fuer oeffentlich erreichbare Webseiten. Bitte pruefe die Inhalte fuer deinen konkreten Betrieb.
+        {% else %}
+        Uebersicht der Datenverarbeitung fuer diese SyncMeta-Instanz. Bitte pruefe und ergaenze die Angaben fuer deinen konkreten Betrieb.
+        {% endif %}
+      </p>
+
+      {% if "Please set" in legal.operator_name or "Please set" in legal.operator_address or "Please set" in legal.operator_email %}
+      <div class="notice">
+        Diese Seite enthaelt noch Platzhalter. Setze vor dem oeffentlichen Betrieb mindestens
+        <span class="mono">LEGAL_NAME</span>, <span class="mono">LEGAL_ADDRESS</span> und <span class="mono">LEGAL_EMAIL</span>.
+      </div>
+      {% endif %}
+
+      {% if legal_type == "impressum" %}
+      <section>
+        <h2>Anbieter</h2>
+        <p>{{ legal.operator_name }}</p>
+        <p style="white-space:pre-line">{{ legal.operator_address }}</p>
+      </section>
+
+      <section>
+        <h2>Kontakt</h2>
+        <p>E-Mail: <a href="mailto:{{ legal.operator_email }}">{{ legal.operator_email }}</a></p>
+        {% if legal.operator_phone %}
+        <p>Telefon: {{ legal.operator_phone }}</p>
+        {% endif %}
+      </section>
+
+      {% if legal.responsible_person %}
+      <section>
+        <h2>Verantwortlich</h2>
+        <p>{{ legal.responsible_person }}</p>
+      </section>
+      {% endif %}
+
+      {% if legal.vat_id or legal.court_register %}
+      <section>
+        <h2>Weitere Angaben</h2>
+        {% if legal.vat_id %}
+        <p>Umsatzsteuer-ID: {{ legal.vat_id }}</p>
+        {% endif %}
+        {% if legal.court_register %}
+        <p>Registereintrag: {{ legal.court_register }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+      {% else %}
+      <section>
+        <h2>Verantwortlicher</h2>
+        <p>{{ legal.operator_name }}</p>
+        <p style="white-space:pre-line">{{ legal.operator_address }}</p>
+        <p>E-Mail: <a href="mailto:{{ legal.operator_email }}">{{ legal.operator_email }}</a></p>
+      </section>
+
+      <section>
+        <h2>Welche Daten SyncMeta verarbeitet</h2>
+        <p>Beim Aufruf der Seite verarbeitet diese Instanz technische Verbindungsdaten, Sitzungsdaten und die Eingaben, die Nutzer in ihren Profilen speichern.</p>
+        <p>Dazu gehoeren insbesondere Profil-UUIDs, Passwort-Hashes, verschluesselt gespeicherte API-Zugangsdaten, ausgewaehlte Listen, Sync-Historie sowie serverseitige Sitzungsinformationen.</p>
+      </section>
+
+      <section>
+        <h2>Zweck der Verarbeitung</h2>
+        <p>Die Daten werden verarbeitet, damit Nutzer ihre Quellen mit PublicMetaDB verbinden, Listen auswaehlen, Profile speichern und automatische Synchronisierungen ausfuehren koennen.</p>
+      </section>
+
+      <section>
+        <h2>Cookies und Sitzungen</h2>
+        <p>Nach der Anmeldung verwendet diese Instanz ein serverseitiges Sitzungs-Cookie, damit Nutzer nicht bei jedem Seitenaufruf erneut ihre Profilzugangsdaten eingeben muessen.</p>
+      </section>
+
+      <section>
+        <h2>Speicherdauer</h2>
+        <p>Profildaten bleiben gespeichert, bis sie vom Betreiber oder vom Nutzer ueber die Funktion <span class="mono">Delete User Records</span> entfernt werden.</p>
+      </section>
+
+      <section>
+        <h2>Externe Dienste</h2>
+        <p>Je nach Nutzung kommuniziert SyncMeta mit SIMKL, AniList, Trakt, MDBList und PublicMetaDB. Dabei koennen die fuer die jeweilige Synchronisierung erforderlichen Daten an diese Dienste uebermittelt werden.</p>
+      </section>
+
+      <section>
+        <h2>Rechte</h2>
+        <p class="muted">Ergaenze hier die fuer dein Land und deinen Betrieb passenden Hinweise zu Auskunft, Berichtigung, Loeschung, Einschraenkung, Datenuebertragbarkeit und Beschwerderecht.</p>
+      </section>
+      {% endif %}
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-copy">SyncMeta</div>
+      <div class="footer-links">
+        <a href="/impressum">Impressum</a>
+        <a href="/datenschutz">Datenschutz</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

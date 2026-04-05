@@ -47,6 +47,16 @@ SESSION_COOKIE_NAME = "syncmeta_session"
 SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))
 LOGIN_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_LOGIN_MAX_ATTEMPTS", "10"))
 LOGIN_WINDOW_SECONDS = int(os.getenv("SYNCMETA_LOGIN_WINDOW_SECONDS", "900"))
+LEGAL_CONTEXT = {
+    "operator_name": os.getenv("LEGAL_NAME", "Please set LEGAL_NAME before public launch"),
+    "operator_address": os.getenv("LEGAL_ADDRESS", "Please set LEGAL_ADDRESS before public launch"),
+    "operator_email": os.getenv("LEGAL_EMAIL", "Please set LEGAL_EMAIL before public launch"),
+    "operator_phone": os.getenv("LEGAL_PHONE", ""),
+    "responsible_person": os.getenv("LEGAL_RESPONSIBLE_PERSON", ""),
+    "vat_id": os.getenv("LEGAL_VAT_ID", ""),
+    "court_register": os.getenv("LEGAL_COURT_REGISTER", ""),
+    "base_url": os.getenv("PUBLIC_BASE_URL", "").strip() or "your public SyncMeta URL",
+}
 
 _profile_store = ProfileStore(PROFILE_STORE_FILE)
 _scheduler_lock = threading.Lock()
@@ -366,6 +376,16 @@ def _before_request() -> None:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/impressum")
+def impressum():
+    return render_template("legal.html", page_title="Impressum", legal_type="impressum", legal=LEGAL_CONTEXT)
+
+
+@app.route("/datenschutz")
+def datenschutz():
+    return render_template("legal.html", page_title="Datenschutz", legal_type="privacy", legal=LEGAL_CONTEXT)
 
 
 @app.route("/api/profile/login", methods=["POST"])
