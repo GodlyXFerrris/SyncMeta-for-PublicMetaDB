@@ -658,6 +658,61 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(simkl.last_history_since, "2026-04-01T00:00:00Z")
         self.assertEqual(trakt.last_history_since, "2026-04-02T00:00:00Z")
 
+    def test_simkl_history_refetches_full_history_when_pmdb_is_empty(self) -> None:
+        class CursorFilteredSimklClient(StubSimklClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self.history_calls: list[str | None] = []
+
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                self.history_calls.append(since)
+                if since:
+                    return []
+                return [
+                    {
+                        "tmdb_id": 811,
+                        "media_type": "tv",
+                        "simkl_type": "shows",
+                        "season": 1,
+                        "episode": 1,
+                        "watched_at": "2026-04-01T12:00:00Z",
+                        "title": "Refetched SIMKL Show",
+                    },
+                ]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                simkl_sync_watched_history=True,
+                simkl_history_cursor="2026-04-02T00:00:00Z",
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        simkl = CursorFilteredSimklClient()
+        service._simkl = simkl
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        stats = service.run()
+
+        history_stats = next(row for row in stats if row.display_name == "Watch History")
+        self.assertEqual(simkl.history_calls, ["2026-04-02T00:00:00Z", None])
+        self.assertEqual(history_stats.items_fetched, 1)
+        self.assertEqual(history_stats.items_added, 1)
+        self.assertEqual(pmdb.watched[0]["tmdb_id"], 811)
+
     def test_simkl_activity_resolves_show_and_anime_without_direct_tmdb_ids(self) -> None:
         class NoTmdbSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:
