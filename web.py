@@ -27,7 +27,7 @@ from src.mdblist_client import MdbListClient
 from src.publicmetadb_client import PublicMetaDBClient
 from src.profile_store import ProfileStore, merge_credentials, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
-from src.sync_service import SyncService, SyncStats
+from src.sync_service import SyncService, SyncStats, _status_list_name
 from src.trakt_client import TraktClient
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -519,6 +519,41 @@ def _remove_managed_selection(profile: dict, managed_entry: dict) -> dict:
     return credentials
 
 
+def _remove_matching_list_name(credentials: dict, list_name: str) -> dict:
+    target = str(list_name).strip()
+    if not target:
+        return credentials
+
+    for media_type, statuses in credentials["simkl"]["selected_statuses"].items():
+        credentials["simkl"]["selected_statuses"][media_type] = [
+            status for status in statuses
+            if _status_list_name(media_type, status) != target
+        ]
+
+    credentials["anilist"]["selected_statuses"] = [
+        status for status in credentials["anilist"]["selected_statuses"]
+        if _status_list_name("anime", status) != target
+    ]
+
+    if target in {
+        _status_list_name("shows", "watchlist"),
+        _status_list_name("movies", "watchlist"),
+    }:
+        credentials["trakt"]["sync_watchlist"] = False
+
+    credentials["trakt"]["selected_lists"] = [
+        item for item in credentials["trakt"]["selected_lists"]
+        if str(item.get("name", "")).strip() != target
+    ]
+
+    credentials["mdblist"]["selected_lists"] = [
+        item for item in credentials["mdblist"]["selected_lists"]
+        if str(item.get("name", "")).strip() != target
+    ]
+
+    return credentials
+
+
 class ProfileScheduler:
     """Polls stored profiles and runs due syncs in background threads."""
 
@@ -940,6 +975,7 @@ def api_profile_list_delete():
 
     try:
         updated_credentials = _remove_managed_selection(profile, managed_entry)
+        updated_credentials = _remove_matching_list_name(updated_credentials, list_name)
         pmdb_client = PublicMetaDBClient(_config_from_profile(profile).pmdb)
         list_id = str(managed_entry.get("list_id", "")).strip()
         if list_id:

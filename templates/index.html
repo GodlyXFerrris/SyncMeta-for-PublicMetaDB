@@ -54,13 +54,14 @@
     .hint{font-size:11px;color:var(--z600);margin-top:4px}.hint a{color:var(--z400);text-decoration:none}.hint a:hover{color:var(--white)}
     .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}.toggle-row:last-child{margin-bottom:0}.toggle-row>label:last-child{margin-bottom:0;text-transform:none;font-size:13px;color:var(--z300);font-weight:400}
     .toggle{position:relative;width:36px;height:20px;flex-shrink:0}.toggle input{opacity:0;width:0;height:0}.toggle .slider{position:absolute;inset:0;background:var(--z800);border:1px solid var(--z700);border-radius:10px;cursor:pointer}.toggle .slider:before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--z500);border-radius:50%;transition:all .2s}.toggle input:checked + .slider{background:var(--accent2);border-color:var(--accent)}.toggle input:checked + .slider:before{transform:translateX(16px);background:var(--white)}
-    .btn{padding:9px 18px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z300);font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.btn:hover{border-color:var(--z600);color:var(--z100)}.btn:disabled{opacity:.4;cursor:not-allowed}.btn-primary{background:var(--accent2);border-color:var(--accent2);color:var(--white);font-weight:600}.btn-primary:hover{background:var(--accent)}.btn-sm{padding:6px 12px;font-size:12px}.btn-ghost{background:transparent;border-color:transparent;color:var(--z400)}.btn-ghost:hover{color:var(--red)}
+    .btn{padding:9px 18px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z300);font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.btn:hover{border-color:var(--z600);color:var(--z100)}.btn:disabled{opacity:.4;cursor:not-allowed}.btn-primary{background:var(--accent2);border-color:var(--accent2);color:var(--white);font-weight:600}.btn-primary:hover{background:var(--accent)}.btn-danger{background:rgba(127,29,29,.9);border-color:rgba(248,113,113,.35);color:var(--white);font-weight:700}.btn-danger:hover{background:rgba(153,27,27,.95);border-color:rgba(248,113,113,.55);color:var(--white)}.btn-sm{padding:6px 12px;font-size:12px}.btn-ghost{background:transparent;border-color:transparent;color:var(--z400)}.btn-ghost:hover{color:var(--red)}
     .dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot-ok{background:var(--green)}.dot-off{background:var(--z700)}
     .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--z800);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     .empty{text-align:center;padding:40px 20px;color:var(--z600);font-size:13px}.history-item{padding:12px 18px;border-bottom:1px solid rgba(39,39,46,.3);font-size:13px;display:flex;justify-content:space-between;align-items:center}.history-item:last-child{border-bottom:none}.history-time{color:var(--z500);font-size:12px}.history-stats{display:flex;gap:14px;font-variant-numeric:tabular-nums}
     .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.9);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300)}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
     .save-flash{font-size:12px;color:var(--green);opacity:0;transition:opacity .3s;margin-left:8px}.save-flash.show{opacity:1}.actions-bar{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions-meta{font-size:12px;color:var(--z600)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
     .hidden{display:none}
+    .inline-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap}
     .auth-box{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:var(--z900)}
     .auth-box.hidden{display:none}
     .auth-code{font-size:22px;font-weight:700;color:var(--white);letter-spacing:2px;margin:6px 0}
@@ -437,6 +438,9 @@
     let mdblistSelectedLists = [];
     let sessionProfileId = '';
     let secretState = emptySecretState();
+    let lastDashboardProfile = null;
+    let pendingDeleteListName = '';
+    let deletingManagedListName = '';
 
     function el(id) { return document.getElementById(id); }
 
@@ -1607,6 +1611,9 @@
     }
 
     function renderEmptyDashboard(message) {
+      lastDashboardProfile = null;
+      pendingDeleteListName = '';
+      deletingManagedListName = '';
       el('cards').innerHTML = `
         <div class="card"><div class="card-label">Last Sync</div><div class="card-value">Never</div><div class="card-sub">No profile loaded</div></div>
         <div class="card"><div class="card-label">Items Fetched</div><div class="card-value">0</div><div class="card-sub">0 resolved</div></div>
@@ -1630,6 +1637,13 @@
       if (!profile) {
         renderEmptyDashboard('Save a profile in Settings to enable background sync.');
         return;
+      }
+      lastDashboardProfile = profile;
+      if (!resultsHaveList(profile.last_results || [], pendingDeleteListName)) {
+        pendingDeleteListName = '';
+      }
+      if (!resultsHaveList(profile.last_results || [], deletingManagedListName)) {
+        deletingManagedListName = '';
       }
 
       const results = profile.last_results || [];
@@ -1670,9 +1684,15 @@
       if (!results.length) {
         el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';
       } else {
-        el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${row.list_name ? `<button class="btn btn-sm" type="button" data-delete-list="${esc(row.list_name)}" data-delete-label="${esc(row.display_name || row.list_name || '')}">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table>`;
+        el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table>`;
         document.querySelectorAll('[data-delete-list]').forEach(node => {
-          node.addEventListener('click', () => deleteManagedList(node.dataset.deleteList, node.dataset.deleteLabel || node.dataset.deleteList));
+          node.addEventListener('click', () => armDeleteManagedList(node.dataset.deleteList));
+        });
+        document.querySelectorAll('[data-delete-confirm]').forEach(node => {
+          node.addEventListener('click', () => deleteManagedList(node.dataset.deleteConfirm, node.dataset.deleteLabel || node.dataset.deleteConfirm));
+        });
+        document.querySelectorAll('[data-delete-cancel]').forEach(node => {
+          node.addEventListener('click', () => cancelDeleteManagedList(node.dataset.deleteCancel));
         });
       }
 
@@ -1696,6 +1716,34 @@
       el('sync-label').textContent = profile.sync_running ? 'Syncing...' : 'Sync Now';
       if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
       else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; }
+    }
+
+    function resultsHaveList(results, listName) {
+      if (!listName) return false;
+      return (results || []).some(row => (row.list_name || '') === listName);
+    }
+
+    function buildDeleteActions(row) {
+      const listName = row.list_name || '';
+      if (!listName) return '';
+      const label = row.display_name || row.list_name || '';
+      const busy = deletingManagedListName === listName;
+      if (pendingDeleteListName === listName) {
+        return `<div class="inline-actions"><button class="btn btn-sm btn-danger" type="button" data-delete-confirm="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>${busy ? 'Deleting...' : 'Confirm'}</button><button class="btn btn-sm btn-ghost" type="button" data-delete-cancel="${esc(listName)}" ${busy ? 'disabled' : ''}>Cancel</button></div>`;
+      }
+      return `<div class="inline-actions"><button class="btn btn-sm" type="button" data-delete-list="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>Delete</button></div>`;
+    }
+
+    function armDeleteManagedList(listName) {
+      pendingDeleteListName = listName || '';
+      if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+    }
+
+    function cancelDeleteManagedList(listName) {
+      if (pendingDeleteListName === (listName || '')) {
+        pendingDeleteListName = '';
+        if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+      }
     }
 
     async function saveProfile(showSuccess) {
@@ -1875,23 +1923,40 @@
         return;
       }
       const targetLabel = label || listName;
-      if (!window.confirm(`Delete "${targetLabel}" from PublicMetaDB and remove it from SyncMeta selections?`)) {
-        return;
-      }
+      deletingManagedListName = listName || '';
+      if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
 
-      const result = await apiPost('/api/profile/list/delete', { list_name: listName });
-      if (!result.ok) {
-        showToast(formatApiError(result.data, 'Could not delete the synced list.'), true, false);
-        return;
-      }
+      try {
+        const result = await apiPost('/api/profile/list/delete', { list_name: listName });
+        if (!result.ok) {
+          deletingManagedListName = '';
+          pendingDeleteListName = '';
+          if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+          showToast(formatApiError(result.data, 'Could not delete the synced list.'), true, false);
+          return;
+        }
 
-      const profile = result.data.profile || null;
-      if (profile) {
-        populateForm(profile.credentials || gatherDraftCreds(), profile.options || gatherOptions(), profile);
-        saveDraft();
-        renderDashboard(profile);
+        const profile = result.data.profile || null;
+        deletingManagedListName = '';
+        pendingDeleteListName = '';
+        if (profile) {
+          populateForm(profile.credentials || gatherDraftCreds(), profile.options || gatherOptions(), profile);
+          saveDraft();
+          renderDashboard(profile);
+          if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && (profile.credentials.trakt.access_token_saved || el('trakt-access-token').value.trim())) {
+            refreshTraktLists(true);
+          }
+          if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
+            refreshMdbListLists(true);
+          }
+        }
+        showToast(`Deleted "${targetLabel}".`, false, true);
+      } catch {
+        deletingManagedListName = '';
+        pendingDeleteListName = '';
+        if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+        showToast('Network error while deleting the synced list.', true, false);
       }
-      showToast(`Deleted "${targetLabel}".`, false, true);
     }
 
     const draftCreds = loadJson(CREDS_KEY, {
