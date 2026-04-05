@@ -1,6 +1,7 @@
 """SIMKL API client for fetching user watchlists."""
 
 import logging
+import re
 import time
 import webbrowser
 from datetime import datetime, timezone
@@ -61,6 +62,7 @@ class SimklClient:
     def __init__(self, config: SimklConfig):
         self._config = config
         self._session = self._build_session()
+        self._tmdb_season_plan_cache: dict[int, list[tuple[int, int]]] = {}
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -603,8 +605,7 @@ class SimklClient:
                 episodes.extend(item for item in candidate if isinstance(item, dict))
         return episodes
 
-    @staticmethod
-    def _synthesize_episode_history_from_counts(entry: dict, show: dict, media_key: str) -> list[dict]:
+    def _synthesize_episode_history_from_counts(self, entry: dict, show: dict, media_key: str) -> list[dict]:
         if media_key != "anime":
             return []
 
@@ -632,11 +633,86 @@ class SimklClient:
             or show.get("last_watched_at")
             or show.get("last_watched")
         )
+        tmdb_raw = (show.get("ids", {}) or {}).get("tmdb")
+        try:
+            tmdb_id = int(tmdb_raw) if tmdb_raw else None
+        except (TypeError, ValueError):
+            tmdb_id = None
 
-        return [
-            {"season": 1, "number": episode_number, "watched_at": watched_at}
-            for episode_number in range(1, watched_total + 1)
-        ]
+        if tmdb_id:
+            season_plan = self._get_tmdb_season_plan_cached(tmdb_id)
+            if season_plan:
+                episodes: list[dict] = []
+                remaining = watched_total
+                for season_number, season_episodes in season_plan:
+                    if season_number <= 0 or season_episodes <= 0:
+                        continue
+                    take = min(remaining, season_episodes)
+                    episodes.extend(
+                        {"season": season_number, "number": episode_number, "watched_at": watched_at}
+                        for episode_number in range(1, take + 1)
+                    )
+                    remaining -= take
+                    if remaining <= 0:
+                        break
+                if episodes:
+                    return episodes
+
+        if watched_total <= 30:
+            return [
+                {"season": 1, "number": episode_number, "watched_at": watched_at}
+                for episode_number in range(1, watched_total + 1)
+            ]
+        return []
+
+    @classmethod
+    def _get_tmdb_season_plan_cached(cls, tmdb_id: int) -> list[tuple[int, int]]:
+        cache = getattr(cls, "_shared_tmdb_season_plan_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(cls, "_shared_tmdb_season_plan_cache", cache)
+        if tmdb_id in cache:
+            return list(cache[tmdb_id])
+        plan = cls._fetch_tmdb_season_plan(tmdb_id)
+        cache[tmdb_id] = list(plan)
+        return list(plan)
+
+    @staticmethod
+    def _fetch_tmdb_season_plan(tmdb_id: int) -> list[tuple[int, int]]:
+        url = f"https://www.themoviedb.org/tv/{tmdb_id}/seasons?language=en-US"
+        try:
+            response = requests.get(
+                url,
+                timeout=20,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; SyncMeta/1.0)",
+                    "Accept-Language": "en-US,en;q=0.9",
+                },
+            )
+            response.raise_for_status()
+        except Exception as exc:
+            logger.info("Failed to load TMDB season plan for %s: %s", tmdb_id, exc)
+            return []
+
+        html = response.text
+        blocks = html.split('<div class="season_wrapper">')
+        plan: list[tuple[int, int]] = []
+        for block in blocks[1:]:
+            season_match = re.search(rf'/tv/{tmdb_id}/season/(\d+)(?:\?language=en-US)?', block)
+            episodes_match = re.search(r'(\d+)\s+Episodes', block)
+            if not season_match or not episodes_match:
+                continue
+            try:
+                season_number = int(season_match.group(1))
+                episode_count = int(episodes_match.group(1))
+            except (TypeError, ValueError):
+                continue
+            if episode_count <= 0:
+                continue
+            plan.append((season_number, episode_count))
+        plan.sort(key=lambda item: item[0])
+        logger.info("TMDB season plan for %s: %s", tmdb_id, plan)
+        return plan
 
     @staticmethod
     def _playback_progress_percent(entry: dict) -> float | None:

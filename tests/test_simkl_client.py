@@ -185,6 +185,12 @@ class RecordingSimklClient(SimklClient):
             }
         return None
 
+    @staticmethod
+    def _fetch_tmdb_season_plan(tmdb_id: int) -> list[tuple[int, int]]:
+        if tmdb_id == 7005:
+            return [(1, 2), (2, 1)]
+        return []
+
 
 class SimklClientTests(unittest.TestCase):
     def test_fetch_list_uses_type_specific_endpoint(self) -> None:
@@ -234,7 +240,7 @@ class SimklClientTests(unittest.TestCase):
                 for item in history
                 if item["tmdb_id"] == 7005
             ),
-            [(1, 1), (1, 2), (1, 3)],
+            [(1, 1), (1, 2), (2, 1)],
         )
 
     def test_get_watched_history_since_filters_older_entries_and_passes_date_from(self) -> None:
