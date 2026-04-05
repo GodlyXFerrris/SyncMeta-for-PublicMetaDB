@@ -190,7 +190,7 @@ class RecordingSimklClient(SimklClient):
         if tmdb_id == 7005:
             return [(1, 2), (2, 1)]
         if tmdb_id == 7006:
-            return [(1, 28)]
+            return [(1, 28), (2, 0)]
         if tmdb_id == 7007:
             return [(1, 12), (2, 12)]
         return []

@@ -377,6 +377,12 @@ class SimklClient:
         ids = show.get("ids", {}) or {}
         title = show.get("title", "Unknown")
         tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
+        fallback_watched_at = (
+            entry.get("last_watched_at")
+            or entry.get("last_watched")
+            or show.get("last_watched_at")
+            or show.get("last_watched")
+        )
 
         def add_episode(season: int | None, episode: int | None, watched_at: str | None) -> None:
             if season is None or episode is None:
@@ -408,21 +414,21 @@ class SimklClient:
                 add_episode(
                     season_number,
                     episode_entry.get("number") or episode_entry.get("episode"),
-                    episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+                    episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
                 )
 
         for episode_entry in self._history_episodes(entry, show):
             add_episode(
                 episode_entry.get("season"),
                 episode_entry.get("number") or episode_entry.get("episode"),
-                episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
             )
 
         for episode_entry in self._history_last_watched_episodes(entry, show):
             add_episode(
                 episode_entry.get("season"),
                 episode_entry.get("number") or episode_entry.get("episode"),
-                episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
             )
 
         if not history:
@@ -713,7 +719,7 @@ class SimklClient:
             if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
                 known_episodes = positive_seasons[0][1]
                 logger.info(
-                    "Falling back to Season 1 overflow for aggregate SIMKL anime history on TMDB %s (%d known, %d watched)",
+                    "Falling back to Season 1 overflow for aggregate SIMKL anime history on TMDB %s (%d known, %d watched, later seasons absent or 0-episode placeholders)",
                     tmdb_id,
                     known_episodes,
                     watched_total,
