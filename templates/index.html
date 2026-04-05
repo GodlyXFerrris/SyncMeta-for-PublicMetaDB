@@ -163,6 +163,7 @@
         <div class="actions-bar" style="margin-bottom:20px">
           <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Now</span></button>
           <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run</button>
+          <button class="btn btn-danger hidden" id="btn-stop" onclick="stopSync()">Stop</button>
           <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
         </div>
         <div class="panel hidden" id="activity-panel">
@@ -1733,6 +1734,9 @@
       el('history-body').innerHTML = '<div class="empty">No history yet.</div>';
       el('btn-sync').disabled = true;
       el('btn-dry').disabled = true;
+      el('btn-stop').disabled = true;
+      el('btn-stop').classList.add('hidden');
+      el('btn-stop').textContent = 'Stop';
       el('sync-label').textContent = 'Sync Now';
       if (polling) {
         clearInterval(polling);
@@ -1820,9 +1824,13 @@
         }).join('');
       }
 
+      const stopping = !!profile.sync_cancel_requested;
       el('btn-sync').disabled = !!profile.sync_running;
       el('btn-dry').disabled = !!profile.sync_running;
-      el('sync-label').textContent = profile.sync_running ? 'Syncing...' : 'Sync Now';
+      el('btn-stop').disabled = !profile.sync_running || stopping;
+      el('btn-stop').classList.toggle('hidden', !profile.sync_running);
+      el('btn-stop').textContent = stopping ? 'Stopping...' : 'Stop';
+      el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Now';
       if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
       else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; }
     }
@@ -2023,6 +2031,29 @@
         if (!polling) polling = setInterval(fetchStatus, 2000);
       } catch {
         showToast('Network error while starting sync.', true, false);
+      }
+    }
+
+    async function stopSync() {
+      if (!sessionProfileId) {
+        showToast('Sign into a profile first.', true, false);
+        return;
+      }
+
+      try {
+        const result = await apiPost('/api/profile/sync/stop', {});
+        if (!result.ok) {
+          showToast(formatApiError(result.data, 'Unable to stop the current sync.'), true, false);
+          return;
+        }
+
+        if (result.data.profile) {
+          renderDashboard(result.data.profile);
+        }
+        showToast('Stopping sync...', false, true);
+        fetchStatus();
+      } catch {
+        showToast('Network error while stopping sync.', true, false);
       }
     }
 

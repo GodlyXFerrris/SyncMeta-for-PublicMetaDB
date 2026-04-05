@@ -426,6 +426,7 @@ class ProfileStore:
             "last_sync": raw_profile.get("last_sync"),
             "last_results": list(raw_profile.get("last_results", [])),
             "sync_running": False,
+            "sync_cancel_requested": False,
             "sync_error": raw_profile.get("sync_error"),
             "sync_status": raw_profile.get("sync_status") or "Idle",
             "sync_started_at": raw_profile.get("sync_started_at"),
@@ -460,6 +461,7 @@ class ProfileStore:
             "sync_status": profile.get("sync_status"),
             "sync_started_at": profile.get("sync_started_at"),
             "sync_updated_at": profile.get("sync_updated_at"),
+            "sync_cancel_requested": bool(profile.get("sync_cancel_requested")),
             "history": copy.deepcopy(profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": profile.get("next_sync_at"),
             "managed_lists": copy.deepcopy(profile.get("managed_lists", [])),
@@ -490,6 +492,7 @@ class ProfileStore:
             "last_sync": profile.get("last_sync"),
             "last_results": copy.deepcopy(profile.get("last_results", [])),
             "sync_running": bool(profile.get("sync_running")),
+            "sync_cancel_requested": bool(profile.get("sync_cancel_requested")),
             "sync_error": profile.get("sync_error"),
             "sync_status": profile.get("sync_status"),
             "sync_started_at": profile.get("sync_started_at"),
@@ -520,6 +523,7 @@ class ProfileStore:
             "last_sync": None,
             "last_results": [],
             "sync_running": False,
+            "sync_cancel_requested": False,
             "sync_error": None,
             "sync_status": "Idle",
             "sync_started_at": None,
@@ -587,6 +591,7 @@ class ProfileStore:
                 raise RuntimeError("Sync already in progress")
             now = utc_now_iso()
             profile["sync_running"] = True
+            profile["sync_cancel_requested"] = False
             profile["sync_error"] = None
             profile["sync_status"] = "Queued"
             profile["sync_started_at"] = now
@@ -601,6 +606,7 @@ class ProfileStore:
                 raise RuntimeError("Sync already in progress")
             now = utc_now_iso()
             profile["sync_running"] = True
+            profile["sync_cancel_requested"] = False
             profile["sync_error"] = None
             profile["sync_status"] = "Queued"
             profile["sync_started_at"] = now
@@ -624,6 +630,7 @@ class ProfileStore:
                     continue
                 now_iso = utc_now_iso()
                 profile["sync_running"] = True
+                profile["sync_cancel_requested"] = False
                 profile["sync_error"] = None
                 profile["sync_status"] = "Queued"
                 profile["sync_started_at"] = now_iso
@@ -652,6 +659,7 @@ class ProfileStore:
                 profile["managed_lists"] = _normalize_managed_lists(managed_lists)
             profile["sync_error"] = None
             profile["sync_running"] = False
+            profile["sync_cancel_requested"] = False
             profile["sync_status"] = "Completed"
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
@@ -680,8 +688,47 @@ class ProfileStore:
             profile = self._profiles[normalized_id]
             now = utc_now_iso()
             profile["sync_running"] = False
+            profile["sync_cancel_requested"] = False
             profile["sync_error"] = error_message
             profile["sync_status"] = f"Failed: {error_message}"
+            profile["updated_at"] = now
+            profile["sync_updated_at"] = now
+            if not dry_run:
+                if profile["options"]["auto_sync"]:
+                    profile["next_sync_at"] = self._next_sync_iso(profile["options"]["interval_seconds"])
+                else:
+                    profile["next_sync_at"] = None
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
+    def request_sync_cancel(self, profile_id: str) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            if not profile.get("sync_running"):
+                raise RuntimeError("No sync is currently running")
+            now = utc_now_iso()
+            profile["sync_cancel_requested"] = True
+            profile["sync_status"] = "Stopping..."
+            profile["sync_updated_at"] = now
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
+    def is_sync_cancel_requested(self, profile_id: str) -> bool:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            return bool(profile.get("sync_cancel_requested"))
+
+    def record_sync_cancelled(self, profile_id: str, dry_run: bool = False) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            now = utc_now_iso()
+            profile["sync_running"] = False
+            profile["sync_cancel_requested"] = False
+            profile["sync_error"] = None
+            profile["sync_status"] = "Stopped"
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
             if not dry_run:

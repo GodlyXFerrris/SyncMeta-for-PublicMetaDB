@@ -1,7 +1,7 @@
 import unittest
 
 from src.config import AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
-from src.sync_service import SyncService
+from src.sync_service import SyncCancelled, SyncService
 
 
 class StubSimklClient:
@@ -197,6 +197,13 @@ class SyncServiceTests(unittest.TestCase):
             [item["list_name"] for item in service.managed_lists],
             ["SIMKL - Series - Watching", "Trakt List - demo - old-list", "Watching - Series"],
         )
+
+    def test_can_cancel_before_sync_work_starts(self) -> None:
+        service, _ = self.build_service(delete_disabled_lists=False)
+        service._cancel_requested_callback = lambda: True
+
+        with self.assertRaises(SyncCancelled):
+            service.run()
 
     def test_uses_expected_public_private_visibility_per_source_group(self) -> None:
         config = AppConfig(

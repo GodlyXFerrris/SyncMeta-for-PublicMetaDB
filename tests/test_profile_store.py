@@ -101,6 +101,20 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(len(loaded["history"]), 1)
         self.assertTrue(loaded["history"][0]["dry_run"])
 
+    def test_request_sync_cancel_and_record_cancelled(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+
+        stopping = self.store.request_sync_cancel(created["profile_id"])
+        self.assertTrue(stopping["sync_cancel_requested"])
+        self.assertEqual(stopping["sync_status"], "Stopping...")
+        self.assertTrue(self.store.is_sync_cancel_requested(created["profile_id"]))
+
+        stopped = self.store.record_sync_cancelled(created["profile_id"])
+        self.assertFalse(stopped["sync_running"])
+        self.assertFalse(stopped["sync_cancel_requested"])
+        self.assertEqual(stopped["sync_status"], "Stopped")
+
     def test_sync_success_persists_managed_lists(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
 

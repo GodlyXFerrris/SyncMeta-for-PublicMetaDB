@@ -27,7 +27,7 @@ from src.mdblist_client import MdbListClient
 from src.publicmetadb_client import PublicMetaDBClient
 from src.profile_store import ProfileStore, merge_credentials, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
-from src.sync_service import SyncService, SyncStats, _status_list_name
+from src.sync_service import SyncCancelled, SyncService, SyncStats, _status_list_name
 from src.trakt_client import TraktClient
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
@@ -364,6 +364,7 @@ def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
             _config_from_profile(profile, dry_run=dry_run),
             status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
             managed_lists=profile.get("managed_lists", []),
+            cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]
@@ -373,6 +374,9 @@ def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
             dry_run=dry_run,
             managed_lists=service.managed_lists,
         )
+    except SyncCancelled:
+        logger.info("Sync stopped for profile %s", profile_id[:8])
+        _profile_store.record_sync_cancelled(profile_id, dry_run=dry_run)
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
         _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run)
@@ -1021,6 +1025,22 @@ def api_profile_sync():
     )
     thread.start()
     return jsonify({"status": "started", "dry_run": dry_run})
+
+
+@app.route("/api/profile/sync/stop", methods=["POST"])
+def api_profile_sync_stop():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+
+    try:
+        profile = _profile_store.request_sync_cancel(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    except RuntimeError as exc:
+        return _json_error(str(exc), 409)
+
+    return jsonify({"status": "stopping", "profile": profile})
 
 
 if __name__ == "__main__":

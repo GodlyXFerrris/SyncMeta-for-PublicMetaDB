@@ -60,6 +60,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Trakt resume progress", html)
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)
+        self.assertIn('id="btn-stop"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
         self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
@@ -359,6 +360,61 @@ class WebTests(unittest.TestCase):
 
         with self.assertRaises(KeyError):
             web._profile_store.get_private_profile_by_id(profile["profile_id"])
+
+    def test_stop_sync_endpoint_marks_profile_as_stopping(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-key",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        web._profile_store.claim_profile_for_sync_by_id(profile["profile_id"])
+
+        stop_response = self.client.post("/api/profile/sync/stop", json={})
+        stop_data = stop_response.get_json()
+
+        self.assertEqual(stop_response.status_code, 200)
+        self.assertEqual(stop_data["status"], "stopping")
+        self.assertTrue(stop_data["profile"]["sync_cancel_requested"])
+        self.assertEqual(stop_data["profile"]["sync_status"], "Stopping...")
+        private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
+        self.assertTrue(private_profile["sync_cancel_requested"])
 
     @patch("web.PublicMetaDBClient.delete_list")
     def test_delete_managed_list_endpoint_removes_mdblist_selection(self, mock_delete_list) -> None:

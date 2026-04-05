@@ -14,6 +14,10 @@ from .trakt_client import TraktClient
 
 logger = logging.getLogger(__name__)
 
+
+class SyncCancelled(Exception):
+    """Raised when a running sync has been asked to stop."""
+
 _TYPE_LABELS = {
     "shows": "Series",
     "movies": "Movies",
@@ -67,7 +71,13 @@ class SyncStats:
 class SyncService:
     """Orchestrates one-way sync into PublicMetaDB."""
 
-    def __init__(self, config: AppConfig, status_callback=None, managed_lists: list[dict] | None = None):
+    def __init__(
+        self,
+        config: AppConfig,
+        status_callback=None,
+        managed_lists: list[dict] | None = None,
+        cancel_requested_callback=None,
+    ):
         self._config = config
         self._simkl = SimklClient(config.simkl)
         self._trakt = TraktClient(config.trakt)
@@ -76,6 +86,7 @@ class SyncService:
         self._matcher = ItemMatcher(self._pmdb)
         self._status_callback = status_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
+        self._cancel_requested_callback = cancel_requested_callback
 
     @property
     def simkl(self) -> SimklClient:
@@ -87,6 +98,7 @@ class SyncService:
 
     def run(self) -> list[SyncStats]:
         """Execute a full sync cycle. Returns stats per synced list."""
+        self._check_cancelled()
         self._set_status("Preparing sync")
         logger.info(
             "Starting sync (dry_run=%s, remove_missing=%s)",
@@ -127,7 +139,9 @@ class SyncService:
             return stats
 
         for simkl_type in media_types:
+            self._check_cancelled()
             for status_key in self._config.simkl.selected_statuses.get(simkl_type, []):
+                self._check_cancelled()
                 self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
@@ -195,6 +209,7 @@ class SyncService:
         source_counts: dict[str, int] = {}
 
         for item in items:
+            self._check_cancelled()
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -246,6 +261,7 @@ class SyncService:
                 deletable = [item for item in current_items if str(item.get("id", "")).strip()]
                 deletable.sort(key=lambda item: str(item.get("watched_at", "") or ""), reverse=True)
                 for existing_item in deletable[:excess]:
+                    self._check_cancelled()
                     if self._config.sync.dry_run:
                         stats.items_removed += 1
                         continue
@@ -271,6 +287,7 @@ class SyncService:
 
         normalized_items: list[dict] = []
         for item in items:
+            self._check_cancelled()
             key = self._resume_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -293,6 +310,7 @@ class SyncService:
 
         payloads: list[dict] = []
         for item in normalized_items:
+            self._check_cancelled()
             payload = {
                 "tmdb_id": int(item["tmdb_id"]),
                 "media_type": item["media_type"],
@@ -306,6 +324,7 @@ class SyncService:
             payloads.append(payload)
 
         for chunk in self._chunked(payloads, 50):
+            self._check_cancelled()
             try:
                 self._set_status("Writing Trakt resume progress to PublicMetaDB")
                 response = self._pmdb.save_resume_points_batch(chunk) or {}
@@ -335,6 +354,7 @@ class SyncService:
         stats: list[SyncStats] = []
 
         for status_key in self._config.anilist.selected_statuses:
+            self._check_cancelled()
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
             items = client.get_status(status_key)
             name = _status_list_name("anime", status_key)
@@ -362,6 +382,7 @@ class SyncService:
         stats: list[SyncStats] = []
 
         if self._config.trakt.sync_watchlist:
+            self._check_cancelled()
             self._set_status("Fetching Trakt watchlist")
             watchlist_items = self._trakt.get_watchlist()
             grouped = {
@@ -369,6 +390,7 @@ class SyncService:
                 "movies": [item for item in watchlist_items if item["media_type"] == "movie"],
             }
             for media_type in self._config.sync.media_types:
+                self._check_cancelled()
                 if media_type not in {"shows", "movies"}:
                     continue
                 items = grouped.get(media_type, [])
@@ -398,6 +420,7 @@ class SyncService:
         selected_public_lists = [item for item in selected_public_lists if item.get("source") != "default"]
 
         for trakt_list in selected_default_lists:
+            self._check_cancelled()
             self._set_status(f"Fetching Trakt catalog {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_default_catalog(trakt_list.get("catalog_key") or trakt_list.get("slug", ""))
@@ -422,8 +445,10 @@ class SyncService:
             )
 
         if self._config.trakt.sync_liked_lists:
+            self._check_cancelled()
             self._set_status("Fetching Trakt liked lists")
             for liked_list in self._trakt.get_liked_lists():
+                self._check_cancelled()
                 items = self._filter_trakt_items(liked_list["items"])
                 name = liked_list["name"]
                 description = f"Auto-synced liked Trakt list '{liked_list['name']}'"
@@ -446,6 +471,7 @@ class SyncService:
                 )
         else:
             for trakt_list in selected_liked_lists:
+                self._check_cancelled()
                 self._set_status(f"Fetching Trakt list {trakt_list['name']}")
                 items = self._filter_trakt_items(
                     self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -472,6 +498,7 @@ class SyncService:
                 )
 
         for trakt_list in selected_public_lists:
+            self._check_cancelled()
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -504,6 +531,7 @@ class SyncService:
         stats: list[SyncStats] = []
 
         for mdblist in self._dedupe_mdblist_lists(self._config.mdblist.selected_lists):
+            self._check_cancelled()
             self._set_status(f"Fetching MDBList {mdblist['name']}")
             items = self._filter_mdblist_items(self._mdblist.get_list_items(mdblist["id"]))
             media_type = "movies" if mdblist["mediatype"] == "movie" else "shows"
@@ -612,6 +640,7 @@ class SyncService:
         self._set_status(f"Resolving IDs for {list_name}")
         resolved: list[dict] = []
         for item in source_items:
+            self._check_cancelled()
             tmdb_id = self._matcher.resolve_tmdb_id(item)
             if tmdb_id is not None:
                 resolved.append({**item, "resolved_tmdb_id": tmdb_id})
@@ -645,6 +674,7 @@ class SyncService:
         desired_keys: set[str] = set()
 
         for item in resolved:
+            self._check_cancelled()
             tmdb_id = item["resolved_tmdb_id"]
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
@@ -684,6 +714,7 @@ class SyncService:
     def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
         removed = 0
         for item in existing_items:
+            self._check_cancelled()
             key = f"{item.get('tmdb_id')}:{item.get('media_type')}"
             if key not in desired_keys:
                 try:
@@ -722,11 +753,23 @@ class SyncService:
                 logger.error("  Error: %s", err)
 
     def _set_status(self, status: str) -> None:
+        self._check_cancelled()
         if self._status_callback:
             try:
                 self._status_callback(status)
             except Exception:
                 logger.debug("Status callback failed", exc_info=True)
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            logger.debug("Cancel callback failed", exc_info=True)
 
     @staticmethod
     def _watched_key(item: dict) -> str:
@@ -800,6 +843,7 @@ class SyncService:
     def _delete_disabled_lists(self, desired_names: set[str]) -> None:
         stale_names = [list_name for list_name in self._managed_lists if list_name not in desired_names]
         for list_name in stale_names:
+            self._check_cancelled()
             entry = self._managed_lists.get(list_name, {})
             list_id = str(entry.get("list_id", "")).strip()
             try:
