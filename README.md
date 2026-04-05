@@ -13,7 +13,7 @@ It connects to SIMKL, AniList, Trakt, and MDBList, lets each user choose exactly
 - Secure hosted mode: Passwords are hashed, saved credentials are encrypted at rest, browsers use server-side sessions, and login attempts are throttled.
 - Optional site-wide access gate: Set a shared site password if you want the whole instance behind a single private entry screen.
 - Built-in auth helpers: SIMKL PIN auth and Trakt device auth can be started directly from the Settings page.
-- Safe sync controls: Use dry runs, remove items missing from source lists, and delete user records from the dashboard when you want to wipe a profile.
+- Safe sync controls: Use dry runs, remove items missing from source lists, delete SyncMeta-managed PublicMetaDB lists when they are deselected, and delete user records from the dashboard when you want to wipe a profile.
 - Docker-first deployment: Run the web dashboard with Docker Compose, or use the CLI for one-off sync jobs.
 
 ## Supported Sources

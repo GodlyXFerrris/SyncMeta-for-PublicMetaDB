@@ -234,7 +234,8 @@
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
             <div class="form-row" style="margin-top:14px"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
             <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
-            <div class="hint">Source selections above decide what gets synced. Right now SyncMeta only removes items inside active lists when that source no longer contains them.</div>
+            <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
+            <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
           </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
@@ -305,11 +306,6 @@
   <footer class="site-footer">
     <div class="footer-inner">
       <div class="footer-copy">SyncMeta</div>
-      <div class="footer-links">
-        <a href="/datenschutz">Datenschutz</a>
-        <a href="/terms">Terms of Service</a>
-        <a href="/cookie-settings">Cookie Settings</a>
-      </div>
     </div>
   </footer>
 
@@ -587,7 +583,7 @@
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
-        delete_disabled_lists: false,
+        delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         media_types: ['shows', 'movies', 'anime'],
       };
     }
@@ -677,6 +673,7 @@
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
+      el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       updateDots();
       renderSimklStatuses();
       renderAniListStatuses();
