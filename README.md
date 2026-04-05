@@ -93,54 +93,6 @@ MDBList can load your account lists directly in Settings so you can pick exactly
 
 AniList has a list picker in Settings with `All`, `Watching`, `Completed`, `Paused`, `Dropped`, and `Planning`.
 
-## CLI
-
-The CLI is still available for manual or standalone use.
-
-### Authenticate with SIMKL
-
-```bash
-python main.py auth
-```
-
-This starts the SIMKL PIN flow and prints an access token you can place in `.env` or a JSON config file.
-
-### One-time sync
-
-```bash
-python main.py sync
-```
-
-### Dry run
-
-```bash
-python main.py sync --dry-run
-```
-
-### Remove items missing from the source
-
-```bash
-python main.py sync --remove-missing
-```
-
-### Continuous CLI sync every 30 minutes
-
-```bash
-python main.py sync --interval 30
-```
-
-### Verbose logging
-
-```bash
-python main.py -v sync
-```
-
-### Use a JSON config file
-
-```bash
-python main.py -c config.json sync
-```
-
 ## Setup
 
 ### 1. Install dependencies
@@ -256,6 +208,54 @@ python main.py sync
 ```
 
 It is useful for manual sync jobs or testing your `.env` configuration without opening the dashboard.
+
+## CLI
+
+The CLI is still available for manual or standalone use.
+
+### Authenticate with SIMKL
+
+```bash
+python main.py auth
+```
+
+This starts the SIMKL PIN flow and prints an access token you can place in `.env` or a JSON config file.
+
+### One-time sync
+
+```bash
+python main.py sync
+```
+
+### Dry run
+
+```bash
+python main.py sync --dry-run
+```
+
+### Remove items missing from the source
+
+```bash
+python main.py sync --remove-missing
+```
+
+### Continuous CLI sync every 30 minutes
+
+```bash
+python main.py sync --interval 30
+```
+
+### Verbose logging
+
+```bash
+python main.py -v sync
+```
+
+### Use a JSON config file
+
+```bash
+python main.py -c config.json sync
+```
 
 ## Environment Variables
 
