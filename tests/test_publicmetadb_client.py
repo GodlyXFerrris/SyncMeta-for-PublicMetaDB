@@ -34,6 +34,28 @@ class PublicMetaDBClientTests(unittest.TestCase):
             ("/api/external/watched", {"page": 2, "perPage": 100}),
         ])
 
+    def test_clear_watched_history_deletes_all_entries_with_ids(self) -> None:
+        client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+        deleted_ids: list[str] = []
+
+        client.get_watched_history = lambda: [  # type: ignore[method-assign]
+            {"id": "w1"},
+            {"id": "w2"},
+            {"tmdb_id": 5},
+            {"id": "w3"},
+        ]
+
+        def fake_delete(watched_id: str) -> bool:
+            deleted_ids.append(watched_id)
+            return True
+
+        client.delete_watched_entry = fake_delete  # type: ignore[method-assign]
+
+        deleted_count = client.clear_watched_history()
+
+        self.assertEqual(deleted_count, 3)
+        self.assertEqual(deleted_ids, ["w1", "w2", "w3"])
+
 
 if __name__ == "__main__":
     unittest.main()

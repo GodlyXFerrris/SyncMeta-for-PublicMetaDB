@@ -167,13 +167,16 @@
           <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
         </div>
         <div class="panel hidden" id="activity-panel">
-          <div class="panel-header">
-            <span>Activity Sync</span>
-            <div class="actions-bar" style="margin-top:0">
-              <button class="btn btn-sm" id="btn-sync-history" type="button" onclick="triggerActivitySync('history')">Sync Watch History</button>
-              <button class="btn btn-sm" id="btn-sync-resume" type="button" onclick="triggerActivitySync('resume')">Sync Resume Progress</button>
+            <div class="panel-header">
+              <span>Activity Sync</span>
+              <div class="actions-bar" style="margin-top:0">
+                <button class="btn btn-sm" id="btn-sync-history" type="button" onclick="triggerActivitySync('history')">Sync Watch History</button>
+                <button class="btn btn-sm" id="btn-clear-history-arm" type="button" onclick="armClearWatchHistory()">Clear PMDB History</button>
+                <button class="btn btn-sm btn-danger hidden" id="btn-clear-history-confirm" type="button" onclick="clearWatchHistory()">Confirm Clear</button>
+                <button class="btn btn-sm btn-ghost hidden" id="btn-clear-history-cancel" type="button" onclick="cancelClearWatchHistory()">Cancel</button>
+                <button class="btn btn-sm" id="btn-sync-resume" type="button" onclick="triggerActivitySync('resume')">Sync Resume Progress</button>
+              </div>
             </div>
-          </div>
           <div class="panel-body">
             <div class="cards activity-cards" id="activity-cards"></div>
           </div>
@@ -476,6 +479,8 @@
     let lastDashboardProfile = null;
     let pendingDeleteListName = '';
     let deletingManagedListName = '';
+    let pendingClearWatchHistory = false;
+    let clearingWatchHistory = false;
 
     function el(id) { return document.getElementById(id); }
 
@@ -1744,6 +1749,7 @@
       el('sync-label').textContent = 'Sync Lists';
       el('btn-sync-history').disabled = true;
       el('btn-sync-resume').disabled = true;
+      updateClearHistoryButtons(false, false);
       if (polling) {
         clearInterval(polling);
         polling = null;
@@ -1860,10 +1866,38 @@
       el('btn-sync-history').disabled = !!profile.sync_running || !watchEnabled;
       el('btn-sync-resume').disabled = !!profile.sync_running || !resumeEnabled;
       el('activity-panel').classList.remove('hidden');
+      updateClearHistoryButtons(!!(watchEnabled || watchRow), !profile.sync_running);
       el('activity-cards').innerHTML = [
         buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', profile.next_history_sync_at, activityResults.watch_history && activityResults.watch_history.timestamp),
         buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', profile.next_resume_sync_at, activityResults.resume_progress && activityResults.resume_progress.timestamp),
       ].join('');
+    }
+
+    function updateClearHistoryButtons(show, canUse) {
+      const arm = el('btn-clear-history-arm');
+      const confirm = el('btn-clear-history-confirm');
+      const cancel = el('btn-clear-history-cancel');
+      if (!show) {
+        pendingClearWatchHistory = false;
+        clearingWatchHistory = false;
+        arm.classList.add('hidden');
+        confirm.classList.add('hidden');
+        cancel.classList.add('hidden');
+        arm.disabled = true;
+        confirm.disabled = true;
+        cancel.disabled = true;
+        confirm.textContent = 'Confirm Clear';
+        return;
+      }
+
+      const busy = !!clearingWatchHistory;
+      arm.classList.toggle('hidden', pendingClearWatchHistory);
+      confirm.classList.toggle('hidden', !pendingClearWatchHistory);
+      cancel.classList.toggle('hidden', !pendingClearWatchHistory);
+      arm.disabled = !canUse || busy;
+      confirm.disabled = !canUse || busy;
+      cancel.disabled = busy;
+      confirm.textContent = busy ? 'Clearing...' : 'Confirm Clear';
     }
 
     function findResultByDisplayName(results, displayName) {
@@ -2070,10 +2104,62 @@
 
         showToast(mode === 'history' ? 'Watch history sync started.' : 'Resume progress sync started.', false, true);
         switchView('dashboard');
+        pendingClearWatchHistory = false;
+        clearingWatchHistory = false;
         fetchStatus();
         if (!polling) polling = setInterval(fetchStatus, 2000);
       } catch {
         showToast('Network error while starting activity sync.', true, false);
+      }
+    }
+
+    function armClearWatchHistory() {
+      pendingClearWatchHistory = true;
+      if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+    }
+
+    function cancelClearWatchHistory() {
+      pendingClearWatchHistory = false;
+      clearingWatchHistory = false;
+      if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+    }
+
+    async function clearWatchHistory() {
+      if (!sessionProfileId) {
+        showToast('Sign into a profile first.', true, false);
+        return;
+      }
+
+      clearingWatchHistory = true;
+      if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+
+      try {
+        const result = await apiPost('/api/profile/activity/history/clear', {});
+        if (!result.ok) {
+          clearingWatchHistory = false;
+          pendingClearWatchHistory = false;
+          if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+          showToast(formatApiError(result.data, 'Could not clear PublicMetaDB watch history.'), true, false);
+          return;
+        }
+
+        clearingWatchHistory = false;
+        pendingClearWatchHistory = false;
+        if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+        const deletedCount = Number(result.data.deleted_count || 0) || 0;
+        showToast(
+          deletedCount
+            ? `Cleared ${deletedCount} watched entr${deletedCount === 1 ? 'y' : 'ies'} from PublicMetaDB history.`
+            : 'PublicMetaDB watch history was already empty.',
+          false,
+          true
+        );
+        fetchStatus();
+      } catch {
+        clearingWatchHistory = false;
+        pendingClearWatchHistory = false;
+        if (lastDashboardProfile) renderDashboard(lastDashboardProfile);
+        showToast('Network error while clearing PublicMetaDB watch history.', true, false);
       }
     }
 

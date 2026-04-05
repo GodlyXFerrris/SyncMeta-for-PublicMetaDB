@@ -119,6 +119,16 @@ class PublicMetaDBClient:
                 return False
             raise
 
+    def clear_watched_history(self) -> int:
+        deleted = 0
+        for item in self.get_watched_history():
+            watched_id = str(item.get("id", "")).strip()
+            if not watched_id:
+                continue
+            if self.delete_watched_entry(watched_id):
+                deleted += 1
+        return deleted
+
     # Resume / continue watching
 
     def get_resume_points(self) -> list[dict]:

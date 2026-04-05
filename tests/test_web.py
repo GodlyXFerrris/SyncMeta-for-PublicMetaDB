@@ -60,6 +60,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)
         self.assertIn("Sync Watch History", html)
+        self.assertIn("Clear PMDB History", html)
         self.assertIn("Sync Resume Progress", html)
         self.assertIn("Refreshes automatically every hour", html)
         self.assertIn('id="btn-stop"', html)
@@ -417,6 +418,59 @@ class WebTests(unittest.TestCase):
         self.assertEqual(stop_data["profile"]["sync_status"], "Stopping...")
         private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
         self.assertTrue(private_profile["sync_cancel_requested"])
+
+    @patch("web.PublicMetaDBClient.clear_watched_history")
+    def test_clear_watch_history_endpoint_clears_pmdb_history(self, mock_clear_watched_history) -> None:
+        mock_clear_watched_history.return_value = 7
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-key",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows", "movies", "anime"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        clear_response = self.client.post("/api/profile/activity/history/clear", json={})
+        clear_data = clear_response.get_json()
+
+        self.assertEqual(clear_response.status_code, 200)
+        self.assertEqual(clear_data["status"], "cleared")
+        self.assertEqual(clear_data["deleted_count"], 7)
+        mock_clear_watched_history.assert_called_once()
 
     def test_activity_sync_endpoint_starts_history_only_run(self) -> None:
         profile = web._profile_store.create_profile("secret", {

@@ -1086,6 +1086,31 @@ def api_profile_activity_sync():
     return jsonify({"status": "started", "mode": mode})
 
 
+@app.route("/api/profile/activity/history/clear", methods=["POST"])
+def api_profile_activity_history_clear():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+
+    profile = _current_private_profile()
+    if not profile:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    if profile.get("sync_running"):
+        return _json_error("Wait for the current sync to finish before clearing watch history", 409)
+
+    credentials = normalize_credentials(profile.get("credentials"))
+    if not credentials["pmdb"]["api_key"]:
+        return _json_error("Save your PublicMetaDB API key first", 409)
+
+    try:
+        deleted_count = PublicMetaDBClient(_config_from_profile(profile).pmdb).clear_watched_history()
+    except Exception as exc:
+        logger.exception("Failed to clear PublicMetaDB watch history for profile %s", profile_id[:8])
+        return _json_error(str(exc), 500)
+
+    return jsonify({"status": "cleared", "deleted_count": deleted_count})
+
+
 @app.route("/api/profile/sync/stop", methods=["POST"])
 def api_profile_sync_stop():
     profile_id = _current_profile_id()
