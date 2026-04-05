@@ -84,12 +84,7 @@ class PublicMetaDBClient:
     # Watch history
 
     def get_watched_history(self) -> list[dict]:
-        resp = self._get("/api/external/watched")
-        if not resp:
-            return []
-        if isinstance(resp, dict):
-            return list(resp.get("items", []))
-        return list(resp)
+        return self._get_paginated_items("/api/external/watched")
 
     def mark_watched(
         self,
@@ -127,12 +122,7 @@ class PublicMetaDBClient:
     # Resume / continue watching
 
     def get_resume_points(self) -> list[dict]:
-        resp = self._get("/api/external/resume")
-        if not resp:
-            return []
-        if isinstance(resp, dict):
-            return list(resp.get("items", []))
-        return list(resp)
+        return self._get_paginated_items("/api/external/resume")
 
     def save_resume_point(
         self,
@@ -168,6 +158,24 @@ class PublicMetaDBClient:
                 logger.info("Resume point %s was already gone", resume_id)
                 return False
             raise
+
+    def _get_paginated_items(self, path: str, per_page: int = 100) -> list[dict]:
+        all_items: list[dict] = []
+        page = 1
+        while True:
+            resp = self._get(path, params={"page": page, "perPage": per_page})
+            if not resp:
+                break
+            if isinstance(resp, list):
+                all_items.extend(resp)
+                break
+            items = list(resp.get("items", []))
+            all_items.extend(items)
+            total_pages = int(resp.get("totalPages", 1) or 1)
+            if page >= total_pages or not items:
+                break
+            page += 1
+        return all_items
 
     # ── Mapping lookups ────────────────────────────────────────────
 
