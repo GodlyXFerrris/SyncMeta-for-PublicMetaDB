@@ -281,6 +281,7 @@ def _normalize_managed_lists(raw_lists: list | None) -> list[dict]:
             "list_id": str(item.get("list_id", "")).strip(),
             "display_name": str(item.get("display_name", "")).strip(),
             "source_name": str(item.get("source_name", "")).strip(),
+            "selection": dict(item.get("selection", {})) if isinstance(item.get("selection"), dict) else {},
         })
     return selected
 
@@ -696,6 +697,43 @@ class ProfileStore:
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
+    def delete_managed_list_by_id(self, profile_id: str, list_name: str, credentials: dict) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            if profile.get("sync_running"):
+                raise RuntimeError("Cannot delete a managed list while a sync is in progress")
+
+            normalized_credentials = normalize_credentials(credentials)
+            now = utc_now_iso()
+            profile["credentials"] = normalized_credentials
+            profile["managed_lists"] = [
+                item for item in profile.get("managed_lists", [])
+                if str(item.get("list_name", "")).strip() != list_name
+            ]
+            profile["last_results"] = [
+                item for item in profile.get("last_results", [])
+                if str(item.get("list_name", "")).strip() != list_name
+            ]
+
+            trimmed_history = []
+            for entry in profile.get("history", []):
+                if not isinstance(entry, dict):
+                    continue
+                next_entry = copy.deepcopy(entry)
+                next_entry["results"] = [
+                    item for item in next_entry.get("results", [])
+                    if str(item.get("list_name", "")).strip() != list_name
+                ]
+                trimmed_history.append(next_entry)
+
+            profile["history"] = trimmed_history[:MAX_HISTORY_ITEMS]
+            profile["updated_at"] = now
+            profile["sync_status"] = "Managed list deleted"
+            profile["sync_updated_at"] = now
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 

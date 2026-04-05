@@ -336,6 +336,80 @@ class WebTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             web._profile_store.get_private_profile_by_id(profile["profile_id"])
 
+    @patch("web.PublicMetaDBClient.delete_list")
+    def test_delete_managed_list_endpoint_removes_mdblist_selection(self, mock_delete_list) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "mdbl-key",
+                "selected_lists": [{
+                    "id": 7,
+                    "name": "Favorites",
+                    "mediatype": "movie",
+                }],
+            },
+            "pmdb": {
+                "api_key": "pmdb-secret",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 600,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows", "movies"],
+        })
+        web._profile_store.record_sync_success(profile["profile_id"], [{
+            "list_name": "Favorites",
+            "display_name": "Favorites",
+            "source_name": "MDBList",
+        }], managed_lists=[{
+            "list_name": "Favorites",
+            "list_id": "pmdb-list-1",
+            "display_name": "Favorites",
+            "source_name": "MDBList",
+            "selection": {
+                "source": "mdblist",
+                "id": 7,
+                "mediatype": "movie",
+            },
+        }])
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        delete_response = self.client.post("/api/profile/list/delete", json={"list_name": "Favorites"})
+        delete_data = delete_response.get_json()
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertEqual(delete_data["profile"]["last_results"], [])
+        self.assertEqual(delete_data["profile"]["credentials"]["mdblist"]["selected_lists"], [])
+        private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
+        self.assertEqual(private_profile["managed_lists"], [])
+        self.assertEqual(private_profile["credentials"]["mdblist"]["selected_lists"], [])
+        mock_delete_list.assert_called_once_with("pmdb-list-1")
+
 
 if __name__ == "__main__":
     unittest.main()

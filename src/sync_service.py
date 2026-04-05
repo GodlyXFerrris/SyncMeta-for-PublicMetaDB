@@ -144,6 +144,11 @@ class SyncService:
                         display_name=display_name,
                         source_name="SIMKL",
                         is_public=self._config.sync.simkl_visibility == "public",
+                        selection={
+                            "source": "simkl",
+                            "media_type": simkl_type,
+                            "status": status_key,
+                        },
                     )
                 )
 
@@ -173,6 +178,10 @@ class SyncService:
                     display_name=display_name,
                     source_name="AniList",
                     is_public=self._config.sync.anilist_visibility == "public",
+                    selection={
+                        "source": "anilist",
+                        "status": status_key,
+                    },
                 )
             )
 
@@ -204,6 +213,11 @@ class SyncService:
                         display_name=display_name,
                         source_name="Trakt",
                         is_public=self._config.sync.trakt_personal_visibility == "public",
+                        selection={
+                            "source": "trakt",
+                            "kind": "watchlist",
+                            "media_type": media_type,
+                        },
                     )
                 )
 
@@ -228,6 +242,12 @@ class SyncService:
                     display_name=trakt_list["name"],
                     source_name="Trakt",
                     is_public=self._config.sync.trakt_personal_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "default",
+                        "catalog_key": trakt_list.get("catalog_key", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
             )
 
@@ -245,6 +265,13 @@ class SyncService:
                         display_name=liked_list["name"],
                         source_name=f"Trakt by {liked_list['user']}",
                         is_public=self._config.sync.trakt_public_visibility == "public",
+                        selection={
+                            "source": "trakt",
+                            "kind": "liked-auto",
+                            "user": liked_list.get("user", ""),
+                            "slug": liked_list.get("slug", ""),
+                            "name": liked_list.get("name", ""),
+                        },
                     )
                 )
         else:
@@ -263,6 +290,14 @@ class SyncService:
                         display_name=trakt_list["name"],
                         source_name=f"Trakt by {trakt_list['user']}",
                         is_public=self._config.sync.trakt_public_visibility == "public",
+                        selection={
+                            "source": "trakt",
+                            "kind": "selected-list",
+                            "list_source": trakt_list.get("source", ""),
+                            "user": trakt_list.get("user", ""),
+                            "slug": trakt_list.get("slug", ""),
+                            "name": trakt_list.get("name", ""),
+                        },
                     )
                 )
 
@@ -281,6 +316,14 @@ class SyncService:
                     display_name=trakt_list["name"],
                     source_name=f"Trakt by {trakt_list['user']}",
                     is_public=self._config.sync.trakt_public_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "selected-list",
+                        "list_source": trakt_list.get("source", ""),
+                        "user": trakt_list.get("user", ""),
+                        "slug": trakt_list.get("slug", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
             )
 
@@ -304,6 +347,12 @@ class SyncService:
                     display_name=mdblist["name"],
                     source_name="MDBList",
                     is_public=self._config.sync.mdblist_visibility == "public",
+                    selection={
+                        "source": "mdblist",
+                        "id": mdblist.get("id"),
+                        "mediatype": mdblist.get("mediatype", ""),
+                        "name": mdblist.get("name", ""),
+                    },
                 )
             )
 
@@ -374,6 +423,7 @@ class SyncService:
         display_name: str | None = None,
         source_name: str | None = None,
         is_public: bool = False,
+        selection: dict | None = None,
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         stats = SyncStats(
@@ -410,6 +460,7 @@ class SyncService:
                 str(pmdb_list.get("id", "")),
                 display_name or list_name,
                 source_name or "",
+                selection,
             )
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
@@ -521,6 +572,7 @@ class SyncService:
                 "list_id": str(item.get("list_id", "")).strip(),
                 "display_name": str(item.get("display_name", "")).strip(),
                 "source_name": str(item.get("source_name", "")).strip(),
+                "selection": dict(item.get("selection", {})) if isinstance(item.get("selection"), dict) else {},
             }
         return normalized
 
@@ -530,12 +582,14 @@ class SyncService:
         list_id: str,
         display_name: str,
         source_name: str,
+        selection: dict | None = None,
     ) -> None:
         self._managed_lists[list_name] = {
             "list_name": list_name,
             "list_id": list_id,
             "display_name": display_name,
             "source_name": source_name,
+            "selection": dict(selection or {}),
         }
 
     def _delete_disabled_lists(self, desired_names: set[str]) -> None:

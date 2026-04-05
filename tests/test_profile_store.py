@@ -111,6 +111,11 @@ class ProfileStoreTests(unittest.TestCase):
             "list_id": "pmdb-1",
             "display_name": "Watching - Series",
             "source_name": "SIMKL",
+            "selection": {
+                "source": "simkl",
+                "media_type": "shows",
+                "status": "watching",
+            },
         }])
 
         reloaded_store = ProfileStore(Path(self.tmpdir.name) / "profiles.json")
@@ -119,6 +124,39 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(loaded["last_results"][0]["list_name"], "Watching - Series")
         self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(reloaded_store._profiles[created["profile_id"]]["managed_lists"][0]["list_id"], "pmdb-1")
+        self.assertEqual(
+            reloaded_store._profiles[created["profile_id"]]["managed_lists"][0]["selection"]["status"],
+            "watching",
+        )
+
+    def test_delete_managed_list_by_id_removes_selection_and_results(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Top Movies",
+        }], managed_lists=[{
+            "list_name": "Top Movies",
+            "list_id": "pmdb-2",
+            "display_name": "Top Movies",
+            "source_name": "MDBList",
+            "selection": {
+                "source": "mdblist",
+                "id": 11,
+                "mediatype": "movie",
+            },
+        }])
+
+        updated_credentials = dict(self.credentials)
+        updated_credentials["mdblist"] = {
+            **self.credentials["mdblist"],
+            "selected_lists": [],
+        }
+
+        updated = self.store.delete_managed_list_by_id(created["profile_id"], "Top Movies", updated_credentials)
+
+        self.assertEqual(updated["sync_status"], "Managed list deleted")
+        self.assertEqual(updated["last_results"], [])
+        self.assertEqual(self.store._profiles[created["profile_id"]]["managed_lists"], [])
+        self.assertEqual(self.store._profiles[created["profile_id"]]["credentials"]["mdblist"]["selected_lists"], [])
 
     def test_delete_profile_by_id_removes_records(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)

@@ -24,6 +24,7 @@ from src.config import (
     validate_config,
 )
 from src.mdblist_client import MdbListClient
+from src.publicmetadb_client import PublicMetaDBClient
 from src.profile_store import ProfileStore, merge_credentials, normalize_credentials, normalize_profile_options
 from src.simkl_client import SimklClient
 from src.sync_service import SyncService, SyncStats
@@ -51,6 +52,22 @@ LOGIN_WINDOW_SECONDS = int(os.getenv("SYNCMETA_LOGIN_WINDOW_SECONDS", "900"))
 SITE_ACCESS_PASSWORD = os.getenv("SITE_ACCESS_PASSWORD", "").strip()
 ACCESS_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_ACCESS_MAX_ATTEMPTS", "10"))
 ACCESS_WINDOW_SECONDS = int(os.getenv("SYNCMETA_ACCESS_WINDOW_SECONDS", "900"))
+
+SIMKL_STATUS_BY_LABEL = {
+    "watching": "watching",
+    "plan to watch": "plantowatch",
+    "completed": "completed",
+    "on hold": "hold",
+    "dropped": "dropped",
+}
+
+ANILIST_STATUS_BY_LABEL = {
+    "watching": "CURRENT",
+    "planning": "PLANNING",
+    "completed": "COMPLETED",
+    "paused": "PAUSED",
+    "dropped": "DROPPED",
+}
 
 _profile_store = ProfileStore(PROFILE_STORE_FILE)
 _scheduler_lock = threading.Lock()
@@ -353,6 +370,153 @@ def _run_profile_sync(profile: dict, dry_run: bool = False) -> None:
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
         _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run)
+
+
+def _find_managed_list(profile: dict, list_name: str) -> dict | None:
+    for item in profile.get("managed_lists", []):
+        if str(item.get("list_name", "")).strip() == list_name:
+            return item
+    return None
+
+
+def _remove_trakt_selected_list(selected_lists: list[dict], selection: dict) -> list[dict]:
+    user = str(selection.get("user", "")).strip().lower()
+    slug = str(selection.get("slug", "")).strip().lower()
+    source = str(selection.get("list_source", "")).strip().lower()
+    name = str(selection.get("name", "")).strip()
+
+    remaining = []
+    for item in selected_lists:
+        item_user = str(item.get("user", "")).strip().lower()
+        item_slug = str(item.get("slug", "")).strip().lower()
+        item_source = str(item.get("source", "")).strip().lower()
+        if user and slug and item_user == user and item_slug == slug:
+            continue
+        if source and name and item_source == source and str(item.get("name", "")).strip() == name:
+            continue
+        remaining.append(item)
+    return remaining
+
+
+def _display_status_label(display_name: str) -> str:
+    return str(display_name or "").split(" - ", 1)[0].strip().lower()
+
+
+def _remove_managed_selection(profile: dict, managed_entry: dict) -> dict:
+    credentials = normalize_credentials(profile.get("credentials"))
+    selection = managed_entry.get("selection") if isinstance(managed_entry.get("selection"), dict) else {}
+    source = str(selection.get("source", "")).strip().lower()
+
+    if source == "simkl":
+        media_type = str(selection.get("media_type", "")).strip().lower()
+        status = str(selection.get("status", "")).strip()
+        if media_type in credentials["simkl"]["selected_statuses"]:
+            credentials["simkl"]["selected_statuses"][media_type] = [
+                item for item in credentials["simkl"]["selected_statuses"][media_type]
+                if item != status
+            ]
+        return credentials
+
+    if source == "anilist":
+        status = str(selection.get("status", "")).strip()
+        credentials["anilist"]["selected_statuses"] = [
+            item for item in credentials["anilist"]["selected_statuses"]
+            if item != status
+        ]
+        return credentials
+
+    if source == "trakt":
+        kind = str(selection.get("kind", "")).strip().lower()
+        if kind == "watchlist":
+            credentials["trakt"]["sync_watchlist"] = False
+            return credentials
+        if kind == "default":
+            catalog_key = str(selection.get("catalog_key", "")).strip()
+            name = str(selection.get("name", "")).strip()
+            credentials["trakt"]["selected_lists"] = [
+                item for item in credentials["trakt"]["selected_lists"]
+                if not (
+                    str(item.get("source", "")).strip().lower() == "default"
+                    and (
+                        (catalog_key and str(item.get("catalog_key", "")).strip() == catalog_key)
+                        or (name and str(item.get("name", "")).strip() == name)
+                    )
+                )
+            ]
+            return credentials
+        if kind == "selected-list":
+            credentials["trakt"]["selected_lists"] = _remove_trakt_selected_list(
+                credentials["trakt"]["selected_lists"],
+                selection,
+            )
+            return credentials
+        if kind == "liked-auto":
+            trakt_config = TraktConfig(
+                client_id=credentials["trakt"]["client_id"],
+                client_secret=credentials["trakt"]["client_secret"],
+                access_token=credentials["trakt"]["access_token"],
+                refresh_token=credentials["trakt"]["refresh_token"],
+                username=credentials["trakt"]["username"],
+            )
+            liked_lists = TraktClient(trakt_config).get_liked_lists_metadata()
+            remaining_liked = [
+                item for item in liked_lists
+                if not (
+                    str(item.get("user", "")).strip().lower() == str(selection.get("user", "")).strip().lower()
+                    and str(item.get("slug", "")).strip().lower() == str(selection.get("slug", "")).strip().lower()
+                )
+            ]
+            existing_non_liked = [
+                item for item in credentials["trakt"]["selected_lists"]
+                if str(item.get("source", "")).strip().lower() != "liked"
+            ]
+            credentials["trakt"]["sync_liked_lists"] = False
+            credentials["trakt"]["selected_lists"] = existing_non_liked + remaining_liked
+            return credentials
+
+    if source == "mdblist":
+        list_id = str(selection.get("id", "")).strip()
+        mediatype = str(selection.get("mediatype", "")).strip().lower()
+        credentials["mdblist"]["selected_lists"] = [
+            item for item in credentials["mdblist"]["selected_lists"]
+            if not (
+                str(item.get("id", "")).strip() == list_id
+                and str(item.get("mediatype", "")).strip().lower() == mediatype
+            )
+        ]
+        return credentials
+
+    # Fallbacks for older managed-list records without selection metadata.
+    source_name = str(managed_entry.get("source_name", "")).strip()
+    display_name = str(managed_entry.get("display_name", "")).strip()
+    if source_name == "SIMKL":
+        status = SIMKL_STATUS_BY_LABEL.get(_display_status_label(display_name), "")
+        if status:
+            for media_type, statuses in credentials["simkl"]["selected_statuses"].items():
+                credentials["simkl"]["selected_statuses"][media_type] = [
+                    item for item in statuses
+                    if item != status
+                ]
+    elif source_name == "AniList":
+        status = ANILIST_STATUS_BY_LABEL.get(_display_status_label(display_name), "")
+        credentials["anilist"]["selected_statuses"] = [
+            item for item in credentials["anilist"]["selected_statuses"]
+            if item != status
+        ]
+    elif source_name == "MDBList":
+        credentials["mdblist"]["selected_lists"] = [
+            item for item in credentials["mdblist"]["selected_lists"]
+            if str(item.get("name", "")).strip() != display_name
+        ]
+    elif source_name.startswith("Trakt"):
+        if display_name.startswith("Watchlist - "):
+            credentials["trakt"]["sync_watchlist"] = False
+        else:
+            credentials["trakt"]["selected_lists"] = [
+                item for item in credentials["trakt"]["selected_lists"]
+                if str(item.get("name", "")).strip() != display_name
+            ]
+    return credentials
 
 
 class ProfileScheduler:
@@ -732,6 +896,44 @@ def api_profile_status():
         return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
     return _profile_response(profile, include_credentials=include_credentials)
+
+
+@app.route("/api/profile/list/delete", methods=["POST"])
+def api_profile_list_delete():
+    body = request.get_json(silent=True) or {}
+    list_name = str(body.get("list_name", "")).strip()
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    if not list_name:
+        return _json_error("List name is required", 400)
+
+    profile = _current_private_profile()
+    if not profile:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    if profile.get("sync_running"):
+        return _json_error("Wait for the current sync to finish before deleting a list", 409)
+
+    managed_entry = _find_managed_list(profile, list_name)
+    if not managed_entry:
+        return _json_error("Managed list not found", 404)
+
+    try:
+        updated_credentials = _remove_managed_selection(profile, managed_entry)
+        pmdb_client = PublicMetaDBClient(_config_from_profile(profile).pmdb)
+        list_id = str(managed_entry.get("list_id", "")).strip()
+        if list_id:
+            pmdb_client.delete_list(list_id)
+        else:
+            existing = pmdb_client.find_list_by_name(list_name)
+            if existing:
+                pmdb_client.delete_list(str(existing.get("id", "")).strip())
+        updated_profile = _profile_store.delete_managed_list_by_id(profile_id, list_name, updated_credentials)
+    except Exception as exc:
+        logger.exception("Failed to delete managed list %s for profile %s", list_name, profile_id[:8])
+        return _json_error(str(exc), 500)
+
+    return _profile_response(updated_profile, include_credentials=True)
 
 
 @app.route("/api/profile/sync", methods=["POST"])
