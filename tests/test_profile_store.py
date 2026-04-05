@@ -284,6 +284,34 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(updated["next_sync_at"], next_sync_before)
         self.assertEqual(due_profiles, [])
 
+    def test_activity_only_sync_keeps_existing_last_list_results(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "trakt_sync_resume_progress": True,
+        })
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Watching - Series",
+            "display_name": "Watching - Series",
+            "source_name": "SIMKL",
+        }], dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
+
+        self.store.claim_profile_for_sync(created["profile_id"], "secret", sync_modes={"lists": False, "history": False, "resume": True})
+        updated = self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "",
+            "display_name": "Trakt Resume Progress",
+            "source_name": "Trakt",
+            "items_fetched": 6,
+        }], dry_run=False, sync_modes={"lists": False, "history": False, "resume": True})
+
+        self.assertEqual(len(updated["last_results"]), 1)
+        self.assertEqual(updated["last_results"][0]["display_name"], "Watching - Series")
+        self.assertIn("resume_progress", updated["activity_results"])
+        self.assertEqual(
+            updated["activity_results"]["resume_progress"]["row"]["display_name"],
+            "Trakt Resume Progress",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

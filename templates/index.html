@@ -1967,8 +1967,9 @@
       }
     }
 
-    async function saveProfile(showSuccess) {
+    async function saveProfile(showSuccess, refreshSources) {
       const announce = showSuccess !== false;
+      const shouldRefreshSources = refreshSources !== false;
       saveDraft();
       const auth = gatherProfileAuth();
       const needsPassword = !sessionProfileId;
@@ -1995,10 +1996,10 @@
         populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         renderDashboard(profile);
         flashSaved();
-        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
+        if (shouldRefreshSources && profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
-        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
+        if (shouldRefreshSources && profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
           refreshMdbListLists(true);
         }
         if (announce) showToast(result.data.created ? 'Profile created.' : 'Profile updated.', false, true);
@@ -2062,7 +2063,7 @@
     }
 
     async function triggerSync(dryRun) {
-      const savedProfile = await saveProfile(false);
+      const savedProfile = await saveProfile(false, false);
       if (!savedProfile) return;
 
       try {
@@ -2083,7 +2084,7 @@
     }
 
     async function triggerActivitySync(mode) {
-      const savedProfile = await saveProfile(false);
+      const savedProfile = await saveProfile(false, false);
       if (!savedProfile) return;
 
       try {
