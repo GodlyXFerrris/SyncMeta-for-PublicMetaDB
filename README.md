@@ -119,9 +119,9 @@ AniList:
 - Username is enough for public anime lists
 - An access token is only needed for private AniList lists
 
-### 3. Create a local `.env`
+### 3. Create a local `.env` if you want CLI defaults or overrides
 
-Copy `.env.example` to `.env` and fill in values if you want to use the CLI or containerized setup:
+Copy `.env.example` to `.env` only if you want to prefill CLI credentials, change deployment settings, or pass overrides into Docker:
 
 ```bash
 cp .env.example .env
@@ -146,20 +146,26 @@ Default address:
 Requirements:
 
 - Docker Desktop or Docker Engine with Compose support
-- A local `.env` file if you want to use the included `docker-compose.yml`
 
-Start by copying the example env file:
+You can start the web app without creating a `.env` file at all:
+
+```bash
+docker compose up --build web
+```
+
+That is enough if you plan to enter credentials in the web UI and save them into a SyncMeta profile.
+
+Create `.env` only if you want Docker or the CLI to start with predefined values or overrides:
 
 ```bash
 cp .env.example .env
 ```
 
-Then fill in any values you want to provide up front for CLI use or container defaults.
-
-Start the web app with:
+Examples:
 
 ```bash
-docker compose up --build web
+PROFILE_STORE_FILE=/app/data/profiles.json
+DISABLE_PROFILE_SCHEDULER=0
 ```
 
 Open:
@@ -184,7 +190,7 @@ The included Docker setup:
 - Starts the Flask dashboard through Gunicorn
 - Exposes port `8080`
 - Uses a single web worker, which matches the built-in background scheduler model
-- Loads environment values from `.env`
+- Does not require `.env`, but still honors environment variables if you provide them
 
 Data and persistence:
 
@@ -207,7 +213,13 @@ That service runs:
 python main.py sync
 ```
 
-It is useful for manual sync jobs or testing your `.env` configuration without opening the dashboard.
+That service usually does need environment variables, because it runs the CLI directly instead of loading a saved web profile. You can provide them by:
+
+- creating `.env`
+- exporting variables in your shell before running Docker
+- or using `docker compose --env-file yourfile.env run --rm sync`
+
+It is useful for manual sync jobs or testing configuration without opening the dashboard.
 
 ## CLI
 
