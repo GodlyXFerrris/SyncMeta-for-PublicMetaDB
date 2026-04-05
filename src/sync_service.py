@@ -121,8 +121,13 @@ class SyncService:
             if self._config.mdblist.enabled:
                 all_stats.extend(self._sync_mdblist())
 
-        if self._config.trakt.enabled and (self._sync_modes["history"] or self._sync_modes["resume"]):
-            all_stats.extend(self._sync_trakt_activity())
+        if self._sync_modes["history"] or self._sync_modes["resume"]:
+            activity_rows: list[SyncStats] = []
+            if self._config.simkl.access_token:
+                activity_rows.extend(self._sync_simkl_activity())
+            if self._config.trakt.enabled:
+                activity_rows.extend(self._sync_trakt_activity())
+            all_stats.extend(self._merge_activity_stats(activity_rows))
 
         if self._sync_modes["lists"] and not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
             desired_names = {stats.list_name for stats in all_stats if stats.list_name}
@@ -183,6 +188,151 @@ class SyncService:
         if self._config.sync.trakt_sync_resume_progress:
             stats.append(self._sync_trakt_resume_progress())
 
+        return stats
+
+    def _sync_simkl_activity(self) -> list[SyncStats]:
+        stats: list[SyncStats] = []
+
+        if self._config.sync.simkl_sync_watched_history:
+            stats.append(self._sync_simkl_watched_history())
+
+        if self._config.sync.simkl_sync_resume_progress:
+            stats.append(self._sync_simkl_resume_progress())
+
+        return stats
+
+    def _sync_simkl_watched_history(self) -> SyncStats:
+        stats = SyncStats(
+            list_name="",
+            display_name="SIMKL Watch History",
+            source_name="SIMKL",
+        )
+        self._set_status("Fetching SIMKL watched history")
+        items = self._simkl.get_watched_history()
+        stats.items_fetched = len(items)
+
+        try:
+            existing_items = self._pmdb.get_watched_history()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            return stats
+
+        existing_counts: dict[str, int] = {}
+        for existing_item in existing_items:
+            key = self._watched_identity_key(existing_item)
+            if key:
+                existing_counts[key] = existing_counts.get(key, 0) + 1
+
+        for item in items:
+            self._check_cancelled()
+            key = self._watched_identity_key(item)
+            if not key:
+                stats.items_skipped_unresolved += 1
+                continue
+            stats.items_resolved += 1
+            if existing_counts.get(key, 0) > 0:
+                stats.items_skipped_duplicate += 1
+                continue
+            if self._config.sync.dry_run:
+                existing_counts[key] = 1
+                stats.items_added += 1
+                continue
+            try:
+                self._set_status("Writing SIMKL watched history to PublicMetaDB")
+                self._pmdb.mark_watched(
+                    tmdb_id=int(item["tmdb_id"]),
+                    media_type=item["media_type"],
+                    season=item.get("season"),
+                    episode=item.get("episode"),
+                    watched_at=item.get("watched_at"),
+                    dedupe=True,
+                )
+                existing_counts[key] = 1
+                stats.items_added += 1
+            except Exception as exc:
+                stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+        return stats
+
+    def _sync_simkl_resume_progress(self) -> SyncStats:
+        stats = SyncStats(
+            list_name="",
+            display_name="SIMKL Resume Progress",
+            source_name="SIMKL",
+        )
+        self._set_status("Fetching SIMKL playback progress")
+        items = self._simkl.get_playback_progress()
+        stats.items_fetched = len(items)
+
+        normalized_items: list[dict] = []
+        for item in items:
+            self._check_cancelled()
+            key = self._resume_key(item)
+            if not key:
+                stats.items_skipped_unresolved += 1
+                continue
+            normalized_items.append(item)
+            stats.items_resolved += 1
+
+        if self._config.sync.dry_run:
+            stats.items_added = len(normalized_items)
+            return stats
+
+        if not normalized_items:
+            return stats
+
+        try:
+            existing_resume_points = self._pmdb.get_resume_points()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
+            return stats
+
+        existing_resume_by_key: dict[str, dict] = {}
+        for item in existing_resume_points:
+            key = self._resume_key(item)
+            if key:
+                existing_resume_by_key[key] = item
+
+        payloads: list[dict] = []
+        for item in normalized_items:
+            self._check_cancelled()
+            key = self._resume_key(item)
+            payload = {
+                "tmdb_id": int(item["tmdb_id"]),
+                "media_type": item["media_type"],
+                "position_ms": int(item["position_ms"]),
+                "runtime_ms": int(item["runtime_ms"]),
+            }
+            if item.get("season") is not None:
+                payload["season"] = int(item["season"])
+            if item.get("episode") is not None:
+                payload["episode"] = int(item["episode"])
+            existing = existing_resume_by_key.get(key)
+            if existing and self._resume_matches(existing, payload):
+                stats.items_skipped_duplicate += 1
+                continue
+            payloads.append(payload)
+
+        if not payloads:
+            return stats
+
+        for chunk in self._chunked(payloads, 50):
+            self._check_cancelled()
+            try:
+                self._set_status("Writing SIMKL resume progress to PublicMetaDB")
+                response = self._pmdb.save_resume_points_batch(chunk) or {}
+                for result in response.get("results", []):
+                    action = str(result.get("action", "")).strip().lower()
+                    if action == "saved":
+                        stats.items_added += 1
+                    elif action == "completed":
+                        stats.items_removed += 1
+                stats.items_skipped_duplicate += max(0, len(chunk) - sum(
+                    1 for result in response.get("results", [])
+                    if str(result.get("action", "")).strip().lower() in {"saved", "completed"}
+                ))
+            except Exception as exc:
+                stats.errors.append(f"Failed to sync resume batch: {exc}")
+                continue
         return stats
 
     def _sync_trakt_watched_history(self) -> SyncStats:
@@ -791,12 +941,46 @@ class SyncService:
         return [items[index:index + size] for index in range(0, len(items), size)]
 
     @staticmethod
+    def _merge_activity_stats(rows: list[SyncStats]) -> list[SyncStats]:
+        grouped: dict[str, SyncStats] = {}
+
+        for row in rows:
+            if "Watch History" in row.display_name:
+                key = "watch_history"
+                display_name = "Watch History"
+            elif "Resume Progress" in row.display_name:
+                key = "resume_progress"
+                display_name = "Resume Progress"
+            else:
+                continue
+
+            aggregate = grouped.get(key)
+            if not aggregate:
+                aggregate = SyncStats(list_name="", display_name=display_name, source_name="")
+                grouped[key] = aggregate
+
+            aggregate.items_fetched += row.items_fetched
+            aggregate.items_resolved += row.items_resolved
+            aggregate.items_added += row.items_added
+            aggregate.items_removed += row.items_removed
+            aggregate.items_skipped_duplicate += row.items_skipped_duplicate
+            aggregate.items_skipped_unresolved += row.items_skipped_unresolved
+            aggregate.errors.extend(list(row.errors))
+
+            existing_sources = {part.strip() for part in aggregate.source_name.split("+") if part.strip()}
+            if row.source_name:
+                existing_sources.add(row.source_name)
+            aggregate.source_name = " + ".join(sorted(existing_sources))
+
+        return [grouped[key] for key in ("watch_history", "resume_progress") if key in grouped]
+
+    @staticmethod
     def _normalize_sync_modes(sync_modes: dict | None, config: AppConfig | None = None) -> dict[str, bool]:
         if sync_modes is None:
             raw = {
                 "lists": True,
-                "history": bool(config.sync.trakt_sync_watched_history) if config else False,
-                "resume": bool(config.sync.trakt_sync_resume_progress) if config else False,
+                "history": bool((config.sync.simkl_sync_watched_history or config.sync.trakt_sync_watched_history)) if config else False,
+                "resume": bool((config.sync.simkl_sync_resume_progress or config.sync.trakt_sync_resume_progress)) if config else False,
             }
         else:
             raw = sync_modes

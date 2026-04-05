@@ -167,13 +167,13 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
     trakt_username = credentials["trakt"]["username"]
     modes = {
         "lists": True,
-        "history": options["trakt_sync_watched_history"],
-        "resume": options["trakt_sync_resume_progress"],
+        "history": options["simkl_sync_watched_history"] or options["trakt_sync_watched_history"],
+        "resume": options["simkl_sync_resume_progress"] or options["trakt_sync_resume_progress"],
     }
     if isinstance(sync_modes, dict):
         modes["lists"] = bool(sync_modes.get("lists", False))
-        modes["history"] = bool(sync_modes.get("history", False)) and options["trakt_sync_watched_history"]
-        modes["resume"] = bool(sync_modes.get("resume", False)) and options["trakt_sync_resume_progress"]
+        modes["history"] = bool(sync_modes.get("history", False)) and (options["simkl_sync_watched_history"] or options["trakt_sync_watched_history"])
+        modes["resume"] = bool(sync_modes.get("resume", False)) and (options["simkl_sync_resume_progress"] or options["trakt_sync_resume_progress"])
 
     return AppConfig(
         simkl=SimklConfig(
@@ -210,11 +210,13 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             delete_disabled_lists=options["delete_disabled_lists"],
             dry_run=dry_run,
             media_types=options["media_types"],
+            simkl_sync_watched_history=modes["history"] and options["simkl_sync_watched_history"],
+            simkl_sync_resume_progress=modes["resume"] and options["simkl_sync_resume_progress"],
             trakt_sync_watched_history=modes["history"],
             trakt_watched_history_interval_seconds=options["trakt_watched_history_interval_seconds"],
             trakt_sync_full_watch_counts=False,
             trakt_reconcile_watched_history=False,
-            trakt_sync_resume_progress=modes["resume"],
+            trakt_sync_resume_progress=modes["resume"] and options["trakt_sync_resume_progress"],
             simkl_visibility=options["simkl_visibility"],
             anilist_visibility=options["anilist_visibility"],
             trakt_personal_visibility=options["trakt_personal_visibility"],
@@ -229,7 +231,11 @@ def _configured_sources(config: AppConfig) -> list[str]:
     if (
         config.simkl.client_id
         and config.simkl.access_token
-        and any(config.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"])
+        and (
+            any(config.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"])
+            or config.sync.simkl_sync_watched_history
+            or config.sync.simkl_sync_resume_progress
+        )
     ):
         sources.append("simkl")
     if config.anilist.enabled and config.anilist.selected_statuses:
@@ -1059,10 +1065,10 @@ def api_profile_activity_sync():
         return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
 
     options = normalize_profile_options(profile.get("options"))
-    if mode == "history" and not options["trakt_sync_watched_history"]:
-        return _json_error("Enable Trakt watched history sync in Settings first", 409)
-    if mode == "resume" and not options["trakt_sync_resume_progress"]:
-        return _json_error("Enable Trakt resume progress sync in Settings first", 409)
+    if mode == "history" and not (options["simkl_sync_watched_history"] or options["trakt_sync_watched_history"]):
+        return _json_error("Enable SIMKL or Trakt watched history sync in Settings first", 409)
+    if mode == "resume" and not (options["simkl_sync_resume_progress"] or options["trakt_sync_resume_progress"]):
+        return _json_error("Enable SIMKL or Trakt resume progress sync in Settings first", 409)
 
     sync_modes = {
         "lists": False,

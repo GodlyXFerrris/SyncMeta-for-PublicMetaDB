@@ -279,10 +279,12 @@
                 <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-sync-watched-history"><span class="slider"></span></label><label>Sync SIMKL watched history</label></div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-sync-resume-progress"><span class="slider"></span></label><label>Sync SIMKL resume progress</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-watched-history"><span class="slider"></span></label><label>Sync Trakt watched history</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-sync-resume-progress"><span class="slider"></span></label><label>Sync Trakt resume progress</label></div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Trakt watch history only imports items that are not already watched in PublicMetaDB. Watch history and resume progress sync only when you run them from the dashboard buttons.</div>
+                <div class="hint">SIMKL and Trakt activity sync only run from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -717,6 +719,8 @@
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
+        simkl_sync_watched_history: el('opt-simkl-sync-watched-history').checked,
+        simkl_sync_resume_progress: el('opt-simkl-sync-resume-progress').checked,
         trakt_sync_watched_history: el('opt-trakt-sync-watched-history').checked,
         trakt_watched_history_interval_seconds: 43200,
         trakt_sync_resume_progress: el('opt-trakt-sync-resume-progress').checked,
@@ -815,6 +819,8 @@
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
+      el('opt-simkl-sync-watched-history').checked = !!options.simkl_sync_watched_history;
+      el('opt-simkl-sync-resume-progress').checked = !!options.simkl_sync_resume_progress;
       el('opt-trakt-sync-watched-history').checked = !!options.trakt_sync_watched_history;
       el('opt-trakt-sync-resume-progress').checked = !!options.trakt_sync_resume_progress;
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
@@ -848,9 +854,9 @@
       ensureLinkedSourceDefaults(false);
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
-      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && simklHasStatuses));
-      setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
       const opts = gatherOptions();
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.simkl_sync_watched_history || opts.simkl_sync_resume_progress)));
+      setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
       setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.trakt_sync_watched_history || opts.trakt_sync_resume_progress)));
       setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
@@ -1847,9 +1853,13 @@
     function renderActivityPanel(profile) {
       const options = profile.options || {};
       const activityResults = profile.activity_results || {};
-      const watchRow = activityResults.watch_history ? activityResults.watch_history.row : findResultByDisplayName(profile.last_results || [], 'Trakt Watch History');
-      const resumeRow = activityResults.resume_progress ? activityResults.resume_progress.row : findResultByDisplayName(profile.last_results || [], 'Trakt Resume Progress');
-      const showPanel = !!(watchRow || resumeRow || options.trakt_sync_watched_history || options.trakt_sync_resume_progress);
+      const watchRow = activityResults.watch_history ? activityResults.watch_history.row : findResultByDisplayName(profile.last_results || [], 'Watch History');
+      const resumeRow = activityResults.resume_progress ? activityResults.resume_progress.row : findResultByDisplayName(profile.last_results || [], 'Resume Progress');
+      const watchEnabled = !!(options.simkl_sync_watched_history || options.trakt_sync_watched_history);
+      const resumeEnabled = !!(options.simkl_sync_resume_progress || options.trakt_sync_resume_progress);
+      const watchSubtitle = describeActivitySources(options, 'history');
+      const resumeSubtitle = describeActivitySources(options, 'resume');
+      const showPanel = !!(watchRow || resumeRow || watchEnabled || resumeEnabled);
       if (!showPanel) {
         el('activity-panel').classList.add('hidden');
         el('activity-cards').innerHTML = '';
@@ -1858,17 +1868,29 @@
         return;
       }
 
-        const watchEnabled = !!options.trakt_sync_watched_history;
-        const resumeEnabled = !!options.trakt_sync_resume_progress;
       el('btn-sync-history').disabled = !!profile.sync_running || !watchEnabled;
       el('btn-sync-resume').disabled = !!profile.sync_running || !resumeEnabled;
       el('activity-panel').classList.remove('hidden');
       updateClearHistoryButtons(!!(watchEnabled || watchRow), !profile.sync_running);
       el('activity-cards').innerHTML = [
-          buildActivityCard('Watch History', 'Trakt watched imports', watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
-          buildActivityCard('Resume Progress', 'Trakt continue watching sync', resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
+          buildActivityCard('Watch History', watchSubtitle, watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
+          buildActivityCard('Resume Progress', resumeSubtitle, resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
         ].join('');
       }
+
+    function describeActivitySources(options, mode) {
+      const sources = [];
+      if (mode === 'history') {
+        if (options.simkl_sync_watched_history) sources.push('SIMKL');
+        if (options.trakt_sync_watched_history) sources.push('Trakt');
+      } else {
+        if (options.simkl_sync_resume_progress) sources.push('SIMKL');
+        if (options.trakt_sync_resume_progress) sources.push('Trakt');
+      }
+      if (!sources.length) return 'Run this manually from the button above.';
+      if (mode === 'history') return `${sources.join(' + ')} watched imports`;
+      return `${sources.join(' + ')} continue watching sync`;
+    }
 
     function updateClearHistoryButtons(show, canUse) {
       const arm = el('btn-clear-history-arm');
@@ -2192,7 +2214,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       showToast('Logged out.', false, true);
     }
@@ -2229,7 +2251,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
+      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       showToast('Profile data deleted.', false, true);
     }
@@ -2282,7 +2304,7 @@
       trakt: { sync_watchlist: true, sync_liked_lists: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], simkl_sync_watched_history: false, simkl_sync_resume_progress: false, trakt_sync_watched_history: false, trakt_watched_history_interval_seconds: 43200, trakt_sync_resume_progress: false });
     populateForm(draftCreds, draftOptions, {});
     resumeSimklPinState();
     resumeTraktDeviceState();

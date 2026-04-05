@@ -76,6 +76,8 @@ class SyncConfig:
     dry_run: bool = False
     interval_minutes: int = 0
     media_types: list[str] = field(default_factory=lambda: ["shows", "movies", "anime"])
+    simkl_sync_watched_history: bool = False
+    simkl_sync_resume_progress: bool = False
     trakt_sync_watched_history: bool = False
     trakt_watched_history_interval_seconds: int = 43200
     trakt_sync_full_watch_counts: bool = False
@@ -142,6 +144,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.remove_missing = os.getenv("SYNC_REMOVE_MISSING", "false").lower() == "true"
     cfg.sync.delete_disabled_lists = os.getenv("SYNC_DELETE_DISABLED_LISTS", "false").lower() == "true"
     cfg.sync.dry_run = os.getenv("SYNC_DRY_RUN", "false").lower() == "true"
+    cfg.sync.simkl_sync_watched_history = os.getenv("SIMKL_SYNC_WATCHED_HISTORY", "false").lower() == "true"
+    cfg.sync.simkl_sync_resume_progress = os.getenv("SIMKL_SYNC_RESUME_PROGRESS", "false").lower() == "true"
     cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
     watched_interval = os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS", "43200")
     cfg.sync.trakt_watched_history_interval_seconds = int(watched_interval) if watched_interval.isdigit() else 43200
@@ -226,6 +230,10 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.delete_disabled_lists = sync["delete_disabled_lists"]
     if "dry_run" in sync and not os.getenv("SYNC_DRY_RUN"):
         cfg.sync.dry_run = sync["dry_run"]
+    if "simkl_sync_watched_history" in sync and not os.getenv("SIMKL_SYNC_WATCHED_HISTORY"):
+        cfg.sync.simkl_sync_watched_history = bool(sync["simkl_sync_watched_history"])
+    if "simkl_sync_resume_progress" in sync and not os.getenv("SIMKL_SYNC_RESUME_PROGRESS"):
+        cfg.sync.simkl_sync_resume_progress = bool(sync["simkl_sync_resume_progress"])
     if "trakt_sync_watched_history" in sync and not os.getenv("TRAKT_SYNC_WATCHED_HISTORY"):
         cfg.sync.trakt_sync_watched_history = bool(sync["trakt_sync_watched_history"])
     if "trakt_watched_history_interval_seconds" in sync and not os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS"):
@@ -267,7 +275,11 @@ def validate_config(cfg: AppConfig, sources: list[str] | None = None) -> list[st
             errors.append("SIMKL_CLIENT_ID is required")
         if not cfg.simkl.access_token:
             errors.append("SIMKL_ACCESS_TOKEN is required (use the web UI PIN auth flow to authenticate)")
-        if not any(cfg.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"]):
+        if (
+            not any(cfg.simkl.selected_statuses.get(media_type) for media_type in ["shows", "movies", "anime"])
+            and not cfg.sync.simkl_sync_watched_history
+            and not cfg.sync.simkl_sync_resume_progress
+        ):
             errors.append("Select at least one SIMKL status to sync")
 
     if check_anilist and cfg.anilist.enabled:

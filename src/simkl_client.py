@@ -205,3 +205,185 @@ class SimklClient:
     def get_activities(self) -> dict | None:
         """Fetch last activity timestamps (used for incremental sync)."""
         return self._get("/sync/activities")
+
+    def get_watched_history(self) -> list[dict]:
+        """Fetch SIMKL completed history as watched-once records."""
+        history: list[dict] = []
+        history.extend(self._get_completed_movie_history())
+        history.extend(self._get_completed_show_history("shows"))
+        history.extend(self._get_completed_show_history("anime"))
+        return history
+
+    def get_playback_progress(self) -> list[dict]:
+        """Fetch SIMKL playback progress records."""
+        raw = self._get("/sync/playback")
+        if not raw:
+            return []
+
+        if isinstance(raw, list):
+            raw_items = raw
+        elif isinstance(raw, dict):
+            raw_items = list(raw.get("movies", [])) + list(raw.get("shows", [])) + list(raw.get("anime", [])) + list(raw.get("items", []))
+        else:
+            raw_items = []
+
+        entries: list[dict] = []
+        for entry in raw_items:
+            normalized = self._normalize_playback_entry(entry)
+            if normalized:
+                entries.append(normalized)
+        return entries
+
+    def _get_completed_movie_history(self) -> list[dict]:
+        raw = self._get("/sync/all-items/movie/completed", params={"extended": "full"})
+        items = raw.get("movies", []) if isinstance(raw, dict) else []
+        history: list[dict] = []
+        for entry in items:
+            movie = entry.get("movie") if isinstance(entry, dict) else None
+            if not isinstance(movie, dict):
+                continue
+            ids = movie.get("ids", {}) or {}
+            tmdb_id = ids.get("tmdb")
+            if not tmdb_id:
+                continue
+            watched_at = (
+                entry.get("watched_at")
+                or entry.get("last_watched_at")
+                or entry.get("last_watched")
+                or movie.get("watched_at")
+            )
+            history.append({
+                "tmdb_id": int(tmdb_id),
+                "media_type": "movie",
+                "watched_at": watched_at,
+                "title": movie.get("title", "Unknown"),
+            })
+        return history
+
+    def _get_completed_show_history(self, media_key: str) -> list[dict]:
+        api_type = self._api_type(media_key)
+        raw = self._get(
+            f"/sync/all-items/{api_type}/completed",
+            params={"extended": "full", "episode_watched_at": "yes"},
+        )
+        items = raw.get(media_key, []) if isinstance(raw, dict) else []
+        history: list[dict] = []
+        for entry in items:
+            show = entry.get("show") if isinstance(entry, dict) else None
+            if not isinstance(show, dict):
+                continue
+            ids = show.get("ids", {}) or {}
+            tmdb_id = ids.get("tmdb")
+            if not tmdb_id:
+                continue
+            history.extend(self._extract_episode_history(entry, int(tmdb_id), show.get("title", "Unknown")))
+        return history
+
+    def _extract_episode_history(self, entry: dict, tmdb_id: int, title: str) -> list[dict]:
+        history: list[dict] = []
+        seen: set[tuple[int, int]] = set()
+
+        def add_episode(season: int | None, episode: int | None, watched_at: str | None) -> None:
+            if season is None or episode is None:
+                return
+            key = (int(season), int(episode))
+            if key in seen:
+                return
+            seen.add(key)
+            history.append({
+                "tmdb_id": tmdb_id,
+                "media_type": "tv",
+                "season": int(season),
+                "episode": int(episode),
+                "watched_at": watched_at,
+                "title": title,
+            })
+
+        for season_entry in entry.get("seasons", []) or []:
+            season_number = season_entry.get("number") or season_entry.get("season")
+            for episode_entry in season_entry.get("episodes", []) or []:
+                add_episode(
+                    season_number,
+                    episode_entry.get("number") or episode_entry.get("episode"),
+                    episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+                )
+
+        for episode_entry in entry.get("episodes", []) or []:
+            add_episode(
+                episode_entry.get("season"),
+                episode_entry.get("number") or episode_entry.get("episode"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at"),
+            )
+
+        return history
+
+    def _normalize_playback_entry(self, entry: dict) -> dict | None:
+        if not isinstance(entry, dict):
+            return None
+
+        movie = entry.get("movie")
+        show = entry.get("show")
+        episode = entry.get("episode")
+
+        if isinstance(movie, dict):
+            ids = movie.get("ids", {}) or {}
+            tmdb_id = ids.get("tmdb")
+            runtime_minutes = entry.get("runtime") or movie.get("runtime")
+            progress = self._playback_progress_percent(entry)
+            if not tmdb_id or runtime_minutes in (None, 0) or progress is None:
+                return None
+            runtime_ms = int(float(runtime_minutes) * 60_000)
+            position_ms = int(round(runtime_ms * (progress / 100.0)))
+            return {
+                "tmdb_id": int(tmdb_id),
+                "media_type": "movie",
+                "position_ms": position_ms,
+                "runtime_ms": runtime_ms,
+                "progress": progress,
+                "paused_at": entry.get("updated_at") or entry.get("paused_at"),
+                "title": movie.get("title", "Unknown"),
+            }
+
+        if isinstance(show, dict) and isinstance(episode, dict):
+            show_ids = show.get("ids", {}) or {}
+            tmdb_id = show_ids.get("tmdb")
+            runtime_minutes = entry.get("runtime") or episode.get("runtime")
+            progress = self._playback_progress_percent(entry)
+            season = episode.get("season")
+            number = episode.get("number") or episode.get("episode")
+            if not tmdb_id or runtime_minutes in (None, 0) or progress is None or season is None or number is None:
+                return None
+            runtime_ms = int(float(runtime_minutes) * 60_000)
+            position_ms = int(round(runtime_ms * (progress / 100.0)))
+            return {
+                "tmdb_id": int(tmdb_id),
+                "media_type": "tv",
+                "season": int(season),
+                "episode": int(number),
+                "position_ms": position_ms,
+                "runtime_ms": runtime_ms,
+                "progress": progress,
+                "paused_at": entry.get("updated_at") or entry.get("paused_at"),
+                "title": show.get("title", "Unknown"),
+            }
+
+        return None
+
+    @staticmethod
+    def _playback_progress_percent(entry: dict) -> float | None:
+        for key in ("progress", "percent"):
+            value = entry.get(key)
+            if value is None:
+                continue
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+        position = entry.get("position")
+        duration = entry.get("duration") or entry.get("runtime")
+        try:
+            if position is not None and duration not in (None, 0):
+                return (float(position) / float(duration)) * 100.0
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+        return None

@@ -15,6 +15,17 @@ class StubSimklClient:
             }
         return {media_type: [] for media_type in media_types}
 
+    def get_watched_history(self) -> list[dict]:
+        return [
+            {"tmdb_id": 801, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "SIMKL Movie"},
+            {"tmdb_id": 802, "media_type": "tv", "season": 1, "episode": 3, "watched_at": "2026-04-01T13:00:00Z", "title": "SIMKL Episode"},
+        ]
+
+    def get_playback_progress(self) -> list[dict]:
+        return [
+            {"tmdb_id": 803, "media_type": "movie", "position_ms": 1_200_000, "runtime_ms": 3_600_000, "progress": 33.3, "title": "SIMKL Resume Movie"},
+        ]
+
 
 class StubMatcher:
     def resolve_tmdb_id(self, item: dict) -> int | None:
@@ -346,8 +357,8 @@ class SyncServiceTests(unittest.TestCase):
 
         results = service.run()
 
-        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
-        resume_stats = next(item for item in results if item.display_name == "Trakt Resume Progress")
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
@@ -355,6 +366,42 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_fetched, 2)
         self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(resume_stats.items_removed, 1)
+        self.assertEqual(len(pmdb.resume_batches), 1)
+
+    def test_syncs_simkl_watched_history_and_resume_when_enabled(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                simkl_sync_watched_history=True,
+                simkl_sync_resume_progress=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = StubSimklClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
+
+        self.assertEqual(watched_stats.items_fetched, 2)
+        self.assertEqual(watched_stats.items_added, 2)
+        self.assertEqual(watched_stats.source_name, "SIMKL")
+        self.assertEqual(resume_stats.items_fetched, 1)
+        self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(len(pmdb.resume_batches), 1)
 
     def test_history_only_mode_does_not_run_list_syncs(self) -> None:
@@ -392,7 +439,8 @@ class SyncServiceTests(unittest.TestCase):
 
         results = service.run()
 
-        self.assertEqual([item.display_name for item in results], ["Trakt Watch History"])
+        self.assertEqual([item.display_name for item in results], ["Watch History"])
+        self.assertEqual(results[0].source_name, "Trakt")
         self.assertEqual(pmdb.created_lists, [])
         self.assertEqual(pmdb.deleted_lists, [])
         self.assertEqual(len(pmdb.watched), 2)
@@ -430,7 +478,7 @@ class SyncServiceTests(unittest.TestCase):
 
         results = service.run()
 
-        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
 
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_resolved, 2)
@@ -466,7 +514,7 @@ class SyncServiceTests(unittest.TestCase):
 
         results = service.run()
 
-        watched_stats = next(item for item in results if item.display_name == "Trakt Watch History")
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
 
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(watched_stats.items_removed, 0)
@@ -505,7 +553,7 @@ class SyncServiceTests(unittest.TestCase):
 
         results = service.run()
 
-        resume_stats = next(item for item in results if item.display_name == "Trakt Resume Progress")
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
         self.assertEqual(resume_stats.items_fetched, 2)
         self.assertEqual(resume_stats.items_resolved, 2)

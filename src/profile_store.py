@@ -28,8 +28,12 @@ ALLOWED_VISIBILITIES = {"private", "public"}
 DEFAULT_KEY_FILE_NAME = "profiles.key"
 
 ACTIVITY_RESULT_NAMES = {
+    "Watch History": "watch_history",
+    "Resume Progress": "resume_progress",
     "Trakt Watch History": "watch_history",
     "Trakt Resume Progress": "resume_progress",
+    "SIMKL Watch History": "watch_history",
+    "SIMKL Resume Progress": "resume_progress",
 }
 
 
@@ -390,6 +394,8 @@ def normalize_profile_options(options: dict | None) -> dict:
         "media_types": media_types,
         "auto_sync": bool(raw.get("auto_sync", True)),
         "interval_seconds": interval_seconds,
+        "simkl_sync_watched_history": bool(raw.get("simkl_sync_watched_history", False)),
+        "simkl_sync_resume_progress": bool(raw.get("simkl_sync_resume_progress", False)),
         "trakt_sync_watched_history": bool(raw.get("trakt_sync_watched_history", False)),
         "trakt_watched_history_interval_seconds": watched_history_interval_seconds,
         "trakt_sync_full_watch_counts": False,
