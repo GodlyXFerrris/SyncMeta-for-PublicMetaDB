@@ -36,14 +36,19 @@ class PublicMetaDBClientTests(unittest.TestCase):
 
     def test_clear_watched_history_deletes_all_entries_with_ids(self) -> None:
         client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+        calls: list[tuple[str, dict | None]] = []
         deleted_ids: list[str] = []
 
-        client.get_watched_history = lambda: [  # type: ignore[method-assign]
-            {"id": "w1"},
-            {"id": "w2"},
-            {"tmdb_id": 5},
-            {"id": "w3"},
-        ]
+        responses = iter([
+            {"items": [{"id": "w1"}, {"id": "w2"}, {"tmdb_id": 5}, {"id": "w3"}]},
+            {"items": []},
+        ])
+
+        def fake_get(path: str, params: dict | None = None):
+            calls.append((path, params))
+            return next(responses)
+
+        client._get = fake_get  # type: ignore[method-assign]
 
         def fake_delete(watched_id: str) -> bool:
             deleted_ids.append(watched_id)
@@ -55,6 +60,41 @@ class PublicMetaDBClientTests(unittest.TestCase):
 
         self.assertEqual(deleted_count, 3)
         self.assertEqual(deleted_ids, ["w1", "w2", "w3"])
+        self.assertEqual(calls, [
+            ("/api/external/watched", {"page": 1, "perPage": 100}),
+            ("/api/external/watched", {"page": 1, "perPage": 100}),
+        ])
+
+    def test_clear_watched_history_reloads_first_page_until_empty(self) -> None:
+        client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+        deleted_ids: list[str] = []
+        pages = [
+            {"items": [{"id": "w1"}, {"id": "w2"}]},
+            {"items": [{"id": "w3"}, {"id": "w4"}]},
+            {"items": [{"id": "w5"}]},
+            {"items": []},
+        ]
+        call_count = {"value": 0}
+
+        def fake_get(path: str, params: dict | None = None):
+            self.assertEqual(path, "/api/external/watched")
+            self.assertEqual(params, {"page": 1, "perPage": 100})
+            index = call_count["value"]
+            call_count["value"] += 1
+            return pages[index]
+
+        def fake_delete(watched_id: str) -> bool:
+            deleted_ids.append(watched_id)
+            return True
+
+        client._get = fake_get  # type: ignore[method-assign]
+        client.delete_watched_entry = fake_delete  # type: ignore[method-assign]
+
+        deleted_count = client.clear_watched_history()
+
+        self.assertEqual(deleted_count, 5)
+        self.assertEqual(deleted_ids, ["w1", "w2", "w3", "w4", "w5"])
+        self.assertEqual(call_count["value"], 4)
 
 
 if __name__ == "__main__":

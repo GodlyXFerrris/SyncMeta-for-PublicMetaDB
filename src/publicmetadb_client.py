@@ -121,12 +121,27 @@ class PublicMetaDBClient:
 
     def clear_watched_history(self) -> int:
         deleted = 0
-        for item in self.get_watched_history():
-            watched_id = str(item.get("id", "")).strip()
-            if not watched_id:
-                continue
-            if self.delete_watched_entry(watched_id):
-                deleted += 1
+        while True:
+            resp = self._get("/api/external/watched", params={"page": 1, "perPage": 100})
+            if not resp:
+                break
+            if isinstance(resp, list):
+                items = list(resp)
+            else:
+                items = list(resp.get("items", []))
+            watched_ids = [str(item.get("id", "")).strip() for item in items if str(item.get("id", "")).strip()]
+            if not watched_ids:
+                break
+
+            deleted_this_round = 0
+            for watched_id in watched_ids:
+                if self.delete_watched_entry(watched_id):
+                    deleted += 1
+                    deleted_this_round += 1
+
+            if deleted_this_round == 0:
+                logger.warning("Stopped clearing watched history because no entries were deleted from the current page")
+                break
         return deleted
 
     # Resume / continue watching
