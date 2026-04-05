@@ -540,6 +540,8 @@ class SimklClient:
         return parsed.astimezone(timezone.utc)
 
     def _is_history_after(self, item: dict, since: str) -> bool:
+        if item.get("cursor_exempt"):
+            return True
         watched_at = self._parse_history_datetime(item.get("watched_at"))
         since_dt = self._parse_history_datetime(since)
         if since_dt is None:
@@ -664,6 +666,7 @@ class SimklClient:
             "ids": ids,
             "aggregate_watched_count": watched_total,
             "aggregate_total_episodes": total_episodes,
+            "cursor_exempt": True,
         }]
 
     def expand_aggregate_history_item(self, item: dict) -> list[dict]:
