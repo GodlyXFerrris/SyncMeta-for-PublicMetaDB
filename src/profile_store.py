@@ -644,14 +644,18 @@ class ProfileStore:
 
         with self._lock:
             profile = self._authenticate_locked(profile_id, password)
+            previous_auto_sync = bool(profile.get("options", {}).get("auto_sync", True))
+            previous_next_sync_at = profile.get("next_sync_at")
             profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
             profile["options"] = normalized_options
             profile["updated_at"] = utc_now_iso()
             profile["sync_error"] = None
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
-                now = utc_now_iso()
-                profile["next_sync_at"] = now if normalized_options["auto_sync"] else None
+                if normalized_options["auto_sync"]:
+                    profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
+                else:
+                    profile["next_sync_at"] = None
                 profile["next_history_sync_at"] = None
                 profile["next_resume_sync_at"] = None
             self._save_locked()
@@ -662,14 +666,18 @@ class ProfileStore:
 
         with self._lock:
             profile = self._get_profile_locked(profile_id)
+            previous_auto_sync = bool(profile.get("options", {}).get("auto_sync", True))
+            previous_next_sync_at = profile.get("next_sync_at")
             profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
             profile["options"] = normalized_options
             profile["updated_at"] = utc_now_iso()
             profile["sync_error"] = None
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
-                now = utc_now_iso()
-                profile["next_sync_at"] = now if normalized_options["auto_sync"] else None
+                if normalized_options["auto_sync"]:
+                    profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
+                else:
+                    profile["next_sync_at"] = None
                 profile["next_history_sync_at"] = None
                 profile["next_resume_sync_at"] = None
             self._save_locked()

@@ -267,6 +267,23 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertFalse(due_profiles[0]["pending_sync_modes"]["history"])
         self.assertFalse(due_profiles[0]["pending_sync_modes"]["resume"])
 
+    def test_update_profile_by_id_preserves_existing_next_list_sync_time(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+        after_sync = self.store.record_sync_success(created["profile_id"], [{"list_name": "demo"}], dry_run=False)
+        next_sync_before = after_sync["next_sync_at"]
+
+        updated = self.store.update_profile_by_id(created["profile_id"], self.credentials, {
+            **self.options,
+            "trakt_sync_watched_history": True,
+            "trakt_sync_resume_progress": True,
+        })
+
+        due_profiles = self.store.claim_due_profiles()
+
+        self.assertEqual(updated["next_sync_at"], next_sync_before)
+        self.assertEqual(due_profiles, [])
+
 
 if __name__ == "__main__":
     unittest.main()
