@@ -1,61 +1,89 @@
-# SIMKL → PublicMetaDB List Sync
+# SyncMeta
 
-One-way sync of your **Watching** and **Plan to Watch** lists from [SIMKL](https://simkl.com) to [PublicMetaDB](https://publicmetadb.com).
+SyncMeta keeps SIMKL and optionally AniList watchlists synced into private PublicMetaDB lists.
 
-## Features
+It supports:
 
-- Creates **6 separate private lists** in PublicMetaDB:
-  - SIMKL – Series – Watching
-  - SIMKL – Series – Plan to Watch
-  - SIMKL – Movies – Watching
-  - SIMKL – Movies – Plan to Watch
-  - SIMKL – Anime – Watching
-  - SIMKL – Anime – Plan to Watch
-- Matches items by TMDB ID (direct) → IMDB → MAL → AniDB → TVDB (lookup chain)
-- Avoids duplicates — only adds items not already in the PMDB list
-- Optional removal of items no longer in SIMKL (`--remove-missing`)
-- Dry-run mode to preview changes
-- Interval mode for continuous sync
-- Rate limiting with automatic backoff
-- Retries on transient failures (429, 5xx)
+- A Flask web dashboard with persistent profiles
+- UUID + password based profile login
+- Background automatic syncing on the server
+- Manual sync and dry run
+- CLI usage for one-off or interval-based sync runs
+- SIMKL for shows, movies, and anime
+- AniList for anime when you want AniList to replace SIMKL anime
 
-## Setup
+## What It Syncs
 
-### 1. Install dependencies
+By default, SyncMeta creates separate private PublicMetaDB lists for each source, media type, and status:
 
-```bash
-pip install -r requirements.txt
-```
+- `SIMKL - Series - Watching`
+- `SIMKL - Series - Plan to Watch`
+- `SIMKL - Movies - Watching`
+- `SIMKL - Movies - Plan to Watch`
+- `SIMKL - Anime - Watching`
+- `SIMKL - Anime - Plan to Watch`
+- `AniList - Anime - Watching`
+- `AniList - Anime - Plan to Watch`
 
-### 2. Get API credentials
+Anime behaves like this:
 
-**SIMKL:**
-1. Go to https://simkl.com/settings/developer/
-2. Create an app → note the **Client ID** and **Client Secret**
+- If AniList is not configured, anime syncs from SIMKL.
+- If AniList is configured, AniList replaces SIMKL for anime.
 
-**PublicMetaDB:**
-1. Go to https://publicmetadb.com/api-docs
-2. Create an API key (format: `pm-...`)
+## How Matching Works
 
-### 3. Configure
+Items are resolved to TMDB IDs in this order:
 
-Copy `.env.example` to `.env` and fill in your credentials:
+1. Direct TMDB ID
+2. IMDb
+3. MAL
+4. AniList
+5. AniDB
+6. TVDB
+7. Root-series MAL or AniList fallback for anime sequels
 
-```bash
-cp .env.example .env
-```
+That fallback helps map entries like later anime seasons back to the main series when needed.
 
-Or use a JSON config file (see `config.example.json`).
+## Web Dashboard
 
-### 4. Authenticate with SIMKL
+The web app now uses persistent server-side profiles instead of browser-only session state.
+
+Each profile has:
+
+- A generated UUID
+- A password you choose
+- Stored source credentials and sync settings
+- Sync history and latest results
+- Automatic background scheduling
+
+Important:
+
+- The server stores your source API credentials so it can continue syncing while your browser is closed.
+- Profile passwords are hashed before storage.
+- Automatic sync intervals have a minimum of `300` seconds.
+
+### Web flow
+
+1. Open the dashboard
+2. Enter your API credentials
+3. Choose media types and sync options
+4. Set an update interval of at least `300` seconds
+5. Save the profile
+6. Keep the generated profile UUID and your password somewhere safe
+
+After that, the server keeps syncing in the background based on that profile.
+
+## CLI
+
+The CLI is still available for manual or standalone use.
+
+### Authenticate with SIMKL
 
 ```bash
 python main.py auth
 ```
 
-This opens a browser for PIN-based OAuth. Enter the code, then copy the access token into your `.env` file.
-
-## Usage
+This starts the SIMKL PIN flow and prints an access token you can place in `.env` or a JSON config file.
 
 ### One-time sync
 
@@ -63,19 +91,19 @@ This opens a browser for PIN-based OAuth. Enter the code, then copy the access t
 python main.py sync
 ```
 
-### Dry run (preview only)
+### Dry run
 
 ```bash
 python main.py sync --dry-run
 ```
 
-### Remove items no longer in SIMKL
+### Remove items missing from the source
 
 ```bash
 python main.py sync --remove-missing
 ```
 
-### Continuous sync (every 30 minutes)
+### Continuous CLI sync every 30 minutes
 
 ```bash
 python main.py sync --interval 30
@@ -87,57 +115,143 @@ python main.py sync --interval 30
 python main.py -v sync
 ```
 
-### Using a config file
+### Use a JSON config file
 
 ```bash
 python main.py -c config.json sync
 ```
 
-## Cron setup
+## Setup
 
-To run every 6 hours via cron:
+### 1. Install dependencies
 
-```cron
-0 */6 * * * cd /path/to/simkl_list_to_pmdb && /path/to/python main.py sync >> sync.log 2>&1
+```bash
+pip install -r requirements.txt
 ```
 
-On Windows Task Scheduler, create a task that runs:
+### 2. Get API credentials
+
+SIMKL:
+
+1. Go to <https://simkl.com/settings/developer/>
+2. Create an app
+3. Copy the client ID and client secret
+
+PublicMetaDB:
+
+1. Go to <https://publicmetadb.com/api-docs>
+2. Create an API key
+
+AniList:
+
+- Username is enough for public anime lists
+- An access token is only needed for private AniList lists
+
+### 3. Create a local `.env`
+
+Copy `.env.example` to `.env` and fill in values if you want to use the CLI or containerized setup:
+
+```bash
+cp .env.example .env
 ```
-python C:\path\to\simkl_list_to_pmdb\main.py sync
+
+You can also use `config.example.json` as a starting point for CLI config files.
+
+## Running the Web App
+
+### Local Flask
+
+```bash
+python web.py
 ```
 
-## Project structure
+Default address:
 
-```
-├── main.py                  # CLI entry point
-├── src/
-│   ├── config.py            # Configuration loading and validation
-│   ├── simkl_client.py      # SIMKL API client (OAuth, watchlist fetch)
-│   ├── publicmetadb_client.py  # PublicMetaDB API client (lists, items, mappings)
-│   ├── matcher.py           # TMDB ID resolution (TMDB → IMDB → MAL → AniDB → TVDB)
-│   └── sync_service.py      # Sync orchestration logic
-├── .env.example             # Environment variable template
-├── config.example.json      # JSON config template
-└── requirements.txt         # Python dependencies
+- `http://127.0.0.1:8080`
+
+### Docker
+
+```bash
+docker compose up --build web
 ```
 
-## How it works
+The included Docker setup runs the web app on port `8080`.
 
-1. Fetches "Watching" and "Plan to Watch" items from SIMKL, grouped by media type (shows, movies, anime)
-2. Resolves each item to a TMDB ID via a lookup chain: direct TMDB → IMDB → MAL → AniDB ��� TVDB
-3. Creates/finds 6 separate **private** lists in PublicMetaDB (one per media type × status)
-4. Adds any items not already present in each PMDB list
-5. Optionally removes items from PMDB that are no longer in the SIMKL list
+Notes:
 
-## Environment variables
+- Profiles are stored in `data/profiles.json` by default.
+- You can override that path with `PROFILE_STORE_FILE`.
+- The background scheduler runs inside the web process.
+
+## Environment Variables
+
+These mainly matter for CLI use and deployment configuration.
+
+### Source credentials
 
 | Variable | Required | Description |
 |---|---|---|
-| `SIMKL_CLIENT_ID` | Yes | SIMKL app client ID |
+| `SIMKL_CLIENT_ID` | CLI: Yes | SIMKL app client ID |
 | `SIMKL_CLIENT_SECRET` | No | SIMKL app client secret |
-| `SIMKL_ACCESS_TOKEN` | Yes | OAuth access token (get via `python main.py auth`) |
-| `PMDB_API_KEY` | Yes | PublicMetaDB API key (`pm-...`) |
-| `SYNC_REMOVE_MISSING` | No | Remove stale items from PMDB (default: `false`) |
-| `SYNC_DRY_RUN` | No | Preview mode (default: `false`) |
-| `SYNC_INTERVAL_MINUTES` | No | Repeat interval in minutes (default: `0` = once) |
-| `SYNC_MEDIA_TYPES` | No | Comma-separated types (default: `shows,movies,anime`) |
+| `SIMKL_ACCESS_TOKEN` | CLI: Yes | SIMKL access token from `python main.py auth` |
+| `ANILIST_USERNAME` | No | Enables AniList anime sync |
+| `ANILIST_ACCESS_TOKEN` | No | Needed only for private AniList lists |
+| `PMDB_API_KEY` | CLI: Yes | PublicMetaDB API key |
+
+### Sync options
+
+| Variable | Required | Description |
+|---|---|---|
+| `SYNC_REMOVE_MISSING` | No | Remove stale items from PMDB |
+| `SYNC_DRY_RUN` | No | Preview changes without writing |
+| `SYNC_INTERVAL_MINUTES` | No | CLI repeat interval in minutes |
+| `SYNC_MEDIA_TYPES` | No | Comma-separated media types such as `shows,movies,anime` |
+
+### Web app options
+
+| Variable | Required | Description |
+|---|---|---|
+| `PROFILE_STORE_FILE` | No | Path to the JSON profile store |
+| `DISABLE_PROFILE_SCHEDULER` | No | Set to `1` to disable background scheduling |
+
+## Project Structure
+
+```text
+main.py
+web.py
+src/
+  config.py
+  simkl_client.py
+  anilist_client.py
+  publicmetadb_client.py
+  matcher.py
+  sync_service.py
+  profile_store.py
+templates/
+  index.html
+tests/
+  test_anilist_client.py
+  test_matcher.py
+  test_profile_store.py
+```
+
+## Development Notes
+
+- PublicMetaDB requests use retry logic and rate limiting.
+- Profile history keeps the latest sync snapshots.
+- Dry runs are recorded in profile history but do not advance the automatic schedule.
+- The scheduler checks for due profiles in the web process and starts sync jobs in background threads.
+
+## Testing
+
+Run the test suite with:
+
+```bash
+python -m unittest discover -v
+```
+
+## Current Limits
+
+- Automatic syncing depends on the web process staying alive.
+- If you run multiple web workers against the same profile store, you should think carefully about scheduler coordination.
+- The current Docker setup uses a single web worker, which fits the built-in scheduler model well.
