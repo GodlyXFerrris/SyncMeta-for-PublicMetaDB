@@ -52,11 +52,11 @@ SITE_ACCESS_PASSWORD = os.getenv("SITE_ACCESS_PASSWORD", "").strip()
 ACCESS_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_ACCESS_MAX_ATTEMPTS", "10"))
 ACCESS_WINDOW_SECONDS = int(os.getenv("SYNCMETA_ACCESS_WINDOW_SECONDS", "900"))
 LEGAL_CONTEXT = {
-    "operator_name": os.getenv("LEGAL_NAME", "Justin Tasler"),
-    "operator_address": os.getenv("LEGAL_ADDRESS", "Saarstrasse 46\n03046 Cottbus"),
-    "operator_email": os.getenv("LEGAL_EMAIL", "justin.tasler@gmail.com"),
+    "operator_name": os.getenv("LEGAL_NAME", "Please set LEGAL_NAME before public launch"),
+    "operator_address": os.getenv("LEGAL_ADDRESS", "Please set LEGAL_ADDRESS before public launch"),
+    "operator_email": os.getenv("LEGAL_EMAIL", "Please set LEGAL_EMAIL before public launch"),
     "operator_phone": os.getenv("LEGAL_PHONE", ""),
-    "responsible_person": os.getenv("LEGAL_RESPONSIBLE_PERSON", "Justin Tasler"),
+    "responsible_person": os.getenv("LEGAL_RESPONSIBLE_PERSON", ""),
     "vat_id": os.getenv("LEGAL_VAT_ID", ""),
     "court_register": os.getenv("LEGAL_COURT_REGISTER", ""),
     "base_url": os.getenv("PUBLIC_BASE_URL", "").strip() or "your public SyncMeta URL",
@@ -446,11 +446,6 @@ def access():
             return _with_access_cookie(response, access_token)
 
     return render_template("access.html", error=error)
-
-
-@app.route("/impressum")
-def impressum():
-    return render_template("legal.html", page_title="Impressum", legal_type="impressum", legal=LEGAL_CONTEXT)
 
 
 @app.route("/datenschutz")

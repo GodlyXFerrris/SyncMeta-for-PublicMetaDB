@@ -44,7 +44,6 @@
       </a>
       <div class="nav-links">
         <a href="/">Home</a>
-        <a href="/impressum">Impressum</a>
         <a href="/datenschutz">Datenschutz</a>
         <a href="/terms">Terms</a>
         <a href="/cookie-settings">Cookie Settings</a>
@@ -56,9 +55,7 @@
     <div class="card">
       <h1>{{ page_title }}</h1>
       <p class="lead">
-        {% if legal_type == "impressum" %}
-        Angaben gemaess den Anforderungen fuer oeffentlich erreichbare Webseiten.
-        {% elif legal_type == "privacy" %}
+        {% if legal_type == "privacy" %}
         Uebersicht der Datenverarbeitung fuer diese SyncMeta-Instanz. Bitte pruefe und ergaenze die Angaben fuer deinen konkreten Betrieb.
         {% elif legal_type == "terms" %}
         Regeln fuer die Nutzung dieser oeffentlich erreichbaren SyncMeta-Instanz.
@@ -74,40 +71,7 @@
       </div>
       {% endif %}
 
-      {% if legal_type == "impressum" %}
-      <section>
-        <h2>Anbieter</h2>
-        <p>{{ legal.operator_name }}</p>
-        <p style="white-space:pre-line">{{ legal.operator_address }}</p>
-      </section>
-
-      <section>
-        <h2>Kontakt</h2>
-        <p>E-Mail: <a href="mailto:{{ legal.operator_email }}">{{ legal.operator_email }}</a></p>
-        {% if legal.operator_phone %}
-        <p>Telefon: {{ legal.operator_phone }}</p>
-        {% endif %}
-      </section>
-
-      {% if legal.responsible_person %}
-      <section>
-        <h2>Verantwortlich</h2>
-        <p>{{ legal.responsible_person }}</p>
-      </section>
-      {% endif %}
-
-      {% if legal.vat_id or legal.court_register %}
-      <section>
-        <h2>Weitere Angaben</h2>
-        {% if legal.vat_id %}
-        <p>Umsatzsteuer-ID: {{ legal.vat_id }}</p>
-        {% endif %}
-        {% if legal.court_register %}
-        <p>Registereintrag: {{ legal.court_register }}</p>
-        {% endif %}
-      </section>
-      {% endif %}
-      {% elif legal_type == "privacy" %}
+      {% if legal_type == "privacy" %}
       <section>
         <h2>Verantwortlicher</h2>
         <p>{{ legal.operator_name }}</p>
@@ -205,7 +169,6 @@
     <div class="footer-inner">
       <div class="footer-copy">SyncMeta</div>
       <div class="footer-links">
-        <a href="/impressum">Impressum</a>
         <a href="/datenschutz">Datenschutz</a>
         <a href="/terms">Terms of Service</a>
         <a href="/cookie-settings">Cookie Settings</a>
