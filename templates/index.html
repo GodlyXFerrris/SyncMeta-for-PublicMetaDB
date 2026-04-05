@@ -35,7 +35,7 @@
     .card{padding:18px}.card-label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--z500);margin-bottom:6px;font-weight:600}.card-value{font-size:22px;font-weight:700;color:var(--z100)}.card-sub{font-size:12px;color:var(--z500);margin-top:4px}
     .panel{overflow:hidden;margin-bottom:20px}.panel-header{padding:14px 18px;border-bottom:1px solid var(--z900);font-size:14px;font-weight:700;color:var(--z100);display:flex;align-items:center;justify-content:space-between}
     table{width:100%;border-collapse:collapse;font-size:13px} th{text-align:left;padding:10px 18px;color:var(--z500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--z900)} td{padding:11px 18px;border-bottom:1px solid rgba(39,39,46,.3);color:var(--z300)} tr:last-child td{border-bottom:none}
-    .num{text-align:right;font-variant-numeric:tabular-nums}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-dim{color:var(--z600)}.table-actions{text-align:right;white-space:nowrap}
+    .num{text-align:right;font-variant-numeric:tabular-nums}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-dim{color:var(--z600)}.table-actions{text-align:right;white-space:nowrap;width:170px;min-width:170px}
     .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.form-section{padding:20px;align-self:start}.form-section.full{grid-column:1 / -1}.form-section h3{font-size:15px;font-weight:700;color:var(--z100);margin-bottom:4px;display:flex;align-items:center;gap:8px}.desc{font-size:12px;color:var(--z500);margin-bottom:16px}
     .settings-columns{grid-column:1 / -1;display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:stretch}
     .settings-stack{display:flex;flex-direction:column;gap:16px}
@@ -61,7 +61,7 @@
     .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.9);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300)}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
     .save-flash{font-size:12px;color:var(--green);opacity:0;transition:opacity .3s;margin-left:8px}.save-flash.show{opacity:1}.actions-bar{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions-meta{font-size:12px;color:var(--z600)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
     .hidden{display:none}
-    .inline-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap}
+    .inline-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:nowrap;min-width:150px}
     .auth-box{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:var(--z900)}
     .auth-box.hidden{display:none}
     .auth-code{font-size:22px;font-weight:700;color:var(--white);letter-spacing:2px;margin:6px 0}
@@ -328,6 +328,7 @@
                 <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
                 <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
                 <button class="btn btn-sm" id="btn-trakt-select-all" type="button" onclick="selectAllVisibleTraktLists()">Select All</button>
+                <button class="btn btn-sm" id="btn-trakt-deselect-all" type="button" onclick="deselectAllVisibleTraktLists()">Deselect All</button>
               </div>
             </div>
             <div class="catalog-search hidden" id="trakt-discover-search">
@@ -344,6 +345,7 @@
               <div class="actions-bar" style="margin-top:0">
                 <button class="btn btn-sm" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
                 <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
+                <button class="btn btn-sm" type="button" onclick="deselectAllVisibleMdbListLists()">Deselect All</button>
               </div>
             </div>
             <div class="catalog-list" id="mdblist-list"></div>
@@ -1050,6 +1052,32 @@
       saveDraft();
     }
 
+    function deselectAllVisibleTraktLists() {
+      if (traktCatalogTab === 'default') {
+        el('trakt-watchlist-toggle').checked = false;
+        const defaultKeys = new Set(TRAKT_DEFAULT_CATALOGS.map(item => traktListKey(item)));
+        traktSelectedLists = normalizeTraktSelectedLists(
+          traktSelectedLists.filter(item => !defaultKeys.has(traktListKey(item)))
+        );
+      } else if (traktCatalogTab === 'enabled') {
+        el('trakt-watchlist-toggle').checked = false;
+        traktSyncAllLikedLists = false;
+        traktSelectedLists = [];
+      } else {
+        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const visibleKeys = new Set(visible.map(item => traktListKey(item)));
+        traktSelectedLists = normalizeTraktSelectedLists(
+          traktSelectedLists.filter(item => !visibleKeys.has(traktListKey(item)))
+        );
+        if (traktCatalogTab === 'my-lists') {
+          traktSyncAllLikedLists = false;
+        }
+      }
+      renderTraktCatalogs();
+      updateDots();
+      saveDraft();
+    }
+
     function traktCatalogMeta(item) {
       if (item.source === 'default') return 'Trakt';
       const parts = [`Trakt by ${item.user}`];
@@ -1067,7 +1095,9 @@
       el('btn-trakt-refresh').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
       el('btn-trakt-sync-all').classList.toggle('hidden', traktCatalogTab !== 'my-lists');
       el('btn-trakt-select-all').classList.toggle('hidden', traktCatalogTab === 'enabled');
+      el('btn-trakt-deselect-all').classList.toggle('hidden', traktCatalogTab === 'enabled');
       el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable All' : 'Select All';
+      el('btn-trakt-deselect-all').textContent = traktCatalogTab === 'default' ? 'Disable All' : 'Deselect All';
 
       const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0) + (traktSyncAllLikedLists ? 1 : 0);
       if (!isTraktConnected()) {
@@ -1309,6 +1339,16 @@
 
     function selectAllVisibleMdbListLists() {
       mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(mdblistLists.length ? mdblistLists : mdblistSelectedLists));
+      renderMdbListLists();
+      updateDots();
+      saveDraft();
+    }
+
+    function deselectAllVisibleMdbListLists() {
+      const visibleKeys = new Set((mdblistLists.length ? mdblistLists : mdblistSelectedLists).map(item => mdbListKey(item)));
+      mdblistSelectedLists = normalizeMdbListSelectedLists(
+        mdblistSelectedLists.filter(item => !visibleKeys.has(mdbListKey(item)))
+      );
       renderMdbListLists();
       updateDots();
       saveDraft();
