@@ -24,9 +24,13 @@ _ROOT_LOOKUP_CHAIN = [
 class ItemMatcher:
     """Resolve normalized items to TMDB IDs usable by PublicMetaDB."""
 
-    def __init__(self, pmdb: PublicMetaDBClient):
+    def __init__(self, pmdb: PublicMetaDBClient, anime_root_resolver=None):
         self._pmdb = pmdb
         self._cache: dict[str, int | None] = {}
+        # Optional callable(anilist_id: int | None, mal_id: int | None) -> dict | None
+        # Returns {"root": media_dict, ...} from the AniList prequel chain.
+        # Used as a last resort for anime sequels that fail all direct lookups.
+        self._anime_root_resolver = anime_root_resolver
 
     def resolve_tmdb_id(self, item: dict) -> int | None:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""
@@ -79,6 +83,34 @@ class ItemMatcher:
                 )
                 return tmdb_id
 
+        # Lazy fallback: walk the AniList prequel chain to find the root series.
+        # Only runs for anime items and only when all direct lookups have failed.
+        if self._anime_root_resolver and item.get("simkl_type") == "anime":
+            anilist_id: int | None = None
+            mal_id: int | None = None
+            try:
+                if item.get("anilist_id"):
+                    anilist_id = int(item["anilist_id"])
+                if item.get("mal_id"):
+                    mal_id = int(item["mal_id"])
+            except (ValueError, TypeError):
+                pass
+            if anilist_id or mal_id:
+                root_context = self._anime_root_resolver(anilist_id, mal_id)
+                root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
+                if isinstance(root, dict) and root.get("id") != anilist_id:
+                    for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
+                        root_ext_id = root.get(root_key)
+                        if root_ext_id:
+                            tmdb_id = self._pmdb.lookup_by_external_id(id_type, str(root_ext_id), media_type)
+                            if tmdb_id:
+                                logger.info(
+                                    "Resolved '%s' via lazy root-series %s lookup (%s -> %d, root='%s')",
+                                    title, id_type, root_ext_id, tmdb_id,
+                                    self._media_title(root),
+                                )
+                                return tmdb_id
+
         logger.warning(
             "Could not resolve TMDB ID for '%s' (year=%s, ids=%s)",
             title,
@@ -86,6 +118,13 @@ class ItemMatcher:
             {k: v for k, v in ids.items() if v},
         )
         return None
+
+    @staticmethod
+    def _media_title(media: dict) -> str:
+        titles = media.get("title") or {}
+        if isinstance(titles, dict):
+            return titles.get("english") or titles.get("romaji") or str(media.get("id", "?"))
+        return str(titles) or str(media.get("id", "?"))
 
     @staticmethod
     def _cache_key(item: dict) -> str:

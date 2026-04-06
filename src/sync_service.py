@@ -6,7 +6,8 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from .config import AppConfig
+from .anilist_client import AniListClient
+from .config import AniListConfig, AppConfig
 from .matcher import ItemMatcher
 from .mdblist_client import MdbListClient
 from .publicmetadb_client import PublicMetaDBClient
@@ -87,7 +88,10 @@ class SyncService:
         self._trakt = TraktClient(config.trakt)
         self._mdblist = MdbListClient(config.mdblist)
         self._pmdb = PublicMetaDBClient(config.pmdb)
-        self._matcher = ItemMatcher(self._pmdb)
+        self._anilist_root_client = AniListClient(
+            config.anilist if config.anilist.enabled else AniListConfig()
+        )
+        self._matcher = ItemMatcher(self._pmdb, anime_root_resolver=self._make_anime_root_resolver())
         self._status_callback = status_callback
         self._progress_callback = progress_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
@@ -95,6 +99,22 @@ class SyncService:
         self._sync_modes = self._normalize_sync_modes(sync_modes, config)
         self._last_progress_publish = 0.0
         self._live_progress_rows: dict[str, dict] = {}
+
+    def _make_anime_root_resolver(self):
+        """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
+        client = self._anilist_root_client
+
+        def resolver(anilist_id: int | None, mal_id: int | None) -> dict | None:
+            if not anilist_id and mal_id:
+                anilist_id = client.get_anilist_id_by_mal(mal_id)
+            if not anilist_id:
+                return None
+            get_ctx = getattr(client, "_get_root_context", None)
+            if callable(get_ctx):
+                return get_ctx(anilist_id)
+            return None
+
+        return resolver
 
     @property
     def simkl(self) -> SimklClient:

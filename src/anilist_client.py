@@ -194,16 +194,11 @@ class AniListClient:
             "mal": mal_id,
         }
 
-        root_media = self._get_root_media(anilist_id) if anilist_id else None
+        # Root IDs are resolved lazily by the matcher only when direct lookup
+        # fails, avoiding an AniList API call for every item up front.
         root_anilist_id = None
         root_mal_id = None
         root_title = None
-        if root_media and root_media.get("id") != anilist_id:
-            root_anilist_id = root_media.get("id")
-            root_mal_id = root_media.get("idMal")
-            root_title = self._media_title(root_media)
-            ids["root_anilist"] = root_anilist_id
-            ids["root_mal"] = root_mal_id
 
         return {
             "title": title,

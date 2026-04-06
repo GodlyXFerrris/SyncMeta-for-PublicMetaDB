@@ -238,7 +238,9 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(grouped["anime"][0]["title"], "Demo Anime")
         self.assertEqual(grouped["anime"][0]["anilist_id"], "44")
 
-    def test_normalize_anime_item_adds_root_series_ids(self) -> None:
+    def test_normalize_anime_item_returns_direct_ids_without_root_walk(self) -> None:
+        # Root IDs are no longer pre-populated during normalization; the matcher
+        # resolves them lazily via anime_root_resolver when direct lookup fails.
         client = RecordingSimklClient()
 
         normalized = client._normalize_item(
@@ -254,12 +256,10 @@ class SimklClientTests(unittest.TestCase):
             "anime",
         )
 
-        self.assertEqual(normalized["root_anilist_id"], "140960")
-        self.assertEqual(normalized["root_mal_id"], "48675")
-        self.assertEqual(normalized["root_title"], "SPY x FAMILY")
-        self.assertEqual(normalized["root_episode_offset"], 25)
-        self.assertEqual(normalized["ids"]["root_anilist"], "140960")
-        self.assertEqual(normalized["ids"]["root_mal"], "48675")
+        self.assertEqual(normalized["anilist_id"], "177937")
+        self.assertEqual(normalized["mal_id"], "59027")
+        self.assertIsNone(normalized["root_anilist_id"])
+        self.assertIsNone(normalized["root_mal_id"])
 
     def test_get_watched_history_parses_movies_shows_and_anime(self) -> None:
         client = RecordingSimklClient()

@@ -238,13 +238,9 @@ class SimklClient:
         else:
             pmdb_type = "tv"  # Shows map to "tv"
 
-        if media_type == "anime":
-            root_ids = self._resolve_anime_root_ids(ids)
-            root_title = root_ids.get("root_title")
-            if root_ids.get("root_anilist"):
-                ids["root_anilist"] = root_ids["root_anilist"]
-            if root_ids.get("root_mal"):
-                ids["root_mal"] = root_ids["root_mal"]
+        # Root IDs are resolved lazily by the matcher only when direct lookup
+        # fails, avoiding AniList API calls for every item up front.
+        root_ids: dict[str, str] = {}
 
         return {
             "title": media.get("title", "Unknown"),
