@@ -24,13 +24,20 @@ _ROOT_LOOKUP_CHAIN = [
 class ItemMatcher:
     """Resolve normalized items to TMDB IDs usable by PublicMetaDB."""
 
-    def __init__(self, pmdb: PublicMetaDBClient, anime_root_resolver=None):
+    def __init__(self, pmdb: PublicMetaDBClient, anime_root_resolver=None, initial_cache: dict | None = None):
         self._pmdb = pmdb
-        self._cache: dict[str, int | None] = {}
+        # Pre-populate with persisted resolutions from a previous sync run so
+        # unchanged items resolve instantly without any external API calls.
+        self._cache: dict[str, int | None] = dict(initial_cache) if initial_cache else {}
         # Optional callable(anilist_id: int | None, mal_id: int | None) -> dict | None
         # Returns {"root": media_dict, ...} from the AniList prequel chain.
         # Used as a last resort for anime sequels that fail all direct lookups.
         self._anime_root_resolver = anime_root_resolver
+
+    @property
+    def resolution_cache(self) -> dict[str, int]:
+        """Return only successful resolutions for persistence (excludes failures)."""
+        return {k: v for k, v in self._cache.items() if isinstance(v, int)}
 
     def resolve_tmdb_id(self, item: dict) -> int | None:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""

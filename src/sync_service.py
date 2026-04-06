@@ -82,6 +82,7 @@ class SyncService:
         managed_lists: list[dict] | None = None,
         cancel_requested_callback=None,
         sync_modes: dict | None = None,
+        resolution_cache: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
@@ -91,7 +92,11 @@ class SyncService:
         self._anilist_root_client = AniListClient(
             config.anilist if config.anilist.enabled else AniListConfig()
         )
-        self._matcher = ItemMatcher(self._pmdb, anime_root_resolver=self._make_anime_root_resolver())
+        self._matcher = ItemMatcher(
+            self._pmdb,
+            anime_root_resolver=self._make_anime_root_resolver(),
+            initial_cache=resolution_cache,
+        )
         self._status_callback = status_callback
         self._progress_callback = progress_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
@@ -115,6 +120,10 @@ class SyncService:
             return None
 
         return resolver
+
+    @property
+    def resolution_cache(self) -> dict[str, int]:
+        return self._matcher.resolution_cache
 
     @property
     def simkl(self) -> SimklClient:

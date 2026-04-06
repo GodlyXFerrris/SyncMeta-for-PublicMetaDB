@@ -912,6 +912,7 @@ class ProfileStore:
         dry_run: bool = False,
         managed_lists: list[dict] | None = None,
         sync_modes: dict | None = None,
+        resolution_cache: dict | None = None,
     ) -> dict:
         with self._lock:
             normalized_id = self._normalize_profile_id(profile_id)
@@ -927,6 +928,8 @@ class ProfileStore:
             profile["sync_live_results"] = []
             if managed_lists is not None:
                 profile["managed_lists"] = _normalize_managed_lists(managed_lists)
+            if resolution_cache is not None and not dry_run:
+                profile["resolution_cache"] = resolution_cache
             self._merge_activity_results(profile, results, now)
             profile["sync_error"] = None
             profile["sync_running"] = False
