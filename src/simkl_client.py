@@ -329,13 +329,12 @@ class SimklClient:
         )
         return deduped
 
-    def get_playback_progress(self) -> list[dict]:
+    def get_playback_progress(self, include_next_up_fallback: bool = False) -> list[dict]:
         """Fetch SIMKL playback progress records."""
         raw = self._get("/sync/playback")
         if not raw:
-            return []
-
-        if isinstance(raw, list):
+            raw_items = []
+        elif isinstance(raw, list):
             raw_items = raw
         elif isinstance(raw, dict):
             raw_items = list(raw.get("movies", [])) + list(raw.get("shows", [])) + list(raw.get("anime", [])) + list(raw.get("items", []))
@@ -347,7 +346,143 @@ class SimklClient:
             normalized = self._normalize_playback_entry(entry)
             if normalized:
                 entries.append(normalized)
+        if include_next_up_fallback:
+            entries = self._merge_next_up_resume_fallback(entries)
         return entries
+
+    def _merge_next_up_resume_fallback(self, entries: list[dict]) -> list[dict]:
+        merged = list(entries)
+        seen = {self._resume_identity_key(item) for item in entries if self._resume_identity_key(item)}
+        fallback_items = self._get_next_up_resume_fallback()
+        added = 0
+        for item in fallback_items:
+            key = self._resume_identity_key(item)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+            added += 1
+        logger.info("SIMKL next-up resume fallback added %d entries", added)
+        return merged
+
+    def _get_next_up_resume_fallback(self) -> list[dict]:
+        entries: list[dict] = []
+        for media_key in ("shows", "anime"):
+            for status in (SIMKL_STATUS_WATCHING, SIMKL_STATUS_ON_HOLD):
+                entries.extend(self._get_next_up_resume_for_status(media_key, status))
+        return entries
+
+    def _get_next_up_resume_for_status(self, media_key: str, status: str) -> list[dict]:
+        api_type = self._api_type(media_key)
+        raw = self._get(
+            f"/sync/all-items/{api_type}/{quote(self._api_status(status), safe='')}",
+            params={"extended": "full"},
+        )
+        items = []
+        if isinstance(raw, list):
+            items = raw
+        elif isinstance(raw, dict):
+            if isinstance(raw.get(media_key), list):
+                items = raw.get(media_key, [])
+            elif media_key == "shows" and isinstance(raw.get("tv"), list):
+                items = raw.get("tv", [])
+            elif media_key == "shows" and isinstance(raw.get("shows"), list):
+                items = raw.get("shows", [])
+            elif media_key == "anime" and isinstance(raw.get("anime"), list):
+                items = raw.get("anime", [])
+            elif media_key == "anime" and isinstance(raw.get("shows"), list):
+                items = raw.get("shows", [])
+
+        progress_entries: list[dict] = []
+        for entry in items:
+            normalized = self._normalize_next_up_resume_entry(entry, media_key)
+            if normalized:
+                progress_entries.append(normalized)
+        logger.info(
+            "SIMKL %s next-up fallback status '%s' yielded %d resume entries",
+            media_key,
+            status,
+            len(progress_entries),
+        )
+        return progress_entries
+
+    def _normalize_next_up_resume_entry(self, entry: dict, media_key: str) -> dict | None:
+        show = self._show_payload(entry)
+        if not isinstance(show, dict):
+            return None
+
+        next_candidate = entry.get("next_to_watch") or show.get("next_to_watch")
+        if isinstance(next_candidate, list):
+            next_candidate = next((item for item in next_candidate if isinstance(item, dict)), None)
+        if not isinstance(next_candidate, dict):
+            return None
+
+        season = next_candidate.get("season")
+        episode = next_candidate.get("number") or next_candidate.get("episode")
+        runtime_minutes = next_candidate.get("runtime") or show.get("runtime") or entry.get("runtime")
+        try:
+            season = int(season)
+            episode = int(episode)
+            runtime_minutes = float(runtime_minutes)
+        except (TypeError, ValueError):
+            return None
+        if season <= 0 or episode <= 0 or runtime_minutes <= 0:
+            return None
+
+        ids = show.get("ids", {}) or {}
+        root_ids: dict[str, str] = {}
+        root_title = None
+        if media_key == "anime":
+            root_ids = self._resolve_anime_root_ids(ids)
+            root_title = root_ids.get("root_title")
+            if root_ids.get("root_anilist"):
+                ids["root_anilist"] = root_ids["root_anilist"]
+            if root_ids.get("root_mal"):
+                ids["root_mal"] = root_ids["root_mal"]
+
+        runtime_ms = int(runtime_minutes * 60_000)
+        # PublicMetaDB ignores very tiny progress values, so keep this as a small
+        # "start of next episode" bookmark rather than pretending it's exact playback.
+        position_ms = max(1, int(round(runtime_ms * 0.05)))
+        return {
+            "tmdb_id": int(ids["tmdb"]) if ids.get("tmdb") else None,
+            "media_type": "tv",
+            "season": season,
+            "episode": episode,
+            "position_ms": position_ms,
+            "runtime_ms": runtime_ms,
+            "progress": 5.0,
+            "paused_at": (
+                entry.get("last_watched_at")
+                or entry.get("last_watched")
+                or show.get("last_watched_at")
+                or show.get("last_watched")
+            ),
+            "title": show.get("title", "Unknown"),
+            "year": show.get("year"),
+            "simkl_type": media_key,
+            "imdb_id": ids.get("imdb"),
+            "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+            "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+            "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+            "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+            "root_title": root_title,
+            "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+            "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+            "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+            "ids": ids,
+            "resume_fallback": "next_up",
+        }
+
+    @staticmethod
+    def _resume_identity_key(item: dict) -> str:
+        tmdb_id = item.get("tmdb_id")
+        media_type = item.get("media_type")
+        if not tmdb_id or not media_type:
+            return ""
+        season = item.get("season")
+        episode = item.get("episode")
+        return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}"
 
     def _get_completed_movie_history(self, since: str | None = None) -> list[dict]:
         params = {"extended": "full"}

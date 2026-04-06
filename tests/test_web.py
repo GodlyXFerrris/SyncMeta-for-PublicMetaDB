@@ -57,6 +57,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Watch History Source", html)
         self.assertIn("Only import SIMKL anime watch history", html)
         self.assertIn("Resume Progress Source", html)
+        self.assertIn("Use SIMKL Next Up as fallback for shows/anime resume", html)
         self.assertIn("Activity Sync", html)
         self.assertIn('id="activity-cards"', html)
         self.assertIn("Sync Watch History", html)

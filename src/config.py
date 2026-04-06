@@ -79,6 +79,7 @@ class SyncConfig:
     simkl_sync_watched_history: bool = False
     simkl_history_anime_only: bool = False
     simkl_sync_resume_progress: bool = False
+    simkl_resume_use_next_up_fallback: bool = False
     trakt_sync_watched_history: bool = False
     simkl_history_cursor: str = ""
     trakt_history_cursor: str = ""
@@ -150,6 +151,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.simkl_sync_watched_history = os.getenv("SIMKL_SYNC_WATCHED_HISTORY", "false").lower() == "true"
     cfg.sync.simkl_history_anime_only = os.getenv("SIMKL_HISTORY_ANIME_ONLY", "false").lower() == "true"
     cfg.sync.simkl_sync_resume_progress = os.getenv("SIMKL_SYNC_RESUME_PROGRESS", "false").lower() == "true"
+    cfg.sync.simkl_resume_use_next_up_fallback = os.getenv("SIMKL_RESUME_USE_NEXT_UP_FALLBACK", "false").lower() == "true"
     cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
     watched_interval = os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS", "43200")
     cfg.sync.trakt_watched_history_interval_seconds = int(watched_interval) if watched_interval.isdigit() else 43200
@@ -240,6 +242,8 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.simkl_history_anime_only = bool(sync["simkl_history_anime_only"])
     if "simkl_sync_resume_progress" in sync and not os.getenv("SIMKL_SYNC_RESUME_PROGRESS"):
         cfg.sync.simkl_sync_resume_progress = bool(sync["simkl_sync_resume_progress"])
+    if "simkl_resume_use_next_up_fallback" in sync and not os.getenv("SIMKL_RESUME_USE_NEXT_UP_FALLBACK"):
+        cfg.sync.simkl_resume_use_next_up_fallback = bool(sync["simkl_resume_use_next_up_fallback"])
     if "trakt_sync_watched_history" in sync and not os.getenv("TRAKT_SYNC_WATCHED_HISTORY"):
         cfg.sync.trakt_sync_watched_history = bool(sync["trakt_sync_watched_history"])
     if "trakt_watched_history_interval_seconds" in sync and not os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS"):

@@ -311,7 +311,12 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL playback progress")
-        items = self._simkl.get_playback_progress()
+        try:
+            items = self._simkl.get_playback_progress(
+                include_next_up_fallback=bool(self._config.sync.simkl_resume_use_next_up_fallback)
+            )
+        except TypeError:
+            items = self._simkl.get_playback_progress()
         stats.items_fetched = len(items)
 
         normalized_items: list[dict] = []

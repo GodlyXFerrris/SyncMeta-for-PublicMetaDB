@@ -441,6 +441,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         "simkl_sync_watched_history": history_source == "simkl",
         "simkl_history_anime_only": bool(raw.get("simkl_history_anime_only", False)),
         "simkl_sync_resume_progress": resume_source == "simkl",
+        "simkl_resume_use_next_up_fallback": bool(raw.get("simkl_resume_use_next_up_fallback", False)),
         "trakt_sync_watched_history": history_source == "trakt",
         "trakt_watched_history_interval_seconds": watched_history_interval_seconds,
         "trakt_sync_full_watch_counts": False,

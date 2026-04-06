@@ -321,6 +321,59 @@ class SimklClientTests(unittest.TestCase):
             for item in progress
         ))
 
+    def test_get_playback_progress_can_fallback_to_next_up_for_tv_and_anime(self) -> None:
+        class NextUpFallbackSimklClient(RecordingSimklClient):
+            def _get(self, path: str, params: dict | None = None) -> dict | list | None:
+                self.paths.append(path)
+                self.requests.append((path, params))
+                if path == "/sync/playback":
+                    return []
+                if path == "/sync/all-items/tv/watching":
+                    return {
+                        "shows": [{
+                            "show": {
+                                "title": "Next Up Show",
+                                "year": 2026,
+                                "runtime": 45,
+                                "ids": {"tmdb": 9001},
+                            },
+                            "next_to_watch": {"season": 2, "number": 5},
+                            "last_watched_at": "2026-04-05T10:00:00Z",
+                        }]
+                    }
+                if path == "/sync/all-items/tv/on%20hold":
+                    return {"shows": []}
+                if path == "/sync/all-items/anime/watching":
+                    return {
+                        "anime": [{
+                            "show": {
+                                "title": "Next Up Anime",
+                                "year": 2026,
+                                "runtime": 24,
+                                "ids": {"tmdb": 9002, "anilist": 777},
+                            },
+                            "next_to_watch": {"season": 1, "number": 7},
+                            "last_watched_at": "2026-04-05T11:00:00Z",
+                        }]
+                    }
+                if path == "/sync/all-items/anime/on%20hold":
+                    return {"anime": []}
+                return None
+
+        client = NextUpFallbackSimklClient()
+
+        progress = client.get_playback_progress(include_next_up_fallback=True)
+
+        self.assertEqual(len(progress), 2)
+        self.assertTrue(any(
+            item["tmdb_id"] == 9001 and item["season"] == 2 and item["episode"] == 5 and item["position_ms"] == 135000 and item["runtime_ms"] == 2700000
+            for item in progress
+        ))
+        self.assertTrue(any(
+            item["tmdb_id"] == 9002 and item["season"] == 1 and item["episode"] == 7 and item["position_ms"] == 72000 and item["runtime_ms"] == 1440000 and item["resume_fallback"] == "next_up"
+            for item in progress
+        ))
+
     def test_expand_aggregate_history_item_uses_tmdb_season_plan(self) -> None:
         client = RecordingSimklClient()
 

@@ -298,6 +298,7 @@
                   </select>
                   <div class="hint">Choose which service should import continue-watching progress when you press the dashboard button.</div>
                 </div>
+                <div class="toggle-row hidden" id="opt-simkl-next-up-fallback-row"><label class="toggle"><input type="checkbox" id="opt-simkl-next-up-fallback"><span class="slider"></span></label><label>Use SIMKL Next Up as fallback for shows/anime resume</label></div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
                 <div class="hint">Activity sync only runs from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
@@ -739,6 +740,7 @@
         activity_history_source: el('opt-activity-history-source').value,
         simkl_history_anime_only: el('opt-simkl-history-anime-only').checked,
         activity_resume_source: el('opt-activity-resume-source').value,
+        simkl_resume_use_next_up_fallback: el('opt-simkl-next-up-fallback').checked,
         trakt_watched_history_interval_seconds: 43200,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
@@ -843,6 +845,7 @@
       el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
       el('opt-simkl-history-anime-only').checked = !!options.simkl_history_anime_only;
       el('opt-activity-resume-source').value = options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
+      el('opt-simkl-next-up-fallback').checked = !!options.simkl_resume_use_next_up_fallback;
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
       el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
@@ -890,11 +893,17 @@
 
     function renderActivityOptionVisibility() {
       const historySource = el('opt-activity-history-source').value || 'off';
+      const resumeSource = el('opt-activity-resume-source').value || 'off';
       const animeOnlyRow = el('opt-simkl-history-anime-only-row');
       const animeOnlyInput = el('opt-simkl-history-anime-only');
+      const nextUpRow = el('opt-simkl-next-up-fallback-row');
+      const nextUpInput = el('opt-simkl-next-up-fallback');
       const showAnimeOnly = historySource === 'simkl';
       animeOnlyRow.classList.toggle('hidden', !showAnimeOnly);
       if (!showAnimeOnly) animeOnlyInput.checked = false;
+      const showNextUpFallback = resumeSource === 'simkl';
+      nextUpRow.classList.toggle('hidden', !showNextUpFallback);
+      if (!showNextUpFallback) nextUpInput.checked = false;
     }
 
     function renderSimklStatuses() {
