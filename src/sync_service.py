@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 from .anilist_client import AniListClient
@@ -151,12 +153,27 @@ class SyncService:
 
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
-            all_stats.extend(self._sync_simkl())
+            anilist_enabled = (
+                self._config.anilist.enabled
+                and bool(self._config.anilist.selected_statuses)
+            )
+            if anilist_enabled:
+                # Run SIMKL and AniList concurrently — they fetch from independent
+                # APIs and write to distinct PMDB lists so there is no data race.
+                # ItemMatcher already uses a threading.Lock for its shared cache.
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    future_simkl = pool.submit(self._sync_simkl)
+                    future_anilist = pool.submit(self._sync_anilist)
+                    for future in as_completed([future_simkl, future_anilist]):
+                        try:
+                            all_stats.extend(future.result())
+                        except SyncCancelled:
+                            raise
+                        except Exception as exc:
+                            logger.error("Provider sync failed: %s", exc)
+            else:
+                all_stats.extend(self._sync_simkl())
             self._publish_progress(all_stats, force=True)
-
-            if self._config.anilist.enabled and self._config.anilist.selected_statuses:
-                all_stats.extend(self._sync_anilist())
-                self._publish_progress(all_stats, force=True)
 
             if self._config.trakt.enabled:
                 all_stats.extend(self._sync_trakt())
@@ -893,12 +910,17 @@ class SyncService:
 
             try:
                 self._set_status(f"Adding items to {actual_list_name}")
-                self._pmdb.add_item_to_list(list_id, tmdb_id, media_type)
-                existing_map[key] = {
-                    "tmdb_id": tmdb_id,
-                    "media_type": media_type,
-                }
-                stats.items_added += 1
+                result = self._pmdb.add_item_to_list(list_id, tmdb_id, media_type)
+                if result is not None:
+                    existing_map[key] = {
+                        "tmdb_id": tmdb_id,
+                        "media_type": media_type,
+                    }
+                    stats.items_added += 1
+                else:
+                    message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): API returned no result"
+                    stats.errors.append(message)
+                    logger.warning(message)
                 self._publish_progress([stats])
             except Exception as exc:
                 message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"

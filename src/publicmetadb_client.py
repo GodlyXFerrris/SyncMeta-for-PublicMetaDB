@@ -2,6 +2,7 @@
 
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -133,11 +134,17 @@ class PublicMetaDBClient:
             if not watched_ids:
                 break
 
+            # Delete the current page concurrently — each entry is independent.
             deleted_this_round = 0
-            for watched_id in watched_ids:
-                if self.delete_watched_entry(watched_id):
-                    deleted += 1
-                    deleted_this_round += 1
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futures = {pool.submit(self.delete_watched_entry, wid): wid for wid in watched_ids}
+                for future in as_completed(futures):
+                    try:
+                        if future.result():
+                            deleted += 1
+                            deleted_this_round += 1
+                    except Exception as exc:
+                        logger.warning("Error deleting watched entry %s: %s", futures[future], exc)
 
             if deleted_this_round == 0:
                 logger.warning("Stopped clearing watched history because no entries were deleted from the current page")

@@ -1,6 +1,7 @@
 """Matching logic to resolve SIMKL items to PublicMetaDB TMDB IDs."""
 
 import logging
+import threading
 import time
 
 from .publicmetadb_client import PublicMetaDBClient
@@ -39,6 +40,9 @@ class ItemMatcher:
         # Pre-populate with persisted resolutions from a previous sync run so
         # unchanged items resolve instantly without any external API calls.
         self._cache: dict[str, int | None] = dict(initial_cache) if initial_cache else {}
+        # Lock protecting _cache and _failed_cache so concurrent provider syncs
+        # (e.g. SIMKL shows + AniList anime) don't race on cache writes.
+        self._lock = threading.Lock()
         # Optional callable(anilist_id: int | None, mal_id: int | None) -> dict | None
         # Returns {"root": media_dict, ...} from the AniList prequel chain.
         # Used as a last resort for anime sequels that fail all direct lookups.
@@ -87,25 +91,32 @@ class ItemMatcher:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""
         cache_key = self._cache_key(item)
 
-        # Return cached success immediately.
+        # Fast path: check caches without the lock (reads are safe in CPython).
         if cache_key in self._cache:
             return self._cache[cache_key]
-
-        # Skip items that recently failed to resolve — no point retrying within TTL.
         failed_at = self._failed_cache.get(cache_key)
         if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
             return None
 
-        tmdb_id = self._try_resolve(item)
-        self._cache[cache_key] = tmdb_id
+        # Slow path: resolve and write to cache under the lock so concurrent
+        # provider syncs (e.g. SIMKL shows + AniList anime) don't race.
+        with self._lock:
+            # Re-check after acquiring — another thread may have resolved this.
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            failed_at = self._failed_cache.get(cache_key)
+            if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
+                return None
 
-        if tmdb_id is None:
-            self._failed_cache[cache_key] = time.time()
-        else:
-            # Clear any stale failure record now that we have a result.
-            self._failed_cache.pop(cache_key, None)
+            tmdb_id = self._try_resolve(item)
+            self._cache[cache_key] = tmdb_id
 
-        return tmdb_id
+            if tmdb_id is None:
+                self._failed_cache[cache_key] = time.time()
+            else:
+                self._failed_cache.pop(cache_key, None)
+
+            return tmdb_id
 
     def _try_resolve(self, item: dict) -> int | None:
         title = item.get("title", "Unknown")

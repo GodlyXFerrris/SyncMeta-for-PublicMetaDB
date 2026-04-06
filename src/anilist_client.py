@@ -1,6 +1,7 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
 import logging
+import threading
 import time
 
 import requests
@@ -10,6 +11,14 @@ from urllib3.util.retry import Retry
 from .config import AniListConfig
 
 logger = logging.getLogger(__name__)
+
+# Module-level shared cache for AniList root-chain data.
+# AniList prequel chains are global facts (not user-specific), so all
+# AniListClient instances across all profiles share the same cache.
+# This avoids re-fetching the same chain data per user.
+_SHARED_ROOT_CACHE: dict[int, dict | None] = {}
+_SHARED_ROOT_CONTEXT_CACHE: dict[int, dict | None] = {}
+_SHARED_CACHE_LOCK = threading.Lock()
 
 GRAPHQL_URL = "https://graphql.anilist.co"
 
@@ -108,8 +117,10 @@ class AniListClient:
     def __init__(self, config: AniListConfig):
         self._config = config
         self._session = self._build_session()
-        self._root_cache: dict[int, dict | None] = {}
-        self._root_context_cache: dict[int, dict | None] = {}
+        # Point to the module-level shared caches so all instances benefit
+        # from chain data already fetched by another user's sync.
+        self._root_cache = _SHARED_ROOT_CACHE
+        self._root_context_cache = _SHARED_ROOT_CONTEXT_CACHE
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -237,55 +248,64 @@ class AniListClient:
         return (context or {}).get("root")
 
     def _get_root_context(self, media_id: int) -> dict | None:
+        # Fast path: check shared cache without acquiring the lock.
         if media_id in self._root_context_cache:
             return self._root_context_cache[media_id]
 
-        if media_id in self._root_cache:
-            root = self._root_cache[media_id]
-            context = {"root": root, "episode_offset": 0}
-            self._root_context_cache[media_id] = context
-            return context
+        # Acquire the shared lock before any cache write so concurrent syncs
+        # for different users don't race on the same chain-walk.
+        with _SHARED_CACHE_LOCK:
+            # Re-check after acquiring the lock — another thread may have
+            # already resolved this chain while we were waiting.
+            if media_id in self._root_context_cache:
+                return self._root_context_cache[media_id]
 
-        seen: set[int] = set()
-        chain: list[dict] = []
-        current_id = media_id
+            if media_id in self._root_cache:
+                root = self._root_cache[media_id]
+                context = {"root": root, "episode_offset": 0}
+                self._root_context_cache[media_id] = context
+                return context
 
-        while current_id and current_id not in seen:
-            seen.add(current_id)
-            data = self._query(_MEDIA_RELATIONS_QUERY, {"id": current_id})
-            media = (data or {}).get("Media")
-            if not media:
-                break
+            seen: set[int] = set()
+            chain: list[dict] = []
+            current_id = media_id
 
-            chain.append(media)
-            prequel = self._pick_prequel(media.get("relations", {}).get("edges", []))
-            if not prequel:
-                break
-            current_id = prequel.get("id")
+            while current_id and current_id not in seen:
+                seen.add(current_id)
+                data = self._query(_MEDIA_RELATIONS_QUERY, {"id": current_id})
+                media = (data or {}).get("Media")
+                if not media:
+                    break
 
-        root = self._pick_root_candidate(chain)
-        chronological_chain = list(reversed(chain))
-        running_offset = 0
-        context_by_id: dict[int, dict] = {}
-        for media in chronological_chain:
-            candidate_id = media.get("id")
-            if candidate_id:
-                context_by_id[int(candidate_id)] = {
-                    "root": root,
-                    "episode_offset": running_offset,
-                }
-            try:
-                running_offset += int(media.get("episodes") or 0)
-            except (TypeError, ValueError):
-                pass
-        for candidate in chain:
-            candidate_id = candidate.get("id")
-            if candidate_id:
-                self._root_cache[int(candidate_id)] = root
-                self._root_context_cache[int(candidate_id)] = context_by_id.get(int(candidate_id), {"root": root, "episode_offset": 0})
-        self._root_cache[media_id] = root
-        self._root_context_cache[media_id] = context_by_id.get(media_id, {"root": root, "episode_offset": 0})
-        return self._root_context_cache[media_id]
+                chain.append(media)
+                prequel = self._pick_prequel(media.get("relations", {}).get("edges", []))
+                if not prequel:
+                    break
+                current_id = prequel.get("id")
+
+            root = self._pick_root_candidate(chain)
+            chronological_chain = list(reversed(chain))
+            running_offset = 0
+            context_by_id: dict[int, dict] = {}
+            for media in chronological_chain:
+                candidate_id = media.get("id")
+                if candidate_id:
+                    context_by_id[int(candidate_id)] = {
+                        "root": root,
+                        "episode_offset": running_offset,
+                    }
+                try:
+                    running_offset += int(media.get("episodes") or 0)
+                except (TypeError, ValueError):
+                    pass
+            for candidate in chain:
+                candidate_id = candidate.get("id")
+                if candidate_id:
+                    self._root_cache[int(candidate_id)] = root
+                    self._root_context_cache[int(candidate_id)] = context_by_id.get(int(candidate_id), {"root": root, "episode_offset": 0})
+            self._root_cache[media_id] = root
+            self._root_context_cache[media_id] = context_by_id.get(media_id, {"root": root, "episode_offset": 0})
+            return self._root_context_cache[media_id]
 
     @classmethod
     def _pick_prequel(cls, edges: list[dict]) -> dict | None:

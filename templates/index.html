@@ -490,6 +490,7 @@
       { name: 'Recommended Series', user: 'default', slug: 'recommended-series', source: 'default', catalog_key: 'recommended-series', description: 'Trakt default catalog' },
     ];
     let polling = null;
+    let pollingController = null;
     let simklPinPoller = null;
     let traktDevicePoller = null;
     let simklSelectedStatuses = cloneSimklStatuses(DEFAULT_SIMKL_STATUSES);
@@ -1022,11 +1023,12 @@
       link.addEventListener('click', () => switchView(link.dataset.nav));
     });
 
-    async function apiPost(url, payload) {
+    async function apiPost(url, payload, { signal } = {}) {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal,
       });
       let data = {};
       try {
@@ -2234,8 +2236,12 @@
     }
 
     async function fetchStatus(includeCredentials) {
+      // Abort any previous in-flight status request before starting a new one.
+      if (pollingController) pollingController.abort();
+      pollingController = new AbortController();
+      const signal = pollingController.signal;
       try {
-        const result = await apiPost('/api/profile/status', { include_credentials: !!includeCredentials });
+        const result = await apiPost('/api/profile/status', { include_credentials: !!includeCredentials }, { signal });
         if (!result.ok) {
           if (!includeCredentials) renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
           return;
@@ -2246,7 +2252,8 @@
         }
         renderDashboard(profile);
         return profile;
-      } catch {
+      } catch (e) {
+        if (e && e.name === 'AbortError') return null;
         if (!includeCredentials) renderEmptyDashboard('Status is temporarily unavailable.');
         return null;
       }
@@ -2355,9 +2362,20 @@
         return;
       }
 
+      // Give instant visual feedback before the API round-trip completes.
+      el('btn-stop').disabled = true;
+      el('btn-stop').textContent = 'Stopping...';
+      el('sync-label').textContent = 'Stopping...';
+      // Abort any in-flight polling request so fetchStatus can restart immediately.
+      if (pollingController) { pollingController.abort(); pollingController = null; }
+
       try {
         const result = await apiPost('/api/profile/sync/stop', {});
         if (!result.ok) {
+          // Restore button so the user can retry.
+          el('btn-stop').disabled = false;
+          el('btn-stop').textContent = 'Stop';
+          el('sync-label').textContent = 'Syncing...';
           showToast(formatApiError(result.data, 'Unable to stop the current sync.'), true, false);
           return;
         }
@@ -2368,6 +2386,9 @@
         showToast('Stopping sync...', false, true);
         fetchStatus();
       } catch {
+        el('btn-stop').disabled = false;
+        el('btn-stop').textContent = 'Stop';
+        el('sync-label').textContent = 'Syncing...';
         showToast('Network error while stopping sync.', true, false);
       }
     }
