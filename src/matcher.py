@@ -45,6 +45,7 @@ class ItemMatcher:
     def _try_resolve(self, item: dict) -> int | None:
         title = item.get("title", "Unknown")
         media_type = item["media_type"]
+        is_anime = item.get("simkl_type") == "anime"
 
         tmdb_raw = item.get("tmdb_id")
         if tmdb_raw:
@@ -56,6 +57,16 @@ class ItemMatcher:
                 pass
 
         ids = item.get("ids", {})
+
+        # For anime with an AniList ID: walk the prequel chain BEFORE trying direct
+        # MAL/AniList lookups. This ensures sequels resolve to the root-series TMDB
+        # entry (with an English title) rather than a season-specific entry that PMDB
+        # may have mapped to a Japanese-titled TMDB record.
+        if is_anime and self._anime_root_resolver and item.get("anilist_id"):
+            tmdb_id = self._try_anime_root_lookup(item, media_type)
+            if tmdb_id:
+                return tmdb_id
+
         for id_type, item_key in _LOOKUP_CHAIN:
             ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
             if not ext_id:
@@ -75,41 +86,16 @@ class ItemMatcher:
             if tmdb_id:
                 logger.info(
                     "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
-                    title,
-                    id_type,
-                    ext_id,
-                    tmdb_id,
+                    title, id_type, ext_id, tmdb_id,
                     item.get("root_title") or "Unknown",
                 )
                 return tmdb_id
 
-        # Lazy fallback: walk the AniList prequel chain to find the root series.
-        # Only runs for anime items and only when all direct lookups have failed.
-        if self._anime_root_resolver and item.get("simkl_type") == "anime":
-            anilist_id: int | None = None
-            mal_id: int | None = None
-            try:
-                if item.get("anilist_id"):
-                    anilist_id = int(item["anilist_id"])
-                if item.get("mal_id"):
-                    mal_id = int(item["mal_id"])
-            except (ValueError, TypeError):
-                pass
-            if anilist_id or mal_id:
-                root_context = self._anime_root_resolver(anilist_id, mal_id)
-                root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
-                if isinstance(root, dict) and root.get("id") != anilist_id:
-                    for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
-                        root_ext_id = root.get(root_key)
-                        if root_ext_id:
-                            tmdb_id = self._pmdb.lookup_by_external_id(id_type, str(root_ext_id), media_type)
-                            if tmdb_id:
-                                logger.info(
-                                    "Resolved '%s' via lazy root-series %s lookup (%s -> %d, root='%s')",
-                                    title, id_type, root_ext_id, tmdb_id,
-                                    self._media_title(root),
-                                )
-                                return tmdb_id
+        # Anime without an AniList ID: try root resolver as last resort using MAL fallback.
+        if is_anime and self._anime_root_resolver and not item.get("anilist_id"):
+            tmdb_id = self._try_anime_root_lookup(item, media_type)
+            if tmdb_id:
+                return tmdb_id
 
         logger.warning(
             "Could not resolve TMDB ID for '%s' (year=%s, ids=%s)",
@@ -117,6 +103,44 @@ class ItemMatcher:
             item.get("year"),
             {k: v for k, v in ids.items() if v},
         )
+        return None
+
+    def _try_anime_root_lookup(self, item: dict, media_type: str) -> int | None:
+        """Walk the AniList prequel chain and look up the root-series TMDB ID."""
+        title = item.get("title", "Unknown")
+        anilist_id: int | None = None
+        mal_id: int | None = None
+        try:
+            if item.get("anilist_id"):
+                anilist_id = int(item["anilist_id"])
+            if item.get("mal_id"):
+                mal_id = int(item["mal_id"])
+        except (ValueError, TypeError):
+            pass
+
+        if not anilist_id and not mal_id:
+            return None
+
+        root_context = self._anime_root_resolver(anilist_id, mal_id)
+        root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
+        if not isinstance(root, dict):
+            return None
+
+        # If root is the same item, it's already a root series — let direct lookup handle it.
+        if root.get("id") and root.get("id") == anilist_id:
+            return None
+
+        for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
+            root_ext_id = root.get(root_key)
+            if root_ext_id:
+                tmdb_id = self._pmdb.lookup_by_external_id(id_type, str(root_ext_id), media_type)
+                if tmdb_id:
+                    logger.info(
+                        "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
+                        title, id_type, root_ext_id, tmdb_id,
+                        self._media_title(root),
+                    )
+                    return tmdb_id
         return None
 
     @staticmethod

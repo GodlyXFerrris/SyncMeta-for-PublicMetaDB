@@ -226,14 +226,17 @@ class SimklClient:
         elif media_type == "anime":
             anime_type = media.get("anime_type", "")
             if not anime_type:
-                # Entries without anime_type are non-anime items mistakenly placed
-                # in the anime list (e.g. live-action shows added by the user).
-                logger.warning(
-                    "Skipping SIMKL anime entry '%s' (%s) — no anime_type field",
-                    media.get("title", "Unknown"),
-                    media.get("year", ""),
-                )
-                return None
+                # anime_type is only present when SIMKL returns extended data.
+                # Fall back to checking IDs: real anime entries have a MAL or AniList ID;
+                # non-anime items accidentally added to the anime list typically don't.
+                ids_preview = media.get("ids", {})
+                if not ids_preview.get("mal") and not ids_preview.get("anilist"):
+                    logger.warning(
+                        "Skipping SIMKL anime entry '%s' (%s) — no anime_type, no MAL/AniList ID",
+                        media.get("title", "Unknown"),
+                        media.get("year", ""),
+                    )
+                    return None
             # Anime movies must be looked up as "movie" in PMDB; everything else is "tv"
             pmdb_type = "movie" if anime_type == "movie" else "tv"
         else:
