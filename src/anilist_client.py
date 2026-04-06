@@ -114,7 +114,7 @@ class AniListClient:
         retry = Retry(
             total=3,
             backoff_factor=1.5,
-            status_forcelist=[429, 500, 502, 503],
+            status_forcelist=[500, 502, 503],
             allowed_methods=["POST"],
         )
         adapter = HTTPAdapter(max_retries=retry)

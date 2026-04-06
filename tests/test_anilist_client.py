@@ -1,6 +1,7 @@
 import unittest
 
 import requests
+from urllib3.util.retry import Retry
 
 from src.anilist_client import AniListClient
 from src.config import AniListConfig
@@ -92,6 +93,14 @@ class AniListClientTests(unittest.TestCase):
         result = client._query("query {}", {"id": 1})
 
         self.assertIsNone(result)
+
+    def test_retry_policy_does_not_retry_429s(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+        adapter = client._session.get_adapter("https://")
+        retry = adapter.max_retries
+
+        self.assertIsInstance(retry, Retry)
+        self.assertNotIn(429, retry.status_forcelist)
 
 
 if __name__ == "__main__":
