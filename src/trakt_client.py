@@ -50,9 +50,22 @@ DEFAULT_CATALOGS = {
 class TraktClient:
     """Client for the Trakt API."""
 
-    def __init__(self, config: TraktConfig):
+    def __init__(self, config: TraktConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
+        self._cancel_requested_callback = cancel_requested_callback
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            pass
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -211,6 +224,7 @@ class TraktClient:
         items: list[dict] = []
         page = 1
         while True:
+            self._check_cancelled()
             raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
             if not raw:
                 break
@@ -227,6 +241,7 @@ class TraktClient:
         items: list[dict] = []
         page = 1
         while True:
+            self._check_cancelled()
             raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
             if not raw:
                 break

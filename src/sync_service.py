@@ -86,7 +86,7 @@ class SyncService:
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
-        self._trakt = TraktClient(config.trakt)
+        self._trakt = TraktClient(config.trakt, cancel_requested_callback=cancel_requested_callback)
         self._mdblist = MdbListClient(config.mdblist)
         self._pmdb = PublicMetaDBClient(config.pmdb)
         self._anilist_root_client = AniListClient(
@@ -246,7 +246,8 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        items = self._simkl.get_watched_history()
+        cursor = self._config.sync.simkl_history_cursor or None
+        items = self._simkl.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -257,6 +258,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
+        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
         stats.items_fetched = len(items)
 
         existing_counts: dict[str, int] = {}
@@ -348,7 +350,8 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        items = self._trakt.get_watched_history()
+        cursor = self._config.sync.trakt_history_cursor or None
+        items = self._trakt.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -357,6 +360,7 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
+        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:

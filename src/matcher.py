@@ -54,6 +54,16 @@ class ItemMatcher:
         media_type = item["media_type"]
         is_anime = item.get("simkl_type") == "anime"
 
+        # For anime with an AniList ID: walk the prequel chain BEFORE accepting
+        # the direct TMDB ID. SIMKL may supply a sequel-specific TMDB entry while
+        # PMDB indexes the whole franchise under the root series entry. Returning
+        # the root series TMDB ID avoids the mismatch. For root-series items,
+        # _try_anime_root_lookup returns None so we fall through to the TMDB ID.
+        if is_anime and self._anime_root_resolver and item.get("anilist_id"):
+            tmdb_id = self._try_anime_root_lookup(item, media_type)
+            if tmdb_id:
+                return tmdb_id
+
         tmdb_raw = item.get("tmdb_id")
         if tmdb_raw:
             try:
@@ -64,15 +74,6 @@ class ItemMatcher:
                 pass
 
         ids = item.get("ids", {})
-
-        # For anime with an AniList ID: walk the prequel chain BEFORE trying direct
-        # MAL/AniList lookups. This ensures sequels resolve to the root-series TMDB
-        # entry (with an English title) rather than a season-specific entry that PMDB
-        # may have mapped to a Japanese-titled TMDB record.
-        if is_anime and self._anime_root_resolver and item.get("anilist_id"):
-            tmdb_id = self._try_anime_root_lookup(item, media_type)
-            if tmdb_id:
-                return tmdb_id
 
         for id_type, item_key in _LOOKUP_CHAIN:
             ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)

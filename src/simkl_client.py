@@ -67,6 +67,18 @@ class SimklClient:
         self._anime_root_client = None
         self._cancel_requested_callback = cancel_requested_callback
 
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            pass
+
     def _build_session(self) -> requests.Session:
         session = requests.Session()
         session.headers.update({
@@ -344,7 +356,9 @@ class SimklClient:
         """Fetch SIMKL completed history as watched-once records."""
         history: list[dict] = []
         movie_history = self._get_completed_movie_history(since=since)
+        self._check_cancelled()
         show_history = self._get_show_history("shows", since=since)
+        self._check_cancelled()
         anime_history = self._get_show_history("anime", since=since)
         history.extend(movie_history)
         history.extend(show_history)
@@ -550,6 +564,7 @@ class SimklClient:
     def _get_show_history(self, media_key: str, since: str | None = None) -> list[dict]:
         history: list[dict] = []
         for status in SIMKL_HISTORY_STATUS_SCAN_ORDER:
+            self._check_cancelled()
             history.extend(self._get_show_history_for_status(media_key, status, since=since))
         return history
 
