@@ -64,6 +64,8 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Resume Progress", html)
         self.assertIn("Activity sync only runs from the dashboard buttons", html)
         self.assertIn("Watched history imports only add items that are not already watched in PublicMetaDB", html)
+        self.assertIn("RESULTS_PAGE_SIZE = 25", html)
+        self.assertIn("results-prev-page", html)
         self.assertIn('id="btn-stop"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
