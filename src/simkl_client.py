@@ -232,25 +232,60 @@ class SimklClient:
         root_ids: dict[str, str] = {}
         root_title = None
 
+        # Known SIMKL anime_type values for real anime productions.
+        # Non-anime content that ends up in a user's anime list (e.g. Western
+        # cartoons, live-action shows) will have an unrecognised or absent type.
+        _VALID_ANIME_TYPES = {"tv", "movie", "ova", "ona", "special", "music", "unknown"}
+
         # Determine the PublicMetaDB-compatible media type
         if media_type == "movies":
             pmdb_type = "movie"
         elif media_type == "anime":
-            anime_type = media.get("anime_type", "")
-            if not anime_type:
-                # anime_type is only present when SIMKL returns extended data.
-                # Fall back to checking IDs: real anime entries have a MAL or AniList ID;
-                # non-anime items accidentally added to the anime list typically don't.
-                ids_preview = media.get("ids", {})
-                if not ids_preview.get("mal") and not ids_preview.get("anilist"):
-                    logger.warning(
-                        "Skipping SIMKL anime entry '%s' (%s) — no anime_type, no MAL/AniList ID",
-                        media.get("title", "Unknown"),
-                        media.get("year", ""),
-                    )
-                    return None
-            # Anime movies must be looked up as "movie" in PMDB; everything else is "tv"
-            pmdb_type = "movie" if anime_type == "movie" else "tv"
+            anime_type = str(media.get("anime_type") or "").strip().lower()
+            ids_check = media.get("ids", {})
+            mal_id = ids_check.get("mal")
+            anilist_id = ids_check.get("anilist")
+
+            # Gate 1: anime_type must be recognised OR item must have a MAL/AniList ID.
+            # This catches Western cartoons, live-action shows, etc. added by mistake.
+            if anime_type and anime_type not in _VALID_ANIME_TYPES:
+                logger.warning(
+                    "Skipping SIMKL anime entry '%s' (%s) — unrecognised anime_type '%s'",
+                    media.get("title", "Unknown"), media.get("year", ""), anime_type,
+                )
+                return None
+
+            if not anime_type and not mal_id and not anilist_id:
+                logger.warning(
+                    "Skipping SIMKL anime entry '%s' (%s) — no anime_type and no MAL/AniList ID",
+                    media.get("title", "Unknown"), media.get("year", ""),
+                )
+                return None
+
+            # Gate 2: require a MAL ID for items that have no recognised anime_type.
+            # This rejects real non-anime that happens to have an AniList entry
+            # (e.g. some Western shows have MAL pages but are not anime).
+            if not anime_type and not mal_id:
+                logger.warning(
+                    "Skipping SIMKL anime entry '%s' (%s) — no anime_type and no MAL ID (AniList-only entries may not be anime)",
+                    media.get("title", "Unknown"), media.get("year", ""),
+                )
+                return None
+
+            # Anime movies must be looked up as "movie" in PMDB; everything else is "tv".
+            # When anime_type is absent, check episode/season counts as a heuristic:
+            # a single-entry show with 1 episode and no seasons is likely a movie.
+            if anime_type == "movie":
+                pmdb_type = "movie"
+            elif not anime_type:
+                ep_count = media.get("total_episodes") or media.get("episodes")
+                try:
+                    ep_count = int(ep_count)
+                except (TypeError, ValueError):
+                    ep_count = None
+                pmdb_type = "movie" if ep_count == 1 else "tv"
+            else:
+                pmdb_type = "tv"
         else:
             pmdb_type = "tv"  # Shows map to "tv"
 
