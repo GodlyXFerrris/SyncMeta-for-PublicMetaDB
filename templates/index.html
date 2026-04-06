@@ -305,10 +305,11 @@
                     <option value="off">Off</option>
                     <option value="trakt">Trakt</option>
                   </select>
-                  <div class="hint">Choose which service should import continue-watching progress when you press the dashboard button.</div>
+                  <div class="hint">Choose which service should import continue-watching progress. Trakt resume also refreshes automatically every 10 minutes while background sync is on.</div>
                 </div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Activity sync only runs from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
+                <div class="hint">Watch history only runs from the dashboard button. Resume progress also refreshes automatically every 10 minutes while background sync is on.</div>
+                <div class="hint">Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -1988,7 +1989,18 @@
             return acc;
           }, { added: 0, removed: 0, errors: 0 });
           const mode = entry.dry_run ? ' <span class="c-dim">dry run</span>' : '';
-          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}</span><div class="history-stats"><span class="c-green">+${summary.added}</span><span class="c-red">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : ''}</div></div>`;
+          const entryStatus = String(entry.status || 'completed').toLowerCase();
+          let statusBadge = '';
+          if (entryStatus === 'failed') {
+            statusBadge = ' <span class="c-red">failed</span>';
+          } else if (entryStatus === 'stopped') {
+            statusBadge = ' <span class="c-orange">stopped</span>';
+          }
+          const errorDetail = entry.error_message ? `<span class="c-red">1 err</span>` : '';
+          const statsHtml = entryStatus === 'failed' && !summary.added && !summary.removed && !summary.errors
+            ? `${errorDetail}`
+            : `<span class="c-green">+${summary.added}</span><span class="c-red">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : errorDetail}`;
+          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}${statusBadge}</span><div class="history-stats">${statsHtml}</div></div>`;
         }).join('');
         const historyNote = history.length > visibleHistory.length
           ? `<div class="panel-body" style="padding-top:12px;padding-bottom:0;color:var(--z500);font-size:12px">Showing the newest ${visibleHistory.length} of ${history.length} sync runs.</div>`
@@ -2041,7 +2053,7 @@
         : (options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       if (!source || source === 'off') return 'Run this manually from the button above.';
       if (mode === 'history') return `${source.toUpperCase()} watched imports`;
-      return `${source.toUpperCase()} continue watching sync`;
+      return `${source.toUpperCase()} continue watching sync · auto every 10 minutes`;
     }
 
     function updateClearHistoryButtons(show, canUse) {

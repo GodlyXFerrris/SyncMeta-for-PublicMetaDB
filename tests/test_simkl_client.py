@@ -259,6 +259,31 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(normalized["ids"]["root_anilist"], "140960")
         self.assertEqual(normalized["ids"]["root_mal"], "48675")
 
+    def test_normalize_anime_item_skips_root_lookup_when_tmdb_is_present(self) -> None:
+        client = RecordingSimklClient()
+        calls = {"count": 0}
+
+        def _unexpected_root_lookup(anilist_id: int) -> dict | None:
+            calls["count"] += 1
+            return None
+
+        client._get_anime_root_context = _unexpected_root_lookup
+
+        normalized = client._normalize_item(
+            {
+                "show": {
+                    "title": "Direct TMDB Anime",
+                    "year": 2025,
+                    "ids": {"tmdb": 12345, "anilist": 177937},
+                },
+                "status": "watching",
+            },
+            "anime",
+        )
+
+        self.assertEqual(normalized["tmdb_id"], "12345")
+        self.assertEqual(calls["count"], 0)
+
     def test_get_watched_history_parses_movies_shows_and_anime(self) -> None:
         client = RecordingSimklClient()
 

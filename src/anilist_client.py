@@ -1,6 +1,7 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
 import logging
+import time
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -101,6 +102,7 @@ class AniListClient:
         self._session = self._build_session()
         self._root_cache: dict[int, dict | None] = {}
         self._root_context_cache: dict[int, dict | None] = {}
+        self._rate_limited_until = 0.0
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -122,12 +124,20 @@ class AniListClient:
         return session
 
     def _query(self, query: str, variables: dict) -> dict | None:
+        if self._rate_limited_until > time.time():
+            logger.info("AniList root lookups temporarily paused after rate limiting")
+            return None
         logger.debug("AniList query variables=%s", variables)
         try:
             resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as exc:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code == 429 or "429" in str(exc):
+                self._rate_limited_until = time.time() + 300
+                logger.warning("AniList rate limited; skipping further root lookups for 5 minutes")
             logger.warning("AniList request failed for variables=%s: %s", variables, exc)
             return None
         if "errors" in data:

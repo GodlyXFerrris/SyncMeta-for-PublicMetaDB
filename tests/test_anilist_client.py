@@ -94,6 +94,28 @@ class AniListClientTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_query_pauses_further_requests_after_429(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+        calls = {"count": 0}
+
+        class _Resp:
+            status_code = 429
+
+            def raise_for_status(self) -> None:
+                error = requests.HTTPError("429 Client Error")
+                error.response = self
+                raise error
+
+        def _post(*args, **kwargs):
+            calls["count"] += 1
+            return _Resp()
+
+        client._session.post = _post
+
+        self.assertIsNone(client._query("query {}", {"id": 1}))
+        self.assertIsNone(client._query("query {}", {"id": 2}))
+        self.assertEqual(calls["count"], 1)
+
     def test_retry_policy_does_not_retry_429s(self) -> None:
         client = AniListClient(AniListConfig(username="tester"))
         adapter = client._session.get_adapter("https://")

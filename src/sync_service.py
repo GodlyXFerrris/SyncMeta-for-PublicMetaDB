@@ -81,7 +81,7 @@ class SyncService:
         sync_modes: dict | None = None,
     ):
         self._config = config
-        self._simkl = SimklClient(config.simkl)
+        self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
         self._trakt = TraktClient(config.trakt)
         self._mdblist = MdbListClient(config.mdblist)
         self._pmdb = PublicMetaDBClient(config.pmdb)

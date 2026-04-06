@@ -59,12 +59,28 @@ SIMKL_HISTORY_STATUS_SCAN_ORDER = [
 class SimklClient:
     """Client for the SIMKL API v2."""
 
-    def __init__(self, config: SimklConfig):
+    def __init__(self, config: SimklConfig, cancel_requested_callback=None):
         self._config = config
+        self._cancel_requested_callback = cancel_requested_callback
         self._session = self._build_session()
         self._tmdb_season_plan_cache: dict[int, list[tuple[int, int]]] = {}
         self._anime_root_cache: dict[int, dict] = {}
         self._anime_root_client = None
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+
+                raise SyncCancelled("Sync stopped by user")
+        except Exception as exc:
+            from .sync_service import SyncCancelled
+
+            if isinstance(exc, SyncCancelled):
+                raise
+            logger.debug("SIMKL cancel callback failed", exc_info=True)
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -162,6 +178,7 @@ class SimklClient:
         requested_status = self._normalize_status(status)
 
         for media_type in types_to_process:
+            self._check_cancelled()
             api_type = self._api_type(media_type)
             raw = self._get(f"/sync/all-items/{api_type}/{quote(api_status, safe='')}")
             if not raw:
@@ -170,6 +187,7 @@ class SimklClient:
             raw_items = raw.get(media_type, [])
             items = []
             for entry in raw_items:
+                self._check_cancelled()
                 normalized = self._normalize_item(entry, media_type)
                 if normalized:
                     item_status = self._normalize_status(normalized.get("status"))
@@ -225,7 +243,7 @@ class SimklClient:
         else:
             pmdb_type = "tv"  # Both shows and anime map to "tv"
 
-        if media_type == "anime":
+        if media_type == "anime" and not ids.get("tmdb"):
             root_ids = self._resolve_anime_root_ids(ids)
             root_title = root_ids.get("root_title")
             if root_ids.get("root_anilist"):
@@ -343,6 +361,7 @@ class SimklClient:
 
         entries: list[dict] = []
         for entry in raw_items:
+            self._check_cancelled()
             normalized = self._normalize_playback_entry(entry)
             if normalized:
                 entries.append(normalized)
@@ -368,7 +387,9 @@ class SimklClient:
     def _get_next_up_resume_fallback(self) -> list[dict]:
         entries: list[dict] = []
         for media_key in ("shows", "anime"):
+            self._check_cancelled()
             for status in (SIMKL_STATUS_WATCHING, SIMKL_STATUS_ON_HOLD):
+                self._check_cancelled()
                 entries.extend(self._get_next_up_resume_for_status(media_key, status))
         return entries
 
@@ -395,6 +416,7 @@ class SimklClient:
 
         progress_entries: list[dict] = []
         for entry in items:
+            self._check_cancelled()
             normalized = self._normalize_next_up_resume_entry(entry, media_key)
             if normalized:
                 progress_entries.append(normalized)
@@ -492,6 +514,7 @@ class SimklClient:
         items = raw.get("movies", []) if isinstance(raw, dict) else []
         history: list[dict] = []
         for entry in items:
+            self._check_cancelled()
             movie = entry.get("movie") if isinstance(entry, dict) else None
             if not isinstance(movie, dict):
                 continue
@@ -517,6 +540,7 @@ class SimklClient:
     def _get_show_history(self, media_key: str, since: str | None = None) -> list[dict]:
         history: list[dict] = []
         for status in SIMKL_HISTORY_STATUS_SCAN_ORDER:
+            self._check_cancelled()
             history.extend(self._get_show_history_for_status(media_key, status, since=since))
         return history
 
@@ -558,6 +582,7 @@ class SimklClient:
             )
         history: list[dict] = []
         for entry in items:
+            self._check_cancelled()
             show = self._show_payload(entry)
             if not isinstance(show, dict):
                 continue
@@ -571,6 +596,7 @@ class SimklClient:
         return history
 
     def _extract_episode_history(self, entry: dict, show: dict, media_key: str) -> list[dict]:
+        self._check_cancelled()
         history: list[dict] = []
         seen: set[tuple[int, int]] = set()
         ids = show.get("ids", {}) or {}
@@ -637,8 +663,10 @@ class SimklClient:
             })
 
         for season_entry in self._history_seasons(entry, show):
+            self._check_cancelled()
             season_number = season_entry.get("number") or season_entry.get("season")
             for episode_entry in season_entry.get("episodes", []) or []:
+                self._check_cancelled()
                 add_episode(
                     season_number,
                     episode_entry.get("number") or episode_entry.get("episode"),
@@ -646,6 +674,7 @@ class SimklClient:
                 )
 
         for episode_entry in self._history_episodes(entry, show):
+            self._check_cancelled()
             add_episode(
                 episode_entry.get("season"),
                 episode_entry.get("number") or episode_entry.get("episode"),
@@ -653,6 +682,7 @@ class SimklClient:
             )
 
         for episode_entry in self._history_last_watched_episodes(entry, show):
+            self._check_cancelled()
             add_episode(
                 episode_entry.get("season"),
                 episode_entry.get("number") or episode_entry.get("episode"),
@@ -662,6 +692,7 @@ class SimklClient:
         synthesized = self._synthesize_episode_history_from_counts(entry, show, media_key)
         if not history:
             for episode in synthesized:
+                self._check_cancelled()
                 if episode.get("aggregate_watched_count"):
                     history.append(episode)
                     continue
@@ -672,6 +703,7 @@ class SimklClient:
                 )
         elif media_key == "anime":
             for episode in synthesized:
+                self._check_cancelled()
                 if episode.get("aggregate_watched_count"):
                     continue
                 add_episode(
