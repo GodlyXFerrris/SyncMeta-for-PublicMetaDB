@@ -614,10 +614,10 @@
       const simklLinked = isSimklLinked();
       const anilistLinked = isAniListLinked();
 
-      if (simklLinked && !hasAnySimklStatuses(simklSelectedStatuses) && (forceInitial || !simklWasLinked)) {
+      if (simklLinked && !hasAnySimklStatuses(simklSelectedStatuses) && !simklWasLinked) {
         simklSelectedStatuses = cloneSimklStatuses(LINKED_SIMKL_STATUSES);
       }
-      if (anilistLinked && !anilistSelectedStatuses.length && (forceInitial || !anilistWasLinked)) {
+      if (anilistLinked && !anilistSelectedStatuses.length && !anilistWasLinked) {
         anilistSelectedStatuses = LINKED_ANILIST_STATUSES.slice();
       }
 
@@ -847,7 +847,9 @@
       el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
       el('opt-trakt-public-visibility').value = options.trakt_public_visibility || 'public';
       el('opt-mdblist-visibility').value = options.mdblist_visibility || 'public';
-      ensureLinkedSourceDefaults(true);
+      simklWasLinked = isSimklLinked();
+      anilistWasLinked = isAniListLinked();
+      ensureLinkedSourceDefaults(false);
       renderActivityOptionVisibility();
       updateDots();
       renderSimklStatuses();
