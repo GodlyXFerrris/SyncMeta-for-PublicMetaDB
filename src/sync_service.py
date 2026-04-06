@@ -197,9 +197,6 @@ class SyncService:
         if self._config.sync.simkl_sync_watched_history:
             stats.append(self._sync_simkl_watched_history())
 
-        if self._config.sync.simkl_sync_resume_progress:
-            stats.append(self._sync_simkl_resume_progress())
-
         return stats
 
     def _sync_simkl_watched_history(self) -> SyncStats:
@@ -303,94 +300,6 @@ class SyncService:
                 "episode": offset + episode,
             }
         return item
-
-    def _sync_simkl_resume_progress(self) -> SyncStats:
-        stats = SyncStats(
-            list_name="",
-            display_name="SIMKL Resume Progress",
-            source_name="SIMKL",
-        )
-        self._set_status("Fetching SIMKL playback progress")
-        try:
-            items = self._simkl.get_playback_progress(
-                include_next_up_fallback=bool(self._config.sync.simkl_resume_use_next_up_fallback)
-            )
-        except TypeError:
-            items = self._simkl.get_playback_progress()
-        stats.items_fetched = len(items)
-
-        normalized_items: list[dict] = []
-        for item in items:
-            self._check_cancelled()
-            item = self._resolve_activity_item(item)
-            key = self._resume_key(item)
-            if not key:
-                stats.items_skipped_unresolved += 1
-                continue
-            normalized_items.append(item)
-            stats.items_resolved += 1
-
-        if self._config.sync.dry_run:
-            stats.items_added = len(normalized_items)
-            return stats
-
-        if not normalized_items:
-            return stats
-
-        try:
-            existing_resume_points = self._pmdb.get_resume_points()
-        except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
-            return stats
-
-        existing_resume_by_key: dict[str, dict] = {}
-        for item in existing_resume_points:
-            key = self._resume_key(item)
-            if key:
-                existing_resume_by_key[key] = item
-
-        payloads: list[dict] = []
-        for item in normalized_items:
-            self._check_cancelled()
-            key = self._resume_key(item)
-            payload = {
-                "tmdb_id": int(item["tmdb_id"]),
-                "media_type": item["media_type"],
-                "position_ms": int(item["position_ms"]),
-                "runtime_ms": int(item["runtime_ms"]),
-            }
-            if item.get("season") is not None:
-                payload["season"] = int(item["season"])
-            if item.get("episode") is not None:
-                payload["episode"] = int(item["episode"])
-            existing = existing_resume_by_key.get(key)
-            if existing and self._resume_matches(existing, payload):
-                stats.items_skipped_duplicate += 1
-                continue
-            payloads.append(payload)
-
-        if not payloads:
-            return stats
-
-        for chunk in self._chunked(payloads, 50):
-            self._check_cancelled()
-            try:
-                self._set_status("Writing SIMKL resume progress to PublicMetaDB")
-                response = self._pmdb.save_resume_points_batch(chunk) or {}
-                for result in response.get("results", []):
-                    action = str(result.get("action", "")).strip().lower()
-                    if action == "saved":
-                        stats.items_added += 1
-                    elif action == "completed":
-                        stats.items_removed += 1
-                stats.items_skipped_duplicate += max(0, len(chunk) - sum(
-                    1 for result in response.get("results", [])
-                    if str(result.get("action", "")).strip().lower() in {"saved", "completed"}
-                ))
-            except Exception as exc:
-                stats.errors.append(f"Failed to sync resume batch: {exc}")
-                continue
-        return stats
 
     def _sync_trakt_watched_history(self) -> SyncStats:
         stats = SyncStats(
@@ -1087,7 +996,7 @@ class SyncService:
             raw = {
                 "lists": True,
                 "history": bool((config.sync.simkl_sync_watched_history or config.sync.trakt_sync_watched_history)) if config else False,
-                "resume": bool((config.sync.simkl_sync_resume_progress or config.sync.trakt_sync_resume_progress)) if config else False,
+                "resume": bool(config.sync.trakt_sync_resume_progress) if config else False,
             }
         else:
             raw = sync_modes

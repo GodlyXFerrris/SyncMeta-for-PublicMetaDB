@@ -450,7 +450,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(len(pmdb.resume_batches), 1)
         self.assertEqual(watched_stats.history_cursor, "")
 
-    def test_syncs_simkl_watched_history_and_resume_when_enabled(self) -> None:
+    def test_syncs_simkl_watched_history_when_enabled(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="simkl-client",
@@ -464,7 +464,6 @@ class SyncServiceTests(unittest.TestCase):
                 dry_run=False,
                 media_types=["shows", "movies"],
                 simkl_sync_watched_history=True,
-                simkl_sync_resume_progress=True,
             ),
         )
 
@@ -477,15 +476,11 @@ class SyncServiceTests(unittest.TestCase):
         results = service.run()
 
         watched_stats = next(item for item in results if item.display_name == "Watch History")
-        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(watched_stats.source_name, "SIMKL")
         self.assertEqual(watched_stats.history_cursor, "")
-        self.assertEqual(resume_stats.items_fetched, 1)
-        self.assertEqual(resume_stats.items_added, 1)
-        self.assertEqual(len(pmdb.resume_batches), 1)
 
     def test_simkl_history_anime_only_filters_non_anime_entries(self) -> None:
         config = AppConfig(
@@ -729,20 +724,6 @@ class SyncServiceTests(unittest.TestCase):
                     {"media_type": "tv", "season": 1, "episode": 3, "title": "Fallback Anime Episode", "anilist_id": "992"},
                 ]
 
-            def get_playback_progress(self) -> list[dict]:
-                return [
-                    {
-                        "media_type": "tv",
-                        "season": 2,
-                        "episode": 4,
-                        "position_ms": 900_000,
-                        "runtime_ms": 2_700_000,
-                        "progress": 33.3,
-                        "title": "Fallback Resume Show",
-                        "tvdb_id": "993",
-                    },
-                ]
-
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="simkl-client",
@@ -756,7 +737,6 @@ class SyncServiceTests(unittest.TestCase):
                 dry_run=False,
                 media_types=["shows", "anime"],
                 simkl_sync_watched_history=True,
-                simkl_sync_resume_progress=True,
             ),
         )
 
@@ -769,15 +749,12 @@ class SyncServiceTests(unittest.TestCase):
         results = service.run()
 
         watched_stats = next(item for item in results if item.display_name == "Watch History")
-        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(
             {(item["tmdb_id"], item["season"], item["episode"]) for item in pmdb.watched},
             {(811, 1, 2), (812, 1, 3)},
         )
-        self.assertEqual(resume_stats.items_added, 1)
-        self.assertEqual(pmdb.resume_batches[0][0]["tmdb_id"], 813)
 
     def test_history_only_mode_does_not_run_list_syncs(self) -> None:
         config = AppConfig(

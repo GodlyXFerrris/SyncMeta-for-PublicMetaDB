@@ -384,6 +384,15 @@ def _normalize_activity_source(value: object, simkl_enabled: bool, trakt_enabled
     return "off"
 
 
+def _normalize_resume_source(value: object, trakt_enabled: bool) -> str:
+    candidate = str(value or "").strip().lower()
+    if candidate == "trakt":
+        return "trakt"
+    if trakt_enabled:
+        return "trakt"
+    return "off"
+
+
 def normalize_profile_options(options: dict | None) -> dict:
     raw = options or {}
     interval_raw = raw.get("interval_seconds", DEFAULT_SYNC_INTERVAL_SECONDS)
@@ -424,9 +433,8 @@ def normalize_profile_options(options: dict | None) -> dict:
         bool(raw.get("simkl_sync_watched_history", False)),
         bool(raw.get("trakt_sync_watched_history", False)),
     )
-    resume_source = _normalize_activity_source(
+    resume_source = _normalize_resume_source(
         raw.get("activity_resume_source"),
-        bool(raw.get("simkl_sync_resume_progress", False)),
         bool(raw.get("trakt_sync_resume_progress", False)),
     )
 

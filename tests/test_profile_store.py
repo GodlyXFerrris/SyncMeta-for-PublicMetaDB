@@ -316,16 +316,15 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertFalse(due_profiles[0]["pending_sync_modes"]["history"])
         self.assertFalse(due_profiles[0]["pending_sync_modes"]["resume"])
 
-    def test_normalize_profile_options_keeps_simkl_next_up_fallback_flag(self) -> None:
+    def test_normalize_profile_options_drops_legacy_simkl_resume_source(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
             "activity_resume_source": "simkl",
-            "simkl_resume_use_next_up_fallback": True,
         })
 
         loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
 
-        self.assertTrue(loaded["options"]["simkl_resume_use_next_up_fallback"])
+        self.assertEqual(loaded["options"]["activity_resume_source"], "off")
 
     def test_update_profile_by_id_preserves_existing_next_list_sync_time(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)

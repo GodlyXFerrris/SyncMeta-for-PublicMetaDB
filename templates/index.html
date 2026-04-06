@@ -293,12 +293,10 @@
                   <label>Resume Progress Source</label>
                   <select id="opt-activity-resume-source">
                     <option value="off">Off</option>
-                    <option value="simkl">SIMKL</option>
                     <option value="trakt">Trakt</option>
                   </select>
                   <div class="hint">Choose which service should import continue-watching progress when you press the dashboard button.</div>
                 </div>
-                <div class="toggle-row hidden" id="opt-simkl-next-up-fallback-row"><label class="toggle"><input type="checkbox" id="opt-simkl-next-up-fallback"><span class="slider"></span></label><label>Use SIMKL Next Up as fallback for shows/anime resume</label></div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
                 <div class="hint">Activity sync only runs from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
@@ -740,7 +738,6 @@
         activity_history_source: el('opt-activity-history-source').value,
         simkl_history_anime_only: el('opt-simkl-history-anime-only').checked,
         activity_resume_source: el('opt-activity-resume-source').value,
-        simkl_resume_use_next_up_fallback: el('opt-simkl-next-up-fallback').checked,
         trakt_watched_history_interval_seconds: 43200,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
@@ -844,8 +841,7 @@
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
       el('opt-simkl-history-anime-only').checked = !!options.simkl_history_anime_only;
-      el('opt-activity-resume-source').value = options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
-      el('opt-simkl-next-up-fallback').checked = !!options.simkl_resume_use_next_up_fallback;
+      el('opt-activity-resume-source').value = options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off');
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
       el('opt-anilist-visibility').value = options.anilist_visibility || 'private';
       el('opt-trakt-personal-visibility').value = options.trakt_personal_visibility || 'private';
@@ -880,7 +876,7 @@
       const creds = gatherCreds();
       const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
       const opts = gatherOptions();
-      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.activity_history_source === 'simkl' || opts.activity_resume_source === 'simkl')));
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.activity_history_source === 'simkl')));
       setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
       setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.activity_history_source === 'trakt' || opts.activity_resume_source === 'trakt')));
       setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
@@ -893,17 +889,11 @@
 
     function renderActivityOptionVisibility() {
       const historySource = el('opt-activity-history-source').value || 'off';
-      const resumeSource = el('opt-activity-resume-source').value || 'off';
       const animeOnlyRow = el('opt-simkl-history-anime-only-row');
       const animeOnlyInput = el('opt-simkl-history-anime-only');
-      const nextUpRow = el('opt-simkl-next-up-fallback-row');
-      const nextUpInput = el('opt-simkl-next-up-fallback');
       const showAnimeOnly = historySource === 'simkl';
       animeOnlyRow.classList.toggle('hidden', !showAnimeOnly);
       if (!showAnimeOnly) animeOnlyInput.checked = false;
-      const showNextUpFallback = resumeSource === 'simkl';
-      nextUpRow.classList.toggle('hidden', !showNextUpFallback);
-      if (!showNextUpFallback) nextUpInput.checked = false;
     }
 
     function renderSimklStatuses() {
@@ -1926,7 +1916,7 @@
     function describeActivitySources(options, mode) {
       const source = mode === 'history'
         ? (options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off')))
-        : (options.activity_resume_source || (options.simkl_sync_resume_progress ? 'simkl' : (options.trakt_sync_resume_progress ? 'trakt' : 'off')));
+        : (options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       if (!source || source === 'off') return 'Run this manually from the button above.';
       if (mode === 'history') return `${source.toUpperCase()} watched imports`;
       return `${source.toUpperCase()} continue watching sync`;
