@@ -893,12 +893,10 @@
       ensureLinkedSourceDefaults(false);
       renderActivityOptionVisibility();
       const creds = gatherCreds();
-      const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
-      const opts = gatherOptions();
-      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.activity_history_source === 'simkl')));
-      setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
-      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.activity_history_source === 'trakt' || opts.activity_resume_source === 'trakt')));
-      setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved')));
+      setDot('dot-anilist', !!(creds.anilist.username || hasSecretInputOrSaved('anilist-access-token', 'anilist', 'access_token_saved')));
+      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved')));
+      setDot('dot-mdblist', hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved'));
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
     }
 
