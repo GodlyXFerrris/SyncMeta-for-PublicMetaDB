@@ -26,6 +26,7 @@ _TYPE_LABELS = {
     "shows": "Series",
     "movies": "Movies",
     "anime": "Anime",
+    "anime_movie": "Anime Movies",
 }
 
 _STATUS_LABELS = {
@@ -203,9 +204,20 @@ class SyncService:
     def _sync_simkl(self) -> list[SyncStats]:
         """Sync all configured SIMKL lists."""
         media_types = list(self._config.sync.media_types)
-        if self._config.anilist.enabled and self._config.anilist.selected_statuses:
-            media_types = [media_type for media_type in media_types if media_type != "anime"]
-            logger.info("AniList enabled, skipping SIMKL anime sync")
+        anilist_handles_tv_anime = (
+            self._config.anilist.enabled
+            and bool(self._config.anilist.selected_statuses)
+        )
+        if anilist_handles_tv_anime:
+            # AniList takes over TV anime entirely, but SIMKL anime MOVIES are
+            # not covered by AniList — keep "anime" in the loop so we can still
+            # extract and sync those movies into their own PMDB lists.
+            logger.info("AniList enabled — SIMKL anime TV will be skipped, anime movies will still sync")
+
+        # Pre-warm the shared AniList prequel-chain cache for all SIMKL anime IDs
+        # that aren't already cached (e.g. items not on the user's AniList).
+        # Done once before the per-status loops to maximise cache hits.
+        self._prewarm_simkl_anime_cache()
 
         stats: list[SyncStats] = []
         if not media_types:
@@ -215,16 +227,36 @@ class SyncService:
             self._check_cancelled()
             for status_key in self._config.simkl.selected_statuses.get(simkl_type, []):
                 self._check_cancelled()
-                name = _status_list_name(simkl_type, status_key)
-                display_name = _display_status_name(simkl_type, status_key)
-                self._publish_pending_list(name, display_name, "SIMKL")
-                self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
+
+                # When AniList handles TV anime, only fetch SIMKL anime movies.
+                anime_movies_only = simkl_type == "anime" and anilist_handles_tv_anime
+
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
-                description = (
-                    f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
-                    f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
-                )
+
+                if anime_movies_only:
+                    # Filter to only items normalised as movies (anime_type == "movie")
+                    items = [item for item in items if item.get("media_type") == "movie"]
+                    if not items:
+                        continue
+                    # Give them a distinct list name so they don't collide with TV anime lists
+                    name = _status_list_name("anime_movie", status_key)
+                    display_name = _display_status_name("anime_movie", status_key)
+                    description = (
+                        f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
+                        f"anime movies from SIMKL"
+                    )
+                else:
+                    name = _status_list_name(simkl_type, status_key)
+                    display_name = _display_status_name(simkl_type, status_key)
+                    description = (
+                        f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
+                        f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
+                    )
+
+                self._publish_pending_list(name, display_name, "SIMKL")
+                self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
+
                 stats.append(
                     self._sync_list(
                         items,
@@ -237,6 +269,7 @@ class SyncService:
                             "source": "simkl",
                             "media_type": simkl_type,
                             "status": status_key,
+                            "anime_movies_only": anime_movies_only,
                         },
                     )
                 )
@@ -572,13 +605,44 @@ class SyncService:
         client = AniListClient(self._config.anilist)
         stats: list[SyncStats] = []
 
+        # Collect all items from every status first, then pre-warm the shared
+        # AniList prequel-chain cache concurrently before the list sync begins.
+        # This ensures SIMKL anime (which runs concurrently) gets cache hits for
+        # any AniList IDs it shares, instead of each thread walking the same chains.
+        all_items_by_status: list[tuple[str, list[dict]]] = []
         for status_key in self._config.anilist.selected_statuses:
+            self._check_cancelled()
+            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
+            items = client.get_status(status_key)
+            all_items_by_status.append((status_key, items))
+
+        # Pre-warm the shared prequel-chain cache for all unique AniList IDs.
+        # Uses up to 4 threads; the shared lock in _get_root_context prevents
+        # duplicate chain walks for the same ID.
+        all_anilist_ids = list({
+            int(item["anilist_id"])
+            for _, items in all_items_by_status
+            for item in items
+            if item.get("anilist_id")
+        })
+        if all_anilist_ids:
+            self._set_status("Pre-warming anime metadata cache")
+            get_ctx = getattr(client, "_get_root_context", None)
+            if callable(get_ctx):
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    futures = {pool.submit(get_ctx, aid): aid for aid in all_anilist_ids}
+                    for future in as_completed(futures):
+                        try:
+                            future.result()
+                        except Exception as exc:
+                            logger.debug("Cache warm failed for anilist_id=%s: %s", futures[future], exc)
+            logger.info("Pre-warmed anime chain cache for %d AniList IDs", len(all_anilist_ids))
+
+        for status_key, items in all_items_by_status:
             self._check_cancelled()
             name = _status_list_name("anime", status_key)
             display_name = _display_status_name("anime", status_key)
             self._publish_pending_list(name, display_name, "AniList")
-            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
-            items = client.get_status(status_key)
             description = f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' anime from AniList"
             stats.append(
                 self._sync_list(
@@ -996,6 +1060,58 @@ class SyncService:
             self._publish_progress([stats], force=True)
 
         return stats
+
+    def _prewarm_simkl_anime_cache(self) -> None:
+        """Pre-warm the shared AniList prequel-chain cache for SIMKL anime items.
+
+        Fetches all SIMKL anime IDs from the configured statuses, filters to
+        those not already cached, then concurrently walks their prequel chains.
+        This ensures the shared cache is hot before the per-status list sync
+        loop runs, so each item resolves instantly via cache hits.
+        """
+        from .anilist_client import _SHARED_ROOT_CONTEXT_CACHE
+
+        anime_statuses = self._config.simkl.selected_statuses.get("anime", [])
+        if not anime_statuses:
+            return
+
+        # Collect all unique AniList IDs from every SIMKL anime status.
+        anilist_ids: set[int] = set()
+        try:
+            for status_key in anime_statuses:
+                grouped = self._simkl.get_status(status_key, ["anime"])
+                for item in grouped.get("anime", []):
+                    aid = item.get("anilist_id")
+                    if aid:
+                        try:
+                            anilist_ids.add(int(aid))
+                        except (TypeError, ValueError):
+                            pass
+        except Exception as exc:
+            logger.debug("SIMKL anime pre-warm fetch failed: %s", exc)
+            return
+
+        # Only walk chains not already in the shared cache.
+        uncached = [aid for aid in anilist_ids if aid not in _SHARED_ROOT_CONTEXT_CACHE]
+        if not uncached:
+            logger.info("SIMKL anime chain cache: all %d IDs already cached", len(anilist_ids))
+            return
+
+        logger.info(
+            "Pre-warming SIMKL anime chain cache: %d uncached / %d total IDs",
+            len(uncached), len(anilist_ids),
+        )
+        get_ctx = getattr(self._anilist_root_client, "_get_root_context", None)
+        if not callable(get_ctx):
+            return
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = {pool.submit(get_ctx, aid): aid for aid in uncached}
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    logger.debug("Chain pre-warm failed for anilist_id=%s: %s", futures[future], exc)
 
     def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
         """Silently contribute a resolved external ID mapping back to PMDB.
