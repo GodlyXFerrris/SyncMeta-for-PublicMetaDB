@@ -162,6 +162,9 @@ class SyncService:
                 # Run SIMKL and AniList concurrently — they fetch from independent
                 # APIs and write to distinct PMDB lists so there is no data race.
                 # ItemMatcher already uses a threading.Lock for its shared cache.
+                # NOTE: SyncCancelled must be detected via the future's exception
+                # and re-raised here, not swallowed by the generic except clause.
+                cancelled = False
                 with ThreadPoolExecutor(max_workers=2) as pool:
                     future_simkl = pool.submit(self._sync_simkl)
                     future_anilist = pool.submit(self._sync_anilist)
@@ -169,9 +172,11 @@ class SyncService:
                         try:
                             all_stats.extend(future.result())
                         except SyncCancelled:
-                            raise
+                            cancelled = True
                         except Exception as exc:
                             logger.error("Provider sync failed: %s", exc)
+                if cancelled:
+                    raise SyncCancelled("Sync stopped by user")
             else:
                 all_stats.extend(self._sync_simkl())
             self._publish_progress(all_stats, force=True)
@@ -208,16 +213,6 @@ class SyncService:
             self._config.anilist.enabled
             and bool(self._config.anilist.selected_statuses)
         )
-        if anilist_handles_tv_anime:
-            # AniList takes over TV anime entirely, but SIMKL anime MOVIES are
-            # not covered by AniList — keep "anime" in the loop so we can still
-            # extract and sync those movies into their own PMDB lists.
-            logger.info("AniList enabled — SIMKL anime TV will be skipped, anime movies will still sync")
-
-        # Pre-warm the shared AniList prequel-chain cache for all SIMKL anime IDs
-        # that aren't already cached (e.g. items not on the user's AniList).
-        # Done once before the per-status loops to maximise cache hits.
-        self._prewarm_simkl_anime_cache()
 
         stats: list[SyncStats] = []
         if not media_types:
@@ -225,21 +220,31 @@ class SyncService:
 
         for simkl_type in media_types:
             self._check_cancelled()
-            for status_key in self._config.simkl.selected_statuses.get(simkl_type, []):
+            statuses = self._config.simkl.selected_statuses.get(simkl_type, [])
+            if not statuses:
+                continue
+
+            # When AniList handles TV anime, only extract SIMKL anime movies.
+            # We still need to fetch the SIMKL anime list but filter client-side.
+            anime_movies_only = simkl_type == "anime" and anilist_handles_tv_anime
+
+            if anime_movies_only:
+                logger.info("AniList enabled — fetching SIMKL anime only for movies")
+
+            for status_key in statuses:
                 self._check_cancelled()
 
-                # When AniList handles TV anime, only fetch SIMKL anime movies.
-                anime_movies_only = simkl_type == "anime" and anilist_handles_tv_anime
-
+                self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
 
                 if anime_movies_only:
-                    # Filter to only items normalised as movies (anime_type == "movie")
+                    # Only keep items where _normalize_item set media_type="movie"
+                    # (i.e. anime_type == "movie" or single-episode heuristic)
                     items = [item for item in items if item.get("media_type") == "movie"]
                     if not items:
+                        logger.info("No anime movies found for SIMKL status '%s', skipping", status_key)
                         continue
-                    # Give them a distinct list name so they don't collide with TV anime lists
                     name = _status_list_name("anime_movie", status_key)
                     display_name = _display_status_name("anime_movie", status_key)
                     description = (
@@ -255,7 +260,6 @@ class SyncService:
                     )
 
                 self._publish_pending_list(name, display_name, "SIMKL")
-                self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
 
                 stats.append(
                     self._sync_list(
@@ -351,6 +355,8 @@ class SyncService:
                 )
                 existing_counts[key] = 1
                 stats.items_added += 1
+            except SyncCancelled:
+                raise
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
         return stats
@@ -508,6 +514,8 @@ class SyncService:
                 )
                 existing_counts[key] = 1
                 stats.items_added += 1
+            except SyncCancelled:
+                raise
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
         return stats
@@ -590,6 +598,8 @@ class SyncService:
                     1 for result in response.get("results", [])
                     if str(result.get("action", "")).strip().lower() in {"saved", "completed"}
                 ))
+            except SyncCancelled:
+                raise
             except Exception as exc:
                 stats.errors.append(f"Failed to sync resume batch: {exc}")
                 continue
@@ -1005,6 +1015,8 @@ class SyncService:
                 source_name or "",
                 selection,
             )
+        except SyncCancelled:
+            raise
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
             logger.error("Failed to get/create list '%s': %s", actual_list_name, exc)
@@ -1048,6 +1060,8 @@ class SyncService:
                     stats.errors.append(message)
                     logger.warning(message)
                 self._publish_progress([stats])
+            except SyncCancelled:
+                raise
             except Exception as exc:
                 message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"
                 stats.errors.append(message)
@@ -1164,6 +1178,8 @@ class SyncService:
                     self._pmdb.remove_item_from_list(list_id, item["id"])
                     removed += 1
                     logger.info("Removed stale item tmdb=%s from list %s", item.get("tmdb_id"), list_id)
+                except SyncCancelled:
+                    raise
                 except Exception as exc:
                     logger.error("Failed to remove item %s: %s", item.get("id"), exc)
         return removed
@@ -1514,5 +1530,7 @@ class SyncService:
                 self._pmdb.delete_list(list_id)
                 logger.info("Deleted disabled PublicMetaDB list '%s' (id=%s)", list_name, list_id)
                 self._managed_lists.pop(list_name, None)
+            except SyncCancelled:
+                raise
             except Exception as exc:
                 logger.error("Failed to delete disabled PublicMetaDB list '%s': %s", list_name, exc)

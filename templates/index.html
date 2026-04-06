@@ -638,6 +638,12 @@
         anilistSelectedStatuses = LINKED_ANILIST_STATUSES.slice();
       }
 
+      // Auto-set history source to SIMKL when SIMKL is first linked and no source is set yet.
+      const historySourceEl = el('opt-activity-history-source');
+      if (simklLinked && !simklWasLinked && historySourceEl && historySourceEl.value === 'off') {
+        historySourceEl.value = 'simkl';
+      }
+
       simklWasLinked = simklLinked;
       anilistWasLinked = anilistLinked;
     }
