@@ -453,6 +453,26 @@ class SimklClient:
             or show.get("last_watched")
         )
 
+        if media_key == "anime" and self._is_movie_like_anime_history(entry, show):
+            return [{
+                "tmdb_id": tmdb_id,
+                "media_type": "movie",
+                "watched_at": fallback_watched_at,
+                "title": title,
+                "year": show.get("year"),
+                "simkl_type": media_key,
+                "imdb_id": ids.get("imdb"),
+                "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+                "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+                "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+                "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+                "root_title": root_ids.get("root_title"),
+                "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+                "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+                "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+                "ids": ids,
+            }]
+
         def add_episode(season: int | None, episode: int | None, watched_at: str | None) -> None:
             if season is None or episode is None:
                 return
@@ -526,6 +546,21 @@ class SimklClient:
                 )
 
         return history
+
+    @staticmethod
+    def _is_movie_like_anime_history(entry: dict, show: dict) -> bool:
+        anime_type = str(entry.get("anime_type") or show.get("anime_type") or show.get("type") or "").strip().lower()
+        if anime_type in {"movie", "film"}:
+            return True
+        episodes = entry.get("episodes") or show.get("episodes")
+        seasons = entry.get("seasons") or show.get("seasons")
+        try:
+            total_episodes = int(entry.get("total_episodes_count") or show.get("total_episodes_count") or 0)
+        except (TypeError, ValueError):
+            total_episodes = 0
+        if total_episodes == 1 and not episodes and not seasons:
+            return True
+        return False
 
     def _normalize_playback_entry(self, entry: dict) -> dict | None:
         if not isinstance(entry, dict):

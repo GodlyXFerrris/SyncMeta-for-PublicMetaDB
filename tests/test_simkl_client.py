@@ -374,6 +374,33 @@ class SimklClientTests(unittest.TestCase):
             [(1, 1), (1, 2), (2, 1)],
         )
 
+    def test_anime_movie_history_is_normalized_as_movie(self) -> None:
+        client = RecordingSimklClient()
+
+        history = client._extract_episode_history(
+            {
+                "show": {
+                    "title": "Cosmic Princess Kaguya!",
+                    "year": 2026,
+                    "ids": {"tmdb": 1575337, "anilist": 999},
+                },
+                "anime_type": "movie",
+                "total_episodes_count": 1,
+                "last_watched_at": "2026-04-03T13:00:00Z",
+            },
+            {
+                "title": "Cosmic Princess Kaguya!",
+                "year": 2026,
+                "ids": {"tmdb": 1575337, "anilist": 999},
+            },
+            "anime",
+        )
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["media_type"], "movie")
+        self.assertEqual(history[0]["tmdb_id"], 1575337)
+        self.assertEqual(history[0]["watched_at"], "2026-04-03T13:00:00Z")
+
     def test_expand_aggregate_history_item_overflows_into_season_one_when_only_season_one_is_known(self) -> None:
         client = RecordingSimklClient()
 
