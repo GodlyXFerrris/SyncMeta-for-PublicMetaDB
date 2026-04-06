@@ -659,13 +659,17 @@ def _before_request() -> None:
     _ensure_scheduler_started()
     if not SITE_ACCESS_PASSWORD:
         return
-    allowed_paths = {"/access"}
+    # Profile login and creation must always be reachable so users can
+    # authenticate before they have a site-access cookie.
+    allowed_paths = {"/access", "/api/profile/login", "/api/profile/save"}
     if request.path in allowed_paths or request.path.startswith("/static/"):
         return
     if _has_site_access():
         return
     if request.path.startswith("/api/"):
-        return _clear_access_cookie(make_response(jsonify({"error": "Site password required"}), 401))
+        # Return 401 without clearing the cookie — the cookie may still be valid
+        # for other requests and clearing it would cascade-lock the user out.
+        return make_response(jsonify({"error": "Site password required"}), 401)
     return _clear_access_cookie(make_response(render_template("access.html", error=None), 401))
 
 

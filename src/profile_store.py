@@ -17,7 +17,7 @@ from .config import ANILIST_DEFAULT_SELECTED_STATUSES, SIMKL_DEFAULT_SELECTED_ST
 
 ALLOWED_MEDIA_TYPES = {"shows", "movies", "anime"}
 DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
-DEFAULT_SYNC_INTERVAL_SECONDS = 1800
+DEFAULT_SYNC_INTERVAL_SECONDS = 21600  # 6 hours
 MIN_SYNC_INTERVAL_SECONDS = 300
 DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 600
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
@@ -121,7 +121,7 @@ def normalize_credentials(credentials: dict | None) -> dict:
     pmdb = raw.get("pmdb", {})
     trakt_default_catalogs_initialized = bool(trakt.get("default_catalogs_initialized", False))
     trakt_selected_lists = _normalize_trakt_selected_lists(trakt.get("selected_lists", []))
-    legacy_sync_watchlist = bool(trakt.get("sync_watchlist", True))
+    legacy_sync_watchlist = bool(trakt.get("sync_watchlist", False))
     if not trakt_default_catalogs_initialized:
         trakt_selected_lists = [item for item in trakt_selected_lists if item.get("source") != "default"]
     return {
