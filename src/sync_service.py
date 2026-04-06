@@ -476,7 +476,9 @@ class SyncService:
         """Sync configured Trakt watchlist and list sources."""
         stats: list[SyncStats] = []
 
-        if self._config.trakt.sync_watchlist:
+        should_sync_watchlist_movies = self._config.trakt.sync_watchlist_movies and "movies" in self._config.sync.media_types
+        should_sync_watchlist_shows = self._config.trakt.sync_watchlist_shows and "shows" in self._config.sync.media_types
+        if should_sync_watchlist_movies or should_sync_watchlist_shows:
             self._check_cancelled()
             self._set_status("Fetching Trakt watchlist")
             watchlist_items = self._trakt.get_watchlist()
@@ -484,26 +486,37 @@ class SyncService:
                 "shows": [item for item in watchlist_items if item["media_type"] == "tv"],
                 "movies": [item for item in watchlist_items if item["media_type"] == "movie"],
             }
-            for media_type in self._config.sync.media_types:
-                self._check_cancelled()
-                if media_type not in {"shows", "movies"}:
-                    continue
-                items = grouped.get(media_type, [])
-                name = _status_list_name(media_type, "watchlist")
-                display_name = _display_status_name(media_type, "watchlist")
-                description = f"Auto-synced Trakt watchlist {_TYPE_LABELS.get(media_type, media_type)}"
+            if should_sync_watchlist_movies:
+                items = grouped.get("movies", [])
                 stats.append(
                     self._sync_list(
                         items,
-                        name,
-                        description,
-                        display_name=display_name,
+                        _status_list_name("movies", "watchlist"),
+                        "Auto-synced Trakt movie watchlist",
+                        display_name=_display_status_name("movies", "watchlist"),
                         source_name="Trakt",
                         is_public=self._config.sync.trakt_personal_visibility == "public",
                         selection={
                             "source": "trakt",
                             "kind": "watchlist",
-                            "media_type": media_type,
+                            "media_type": "movies",
+                        },
+                    )
+                )
+            if should_sync_watchlist_shows:
+                items = grouped.get("shows", [])
+                stats.append(
+                    self._sync_list(
+                        items,
+                        _status_list_name("shows", "watchlist"),
+                        "Auto-synced Trakt show watchlist",
+                        display_name=_display_status_name("shows", "watchlist"),
+                        source_name="Trakt",
+                        is_public=self._config.sync.trakt_personal_visibility == "public",
+                        selection={
+                            "source": "trakt",
+                            "kind": "watchlist",
+                            "media_type": "shows",
                         },
                     )
                 )
@@ -511,8 +524,8 @@ class SyncService:
         selected_lists = self._dedupe_trakt_lists(self._config.trakt.selected_lists)
         selected_default_lists = [item for item in selected_lists if item.get("source") == "default"]
         selected_liked_lists = [item for item in selected_lists if item.get("source") == "liked"]
-        selected_public_lists = [item for item in selected_lists if item.get("source") != "liked"]
-        selected_public_lists = [item for item in selected_public_lists if item.get("source") != "default"]
+        selected_personal_lists = [item for item in selected_lists if item.get("source") == "personal"]
+        selected_public_lists = [item for item in selected_lists if item.get("source") == "discover"]
 
         for trakt_list in selected_default_lists:
             self._check_cancelled()
@@ -558,39 +571,67 @@ class SyncService:
                         selection={
                             "source": "trakt",
                             "kind": "liked-auto",
+                            "list_source": "liked",
                             "user": liked_list.get("user", ""),
                             "slug": liked_list.get("slug", ""),
                             "name": liked_list.get("name", ""),
                         },
                     )
                 )
-        else:
-            for trakt_list in selected_liked_lists:
-                self._check_cancelled()
-                self._set_status(f"Fetching Trakt list {trakt_list['name']}")
-                items = self._filter_trakt_items(
-                    self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+
+        for trakt_list in selected_liked_lists:
+            self._check_cancelled()
+            self._set_status(f"Fetching Trakt list {trakt_list['name']}")
+            items = self._filter_trakt_items(
+                self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+            )
+            name = trakt_list["name"]
+            description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name=f"Trakt by {trakt_list['user']}",
+                    is_public=self._config.sync.trakt_public_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "selected-list",
+                        "list_source": trakt_list.get("source", ""),
+                        "user": trakt_list.get("user", ""),
+                        "slug": trakt_list.get("slug", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
-                name = trakt_list["name"]
-                description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
-                stats.append(
-                    self._sync_list(
-                        items,
-                        name,
-                        description,
-                        display_name=trakt_list["name"],
-                        source_name=f"Trakt by {trakt_list['user']}",
-                        is_public=self._config.sync.trakt_public_visibility == "public",
-                        selection={
-                            "source": "trakt",
-                            "kind": "selected-list",
-                            "list_source": trakt_list.get("source", ""),
-                            "user": trakt_list.get("user", ""),
-                            "slug": trakt_list.get("slug", ""),
-                            "name": trakt_list.get("name", ""),
-                        },
-                    )
+            )
+
+        for trakt_list in selected_personal_lists:
+            self._check_cancelled()
+            self._set_status(f"Fetching Trakt list {trakt_list['name']}")
+            items = self._filter_trakt_items(
+                self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+            )
+            name = trakt_list["name"]
+            description = f"Auto-synced your Trakt list '{trakt_list['name']}'"
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name=f"Trakt by {trakt_list['user']}",
+                    is_public=self._config.sync.trakt_personal_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "selected-list",
+                        "list_source": trakt_list.get("source", ""),
+                        "user": trakt_list.get("user", ""),
+                        "slug": trakt_list.get("slug", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
+            )
 
         for trakt_list in selected_public_lists:
             self._check_cancelled()

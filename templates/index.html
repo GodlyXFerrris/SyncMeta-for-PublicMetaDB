@@ -258,8 +258,9 @@
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Sync your Trakt watchlist, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
-                <input type="checkbox" id="trakt-watchlist-toggle" checked class="hidden">
+                <p class="desc">Sync your Trakt watchlist, personal created lists, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
+                <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
+                <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
                 <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses device auth here, so the redirect is only a dashboard requirement.</div></div>
                 <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
                 <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
@@ -367,7 +368,7 @@
           </div>
           <div class="form-section full">
             <h3>Trakt Catalogs</h3>
-            <p class="desc">Choose what should sync from Trakt. Default covers your personal watchlist and recommendations, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
+            <p class="desc">Choose what should sync from Trakt. Default covers split movie/show watchlists plus recommendations, My Lists loads your created and liked lists, and Discover lets you search public Trakt lists.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
               <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
@@ -375,7 +376,7 @@
               <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
             </div>
             <div class="catalog-toolbar">
-              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load liked lists and search public lists.</span>
+              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load your personal and liked lists, or search public lists.</span>
               <div class="actions-bar" style="margin-top:0">
                 <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
                 <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
@@ -495,6 +496,7 @@
     let simklWasLinked = false;
     let anilistWasLinked = false;
     let traktCatalogTab = 'default';
+    let traktPersonalLists = [];
     let traktLikedLists = [];
     let traktDiscoverLists = [];
     let traktSelectedLists = [];
@@ -652,7 +654,11 @@
         const key = `${user.toLowerCase()}/${slug.toLowerCase()}`;
         if (seen.has(key)) return;
         seen.add(key);
-        const source = item.source === 'discover' ? 'discover' : (item.source === 'default' ? 'default' : 'liked');
+        const source = item.source === 'discover'
+          ? 'discover'
+          : (item.source === 'default'
+            ? 'default'
+            : (item.source === 'personal' ? 'personal' : 'liked'));
         normalized.push({
           name: name,
           description: String(item.description || '').trim(),
@@ -710,7 +716,15 @@
       return !!(el('trakt-client-id').value.trim() && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved'));
     }
 
+    function isTraktWatchlistEnabled(mediaType) {
+      return mediaType === 'movies'
+        ? el('trakt-watchlist-movies-toggle').checked
+        : el('trakt-watchlist-shows-toggle').checked;
+    }
+
     function gatherCreds() {
+      const syncWatchlistMovies = el('trakt-watchlist-movies-toggle').checked;
+      const syncWatchlistShows = el('trakt-watchlist-shows-toggle').checked;
       return {
         simkl: {
           client_id: el('simkl-client-id').value.trim(),
@@ -729,7 +743,9 @@
           access_token: el('trakt-access-token').value.trim(),
           refresh_token: el('trakt-refresh-token').value.trim(),
           username: '',
-          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_watchlist: syncWatchlistMovies || syncWatchlistShows,
+          sync_watchlist_movies: syncWatchlistMovies,
+          sync_watchlist_shows: syncWatchlistShows,
           sync_liked_lists: traktSyncAllLikedLists,
           default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
@@ -763,6 +779,8 @@
     }
 
     function gatherDraftCreds() {
+      const syncWatchlistMovies = el('trakt-watchlist-movies-toggle').checked;
+      const syncWatchlistShows = el('trakt-watchlist-shows-toggle').checked;
       return {
         simkl: {
           client_id: el('simkl-client-id').value.trim(),
@@ -775,7 +793,9 @@
         trakt: {
           client_id: el('trakt-client-id').value.trim(),
           username: '',
-          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_watchlist: syncWatchlistMovies || syncWatchlistShows,
+          sync_watchlist_movies: syncWatchlistMovies,
+          sync_watchlist_shows: syncWatchlistShows,
           sync_liked_lists: traktSyncAllLikedLists,
           default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
@@ -832,13 +852,16 @@
       setSecretInputState('trakt-client-secret', 'trakt', 'client_secret_saved', 'Required for device auth');
       setSecretInputState('trakt-access-token', 'trakt', 'access_token_saved', 'Filled after Trakt auth');
       setSecretInputState('trakt-refresh-token', 'trakt', 'refresh_token_saved', 'Saved for future refresh support');
-      el('trakt-watchlist-toggle').checked = trakt.sync_watchlist !== false;
+      const traktWatchlistLegacy = trakt.sync_watchlist !== false;
+      el('trakt-watchlist-movies-toggle').checked = trakt.sync_watchlist_movies !== undefined ? !!trakt.sync_watchlist_movies : traktWatchlistLegacy;
+      el('trakt-watchlist-shows-toggle').checked = trakt.sync_watchlist_shows !== undefined ? !!trakt.sync_watchlist_shows : traktWatchlistLegacy;
       traktSelectedLists = normalizeTraktSelectedLists(trakt.selected_lists || []);
       traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
       traktDefaultCatalogsInitialized = !!trakt.default_catalogs_initialized;
       if (!traktDefaultCatalogsInitialized) {
         traktSelectedLists = traktSelectedLists.filter(item => item.source !== 'default');
       }
+      traktPersonalLists = [];
       traktLikedLists = [];
       traktDiscoverLists = [];
       setSecretInputState('mdblist-api-key', 'mdblist', 'api_key_saved', 'From mdblist.com settings');
@@ -1099,21 +1122,26 @@
     function switchTraktTab(tab) {
       traktCatalogTab = tab;
       renderTraktCatalogs();
-      if (tab === 'my-lists' && !traktLikedLists.length && isTraktConnected()) {
+      if (tab === 'my-lists' && !traktPersonalLists.length && !traktLikedLists.length && isTraktConnected()) {
         refreshTraktLists(true);
       }
     }
 
-    function toggleTraktWatchlist() {
+    function toggleTraktWatchlist(mediaType) {
       traktDefaultCatalogsInitialized = true;
-      el('trakt-watchlist-toggle').checked = !el('trakt-watchlist-toggle').checked;
+      const targetId = mediaType === 'movies' ? 'trakt-watchlist-movies-toggle' : 'trakt-watchlist-shows-toggle';
+      el(targetId).checked = !el(targetId).checked;
       renderTraktCatalogs();
       updateDots();
       saveDraft();
     }
 
     function findTraktListByKey(key) {
-      const items = TRAKT_DEFAULT_CATALOGS.concat(traktLikedLists).concat(traktDiscoverLists).concat(traktSelectedLists);
+      const items = TRAKT_DEFAULT_CATALOGS
+        .concat(traktPersonalLists)
+        .concat(traktLikedLists)
+        .concat(traktDiscoverLists)
+        .concat(traktSelectedLists);
       for (const item of items) {
         if (traktListKey(item) === key) return item;
       }
@@ -1145,11 +1173,11 @@
     function enableAllLikedTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (!isTraktConnected()) {
-        showToast('Connect Trakt first so SyncMeta can read your liked lists.', true, false);
+        showToast('Connect Trakt first so SyncMeta can read your liked and personal lists.', true, false);
         return;
       }
       traktSyncAllLikedLists = true;
-      traktSelectedLists = traktSelectedLists.filter(item => item.source === 'discover');
+      traktSelectedLists = traktSelectedLists.filter(item => item.source !== 'liked');
       renderTraktCatalogs();
       updateDots();
       saveDraft();
@@ -1159,12 +1187,13 @@
     function selectAllVisibleTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
-        el('trakt-watchlist-toggle').checked = true;
+        el('trakt-watchlist-movies-toggle').checked = true;
+        el('trakt-watchlist-shows-toggle').checked = true;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(TRAKT_DEFAULT_CATALOGS));
       } else if (traktCatalogTab === 'enabled') {
         return;
       } else {
-        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const visible = traktCatalogTab === 'my-lists' ? traktPersonalLists.concat(traktLikedLists) : traktDiscoverLists;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(visible));
         if (traktCatalogTab === 'my-lists') {
           traktSyncAllLikedLists = false;
@@ -1178,17 +1207,19 @@
     function deselectAllVisibleTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
-        el('trakt-watchlist-toggle').checked = false;
+        el('trakt-watchlist-movies-toggle').checked = false;
+        el('trakt-watchlist-shows-toggle').checked = false;
         const defaultKeys = new Set(TRAKT_DEFAULT_CATALOGS.map(item => traktListKey(item)));
         traktSelectedLists = normalizeTraktSelectedLists(
           traktSelectedLists.filter(item => !defaultKeys.has(traktListKey(item)))
         );
       } else if (traktCatalogTab === 'enabled') {
-        el('trakt-watchlist-toggle').checked = false;
+        el('trakt-watchlist-movies-toggle').checked = false;
+        el('trakt-watchlist-shows-toggle').checked = false;
         traktSyncAllLikedLists = false;
         traktSelectedLists = [];
       } else {
-        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const visible = traktCatalogTab === 'my-lists' ? traktPersonalLists.concat(traktLikedLists) : traktDiscoverLists;
         const visibleKeys = new Set(visible.map(item => traktListKey(item)));
         traktSelectedLists = normalizeTraktSelectedLists(
           traktSelectedLists.filter(item => !visibleKeys.has(traktListKey(item)))
@@ -1204,6 +1235,11 @@
 
     function traktCatalogMeta(item) {
       if (item.source === 'default') return 'Trakt';
+      if (item.source === 'personal') {
+        const parts = ['Your Trakt list'];
+        if (item.item_count) parts.push(`${item.item_count} items`);
+        return parts.join(' · ');
+      }
       const parts = [`Trakt by ${item.user}`];
       if (item.item_count) parts.push(`${item.item_count} items`);
       if (item.likes) parts.push(`${item.likes} likes`);
@@ -1223,11 +1259,13 @@
       el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable All' : 'Select All';
       el('btn-trakt-deselect-all').textContent = traktCatalogTab === 'default' ? 'Disable All' : 'Deselect All';
 
-      const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0) + (traktSyncAllLikedLists ? 1 : 0);
+      const watchlistCount = (isTraktWatchlistEnabled('movies') ? 1 : 0) + (isTraktWatchlistEnabled('shows') ? 1 : 0);
+      const selectedCount = traktSelectedLists.length + watchlistCount + (traktSyncAllLikedLists ? 1 : 0);
       if (!isTraktConnected()) {
-        setTraktCatalogStatus('Connect Trakt to load liked lists and search public lists.', false);
+        setTraktCatalogStatus('Connect Trakt to load your personal and liked lists, or search public lists.', false);
       } else if (traktSyncAllLikedLists) {
-        setTraktCatalogStatus(`Watchlist${el('trakt-watchlist-toggle').checked ? ' + ' : ' '}all liked Trakt lists will sync.`, false);
+        const watchlistLabel = watchlistCount ? `${watchlistCount} watchlist source${watchlistCount === 1 ? '' : 's'} + ` : '';
+        setTraktCatalogStatus(`${watchlistLabel}all liked Trakt lists will sync.`, false);
       } else if (selectedCount) {
         setTraktCatalogStatus(`${selectedCount} Trakt source${selectedCount === 1 ? '' : 's'} selected.`, false);
       } else {
@@ -1237,14 +1275,20 @@
       let rows = '';
       if (traktCatalogTab === 'default') {
         const defaultItems = [{
-          name: 'My Watchlist',
+          name: 'My Watchlist Movies',
           source: 'watchlist',
-          description: 'Imports your Trakt movie and show watchlist into PublicMetaDB.',
+          watchlistMediaType: 'movies',
+          description: 'Imports your Trakt movie watchlist into PublicMetaDB.',
+        }, {
+          name: 'My Watchlist Series',
+          source: 'watchlist',
+          watchlistMediaType: 'shows',
+          description: 'Imports your Trakt show watchlist into PublicMetaDB.',
         }].concat(TRAKT_DEFAULT_CATALOGS);
         rows = defaultItems.map(item => {
           const isWatchlist = item.source === 'watchlist';
-          const selected = isWatchlist ? el('trakt-watchlist-toggle').checked : isTraktListSelected(traktListKey(item));
-          const attrs = isWatchlist ? 'data-trakt-watchlist="1"' : `data-trakt-key="${esc(traktListKey(item))}"`;
+          const selected = isWatchlist ? isTraktWatchlistEnabled(item.watchlistMediaType) : isTraktListSelected(traktListKey(item));
+          const attrs = isWatchlist ? `data-trakt-watchlist="${esc(item.watchlistMediaType)}"` : `data-trakt-key="${esc(traktListKey(item))}"`;
           const meta = isWatchlist ? 'Trakt' : traktCatalogMeta(item);
           return `
             <div class="catalog-row ${selected ? 'selected' : ''}" ${attrs}>
@@ -1259,8 +1303,11 @@
         }).join('');
       } else if (traktCatalogTab === 'enabled') {
         const enabledItems = [];
-        if (el('trakt-watchlist-toggle').checked) {
-          enabledItems.push({ name: 'My Watchlist', meta: 'Trakt', key: null, removable: 'watchlist' });
+        if (isTraktWatchlistEnabled('movies')) {
+          enabledItems.push({ name: 'My Watchlist Movies', meta: 'Trakt', key: null, removable: 'watchlist', watchlistMediaType: 'movies' });
+        }
+        if (isTraktWatchlistEnabled('shows')) {
+          enabledItems.push({ name: 'My Watchlist Series', meta: 'Trakt', key: null, removable: 'watchlist', watchlistMediaType: 'shows' });
         }
         normalizeTraktSelectedLists(traktSelectedLists).forEach(item => {
           enabledItems.push({
@@ -1275,7 +1322,7 @@
         }
         rows = enabledItems.length
           ? enabledItems.map(item => `
-            <div class="catalog-row selected" ${item.key ? `data-trakt-key="${esc(item.key)}"` : ''} ${item.removable === 'watchlist' ? 'data-trakt-watchlist="1"' : ''} ${item.removable === 'liked-all' ? 'data-trakt-liked-all="1"' : ''}>
+            <div class="catalog-row selected" ${item.key ? `data-trakt-key="${esc(item.key)}"` : ''} ${item.removable === 'watchlist' ? `data-trakt-watchlist="${esc(item.watchlistMediaType)}"` : ''} ${item.removable === 'liked-all' ? 'data-trakt-liked-all="1"' : ''}>
               <div class="catalog-check">&#10003;</div>
               <div class="catalog-body">
                 <div class="catalog-title">${esc(item.name)}</div>
@@ -1286,11 +1333,11 @@
           : '<div class="empty">No Trakt sources enabled yet.</div>';
       } else {
         const items = traktCatalogTab === 'my-lists'
-          ? normalizeTraktSelectedLists(traktLikedLists.concat(traktSelectedLists.filter(item => item.source === 'liked')))
+          ? normalizeTraktSelectedLists(traktPersonalLists.concat(traktLikedLists).concat(traktSelectedLists.filter(item => item.source === 'personal' || item.source === 'liked')))
           : traktDiscoverLists;
         if (!items.length) {
           const emptyMessage = traktCatalogTab === 'my-lists'
-            ? 'No liked Trakt lists loaded yet. Connect Trakt and press Refresh My Lists.'
+            ? 'No Trakt personal or liked lists loaded yet. Connect Trakt and press Refresh My Lists.'
             : 'Search for a public Trakt list to add it here.';
           rows = `<div class="empty">${emptyMessage}</div>`;
         } else {
@@ -1312,8 +1359,8 @@
       }
 
       el('trakt-catalog-list').innerHTML = rows;
-      document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist="1"]').forEach(node => {
-        node.addEventListener('click', toggleTraktWatchlist);
+      document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist]').forEach(node => {
+        node.addEventListener('click', () => toggleTraktWatchlist(node.dataset.traktWatchlist));
       });
       document.querySelectorAll('#trakt-catalog-list [data-trakt-liked-all="1"]').forEach(node => {
         node.addEventListener('click', () => {
@@ -1330,26 +1377,29 @@
 
     async function refreshTraktLists(silent) {
       if (!isTraktConnected()) {
-        if (!silent) showToast('Connect Trakt first to load your liked lists.', true, false);
+        if (!silent) showToast('Connect Trakt first to load your Trakt lists.', true, false);
         return;
       }
-      setTraktCatalogStatus('Loading your liked Trakt lists...', false);
+      setTraktCatalogStatus('Loading your Trakt lists...', false);
       try {
         const payload = { client_id: el('trakt-client-id').value.trim() };
         const token = el('trakt-access-token').value.trim();
         if (token) payload.access_token = token;
         const result = await apiPost('/api/trakt/catalogs', payload);
         if (!result.ok) {
-          setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt liked lists.'), true);
+          setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt lists.'), true);
           return;
         }
-        traktLikedLists = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
+        const items = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
+        traktPersonalLists = items.filter(item => item.source === 'personal');
+        traktLikedLists = items.filter(item => item.source === 'liked');
         renderTraktCatalogs();
         if (!silent) {
-          showToast(traktLikedLists.length ? 'Trakt liked lists loaded.' : 'No liked Trakt lists found.', false, true);
+          const total = traktPersonalLists.length + traktLikedLists.length;
+          showToast(total ? `Loaded ${total} Trakt list${total === 1 ? '' : 's'}.` : 'No Trakt personal or liked lists found.', false, true);
         }
       } catch {
-        setTraktCatalogStatus('Network error while loading Trakt liked lists.', true);
+        setTraktCatalogStatus('Network error while loading Trakt lists.', true);
       }
     }
 
@@ -2318,7 +2368,7 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
@@ -2355,7 +2405,7 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
@@ -2407,7 +2457,7 @@
     const draftCreds = loadJson(CREDS_KEY, {
       simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
       anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-      trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+      trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });

@@ -129,11 +129,27 @@ class TraktClient:
             liked_lists.append({**meta, "items": items})
         return liked_lists
 
+    def get_personal_lists(self) -> list[dict]:
+        personal_lists = []
+        for meta in self.get_personal_lists_metadata():
+            items = self.get_list_items(meta["user"], meta["slug"])
+            personal_lists.append({**meta, "items": items})
+        return personal_lists
+
     def get_liked_lists_metadata(self) -> list[dict]:
         raw = self._get("/users/likes/lists", params={"extended": "full", "limit": 100}) or []
         metadata = []
         for entry in raw:
             normalized = self._normalize_list_metadata(entry, source="liked")
+            if normalized:
+                metadata.append(normalized)
+        return metadata
+
+    def get_personal_lists_metadata(self) -> list[dict]:
+        raw = self._get("/users/me/lists", params={"extended": "full", "limit": 100}) or []
+        metadata = []
+        for entry in raw:
+            normalized = self._normalize_list_metadata(entry, source="personal")
             if normalized:
                 metadata.append(normalized)
         return metadata

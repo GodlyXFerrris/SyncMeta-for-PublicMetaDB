@@ -61,6 +61,23 @@ class TraktClientTests(unittest.TestCase):
         self.assertEqual(item["source"], "liked")
         self.assertEqual(item["catalog_key"], "")
 
+    def test_normalize_personal_list_metadata(self) -> None:
+        client = TraktClient(TraktConfig())
+
+        item = client._normalize_list_metadata({
+            "name": "My Custom List",
+            "description": "Mine",
+            "item_count": 12,
+            "likes": 0,
+            "ids": {"trakt": 99, "slug": "my-custom-list"},
+            "user": {"username": "demo", "ids": {"slug": "demo"}},
+        }, source="personal")
+
+        self.assertEqual(item["name"], "My Custom List")
+        self.assertEqual(item["user"], "demo")
+        self.assertEqual(item["slug"], "my-custom-list")
+        self.assertEqual(item["source"], "personal")
+
     def test_normalize_default_catalog_movie_entry(self) -> None:
         client = TraktClient(TraktConfig())
 

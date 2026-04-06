@@ -120,6 +120,7 @@ def normalize_credentials(credentials: dict | None) -> dict:
     pmdb = raw.get("pmdb", {})
     trakt_default_catalogs_initialized = bool(trakt.get("default_catalogs_initialized", False))
     trakt_selected_lists = _normalize_trakt_selected_lists(trakt.get("selected_lists", []))
+    legacy_sync_watchlist = bool(trakt.get("sync_watchlist", True))
     if not trakt_default_catalogs_initialized:
         trakt_selected_lists = [item for item in trakt_selected_lists if item.get("source") != "default"]
     return {
@@ -140,7 +141,9 @@ def normalize_credentials(credentials: dict | None) -> dict:
             "access_token": str(trakt.get("access_token", "")).strip(),
             "refresh_token": str(trakt.get("refresh_token", "")).strip(),
             "username": str(trakt.get("username", "")).strip(),
-            "sync_watchlist": bool(trakt.get("sync_watchlist", True)),
+            "sync_watchlist": legacy_sync_watchlist,
+            "sync_watchlist_movies": bool(trakt.get("sync_watchlist_movies", legacy_sync_watchlist)),
+            "sync_watchlist_shows": bool(trakt.get("sync_watchlist_shows", legacy_sync_watchlist)),
             "sync_liked_lists": bool(trakt.get("sync_liked_lists", True)),
             "default_catalogs_initialized": trakt_default_catalogs_initialized,
             "selected_lists": trakt_selected_lists,
@@ -176,6 +179,8 @@ def public_credentials(credentials: dict | None) -> dict:
             "refresh_token_saved": bool(raw["trakt"]["refresh_token"]),
             "username": raw["trakt"]["username"],
             "sync_watchlist": raw["trakt"]["sync_watchlist"],
+            "sync_watchlist_movies": raw["trakt"]["sync_watchlist_movies"],
+            "sync_watchlist_shows": raw["trakt"]["sync_watchlist_shows"],
             "sync_liked_lists": raw["trakt"]["sync_liked_lists"],
             "default_catalogs_initialized": raw["trakt"]["default_catalogs_initialized"],
             "selected_lists": copy.deepcopy(raw["trakt"]["selected_lists"]),
@@ -243,7 +248,7 @@ def _normalize_trakt_selected_lists(raw_lists: list | None) -> list[dict]:
         except (TypeError, ValueError):
             item_count = 0
         source = str(item.get("source", "liked")).strip().lower()
-        if source not in {"liked", "discover", "default"}:
+        if source not in {"liked", "discover", "default", "personal"}:
             source = "liked"
         selected.append({
             "name": name,
@@ -354,6 +359,8 @@ def merge_credentials(existing: dict | None, updates: dict | None) -> dict:
             "refresh_token": keep_secret("trakt", "refresh_token"),
             "username": incoming["trakt"]["username"],
             "sync_watchlist": incoming["trakt"]["sync_watchlist"],
+            "sync_watchlist_movies": incoming["trakt"]["sync_watchlist_movies"],
+            "sync_watchlist_shows": incoming["trakt"]["sync_watchlist_shows"],
             "sync_liked_lists": incoming["trakt"]["sync_liked_lists"],
             "default_catalogs_initialized": incoming["trakt"]["default_catalogs_initialized"],
             "selected_lists": incoming["trakt"]["selected_lists"],
