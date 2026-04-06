@@ -52,6 +52,39 @@ It is built around the web UI, persistent profiles, and Docker-first deployment.
 - Account lists
 - Per-list selection in the web UI
 
+## Docker Setup
+
+The included `docker-compose.yml` is the main supported deployment path.
+
+Example shape:
+
+```yaml
+services:
+  web:
+    build: .
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    environment:
+      PROFILE_STORE_FILE: /app/data/profiles.json
+      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+    volumes:
+      - ./data:/app/data
+```
+
+What this does:
+
+- runs the web app
+- exposes port `8080`
+- stores profile data in `./data`
+- keeps the scheduler inside the web process
+
+Stop it with:
+
+```bash
+docker compose down
+```
+
 ## Quick Start
 
 ### 1. Start SyncMeta
@@ -107,39 +140,6 @@ The dashboard has separate actions for:
 - `Dry Run Lists`
 - `Sync Watch History`
 - `Sync Resume Progress`
-
-## Docker Setup
-
-The included `docker-compose.yml` is the main supported deployment path.
-
-Example shape:
-
-```yaml
-services:
-  web:
-    build: .
-    ports:
-      - "8080:8080"
-    restart: unless-stopped
-    environment:
-      PROFILE_STORE_FILE: /app/data/profiles.json
-      SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
-    volumes:
-      - ./data:/app/data
-```
-
-What this does:
-
-- runs the web app
-- exposes port `8080`
-- stores profile data in `./data`
-- keeps the scheduler inside the web process
-
-Stop it with:
-
-```bash
-docker compose down
-```
 
 ## Persistent Data
 
