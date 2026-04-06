@@ -1,6 +1,7 @@
 """Matching logic to resolve SIMKL items to PublicMetaDB TMDB IDs."""
 
 import logging
+import time
 
 from .publicmetadb_client import PublicMetaDBClient
 
@@ -20,27 +21,106 @@ _ROOT_LOOKUP_CHAIN = [
     ("anilist", "root_anilist_id"),
 ]
 
+# Failed resolutions are remembered for this long before being retried.
+_FAILED_CACHE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
 
 class ItemMatcher:
     """Resolve normalized items to TMDB IDs usable by PublicMetaDB."""
 
-    def __init__(self, pmdb: PublicMetaDBClient):
+    def __init__(
+        self,
+        pmdb: PublicMetaDBClient,
+        anime_root_resolver=None,
+        initial_cache: dict | None = None,
+        initial_failed_cache: dict[str, str] | None = None,
+    ):
         self._pmdb = pmdb
-        self._cache: dict[str, int | None] = {}
+        # Pre-populate with persisted resolutions from a previous sync run so
+        # unchanged items resolve instantly without any external API calls.
+        self._cache: dict[str, int | None] = dict(initial_cache) if initial_cache else {}
+        # Optional callable(anilist_id: int | None, mal_id: int | None) -> dict | None
+        # Returns {"root": media_dict, ...} from the AniList prequel chain.
+        # Used as a last resort for anime sequels that fail all direct lookups.
+        self._anime_root_resolver = anime_root_resolver
+        # Failed resolutions keyed by cache_key → unix timestamp of failure.
+        # Items in here are skipped until the TTL expires, avoiding redundant
+        # AniList chain-walks and PMDB lookups for permanently unresolvable entries.
+        self._failed_cache: dict[str, float] = self._load_failed_cache(initial_failed_cache)
+
+    @staticmethod
+    def _load_failed_cache(raw: dict[str, str] | None) -> dict[str, float]:
+        """Convert persisted ISO-timestamp failed cache to float unix timestamps."""
+        if not raw:
+            return {}
+        result: dict[str, float] = {}
+        now = time.time()
+        cutoff = now - _FAILED_CACHE_TTL_SECONDS
+        for key, iso in raw.items():
+            try:
+                import datetime
+                ts = datetime.datetime.fromisoformat(iso).timestamp()
+                if ts > cutoff:
+                    result[key] = ts
+            except Exception:
+                pass
+        return result
+
+    @property
+    def resolution_cache(self) -> dict[str, int]:
+        """Return only successful resolutions for persistence (excludes failures)."""
+        return {k: v for k, v in self._cache.items() if isinstance(v, int)}
+
+    @property
+    def failed_resolution_cache(self) -> dict[str, str]:
+        """Return recent failed resolutions as {cache_key: iso_timestamp} for persistence."""
+        import datetime
+        now = time.time()
+        cutoff = now - _FAILED_CACHE_TTL_SECONDS
+        return {
+            key: datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+            for key, ts in self._failed_cache.items()
+            if ts > cutoff
+        }
 
     def resolve_tmdb_id(self, item: dict) -> int | None:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""
         cache_key = self._cache_key(item)
+
+        # Return cached success immediately.
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        # Skip items that recently failed to resolve — no point retrying within TTL.
+        failed_at = self._failed_cache.get(cache_key)
+        if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
+            return None
+
         tmdb_id = self._try_resolve(item)
         self._cache[cache_key] = tmdb_id
+
+        if tmdb_id is None:
+            self._failed_cache[cache_key] = time.time()
+        else:
+            # Clear any stale failure record now that we have a result.
+            self._failed_cache.pop(cache_key, None)
+
         return tmdb_id
 
     def _try_resolve(self, item: dict) -> int | None:
         title = item.get("title", "Unknown")
         media_type = item["media_type"]
+        is_anime = item.get("simkl_type") == "anime"
+
+        # For anime with an AniList ID: walk the prequel chain BEFORE accepting
+        # the direct TMDB ID. SIMKL may supply a sequel-specific TMDB entry while
+        # PMDB indexes the whole franchise under the root series entry. Returning
+        # the root series TMDB ID avoids the mismatch. For root-series items,
+        # _try_anime_root_lookup returns None so we fall through to the TMDB ID.
+        if is_anime and self._anime_root_resolver and item.get("anilist_id"):
+            tmdb_id = self._try_anime_root_lookup(item, media_type)
+            if tmdb_id:
+                return tmdb_id
 
         tmdb_raw = item.get("tmdb_id")
         if tmdb_raw:
@@ -52,6 +132,7 @@ class ItemMatcher:
                 pass
 
         ids = item.get("ids", {})
+
         for id_type, item_key in _LOOKUP_CHAIN:
             ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
             if not ext_id:
@@ -71,12 +152,15 @@ class ItemMatcher:
             if tmdb_id:
                 logger.info(
                     "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
-                    title,
-                    id_type,
-                    ext_id,
-                    tmdb_id,
+                    title, id_type, ext_id, tmdb_id,
                     item.get("root_title") or "Unknown",
                 )
+                return tmdb_id
+
+        # Anime without an AniList ID: try root resolver as last resort using MAL fallback.
+        if is_anime and self._anime_root_resolver and not item.get("anilist_id"):
+            tmdb_id = self._try_anime_root_lookup(item, media_type)
+            if tmdb_id:
                 return tmdb_id
 
         logger.warning(
@@ -87,10 +171,56 @@ class ItemMatcher:
         )
         return None
 
+    def _try_anime_root_lookup(self, item: dict, media_type: str) -> int | None:
+        """Walk the AniList prequel chain and look up the root-series TMDB ID."""
+        title = item.get("title", "Unknown")
+        anilist_id: int | None = None
+        mal_id: int | None = None
+        try:
+            if item.get("anilist_id"):
+                anilist_id = int(item["anilist_id"])
+            if item.get("mal_id"):
+                mal_id = int(item["mal_id"])
+        except (ValueError, TypeError):
+            pass
+
+        if not anilist_id and not mal_id:
+            return None
+
+        root_context = self._anime_root_resolver(anilist_id, mal_id)
+        root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
+        if not isinstance(root, dict):
+            return None
+
+        # If root is the same item, it's already a root series — let direct lookup handle it.
+        if root.get("id") and root.get("id") == anilist_id:
+            return None
+
+        for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
+            root_ext_id = root.get(root_key)
+            if root_ext_id:
+                tmdb_id = self._pmdb.lookup_by_external_id(id_type, str(root_ext_id), media_type)
+                if tmdb_id:
+                    logger.info(
+                        "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
+                        title, id_type, root_ext_id, tmdb_id,
+                        self._media_title(root),
+                    )
+                    return tmdb_id
+        return None
+
+    @staticmethod
+    def _media_title(media: dict) -> str:
+        titles = media.get("title") or {}
+        if isinstance(titles, dict):
+            return titles.get("english") or titles.get("romaji") or str(media.get("id", "?"))
+        return str(titles) or str(media.get("id", "?"))
+
     @staticmethod
     def _cache_key(item: dict) -> str:
         ids = item.get("ids", {})
         return (
+            f"{item.get('media_type', '')}:"
             f"{ids.get('simkl', '')}:"
             f"{item.get('imdb_id', '')}:"
             f"{item.get('tmdb_id', '')}:"

@@ -50,9 +50,22 @@ DEFAULT_CATALOGS = {
 class TraktClient:
     """Client for the Trakt API."""
 
-    def __init__(self, config: TraktConfig):
+    def __init__(self, config: TraktConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
+        self._cancel_requested_callback = cancel_requested_callback
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            pass
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -129,11 +142,27 @@ class TraktClient:
             liked_lists.append({**meta, "items": items})
         return liked_lists
 
+    def get_personal_lists(self) -> list[dict]:
+        personal_lists = []
+        for meta in self.get_personal_lists_metadata():
+            items = self.get_list_items(meta["user"], meta["slug"])
+            personal_lists.append({**meta, "items": items})
+        return personal_lists
+
     def get_liked_lists_metadata(self) -> list[dict]:
         raw = self._get("/users/likes/lists", params={"extended": "full", "limit": 100}) or []
         metadata = []
         for entry in raw:
             normalized = self._normalize_list_metadata(entry, source="liked")
+            if normalized:
+                metadata.append(normalized)
+        return metadata
+
+    def get_personal_lists_metadata(self) -> list[dict]:
+        raw = self._get("/users/me/lists", params={"extended": "full", "limit": 100}) or []
+        metadata = []
+        for entry in raw:
+            normalized = self._normalize_list_metadata(entry, source="personal")
             if normalized:
                 metadata.append(normalized)
         return metadata
@@ -195,6 +224,7 @@ class TraktClient:
         items: list[dict] = []
         page = 1
         while True:
+            self._check_cancelled()
             raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
             if not raw:
                 break
@@ -211,6 +241,7 @@ class TraktClient:
         items: list[dict] = []
         page = 1
         while True:
+            self._check_cancelled()
             raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
             if not raw:
                 break

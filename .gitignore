@@ -8,6 +8,7 @@ venv/
 .pytest_cache/
 
 data/*.json
+data/*.key
 !data/.gitkeep
 
 tmp_script_check.js

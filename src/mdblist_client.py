@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import html
 import logging
+import re
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -15,6 +17,15 @@ logger = logging.getLogger(__name__)
 
 class MdbListClient:
     """Client for the MDBList REST API."""
+
+    _PUBLIC_LIST_CARD_RE = re.compile(r'<article class="related-list-card">(.*?)</article>', re.S)
+    _HREF_RE = re.compile(r'<a href="(?P<href>/lists/[^"]+)"')
+    _TITLE_RE = re.compile(r'<div class="related-list-meta__title">\s*<a [^>]+>(?P<title>.*?)</a>', re.S)
+    _USER_RE = re.compile(r'<a class="related-list-meta__user" [^>]*>(?P<user>.*?)</a>', re.S)
+    _TYPE_RE = re.compile(r'<span class="related-list-meta__type">(?P<type>.*?)</span>', re.S)
+    _ITEMS_RE = re.compile(r'<span class="related-list-meta__items">(?P<items>\d+)\s+items</span>', re.S)
+    _LIKES_RE = re.compile(r'<span class="related-list-meta__likes">\s*<span class="ui medium text">(?P<likes>\d+)</span>', re.S)
+    _LIST_ID_RE = re.compile(r'href="/(?:movies|shows)/\?list=(?P<id>\d+)"')
 
     def __init__(self, config: MdbListConfig):
         self._config = config
@@ -50,6 +61,96 @@ class MdbListClient:
         payload = response.json() or []
         items = [self._normalize_list_metadata(item) for item in payload]
         return [item for item in items if item]
+
+    def search_public_lists(self, query: str) -> list[dict]:
+        """Search public MDBList lists."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+
+        attempts = [
+            ("/search/lists", {"query": query}),
+            ("/lists/search", {"query": query}),
+        ]
+
+        last_error: Exception | None = None
+        for path, params in attempts:
+            try:
+                response = self._get(path, params)
+                payload = response.json() or []
+                batch = self._extract_list_results(payload)
+                items = [self._normalize_list_metadata(item) for item in batch]
+                normalized = [item for item in items if item and not item.get("private")]
+                if normalized:
+                    return normalized
+            except requests.HTTPError as exc:
+                last_error = exc
+                if exc.response is not None and exc.response.status_code == 404:
+                    continue
+                raise
+
+        fallback_items = self._search_public_lists_fallback(query)
+        if fallback_items:
+            return fallback_items
+        if last_error:
+            raise last_error
+        return []
+
+    def _search_public_lists_fallback(self, query: str) -> list[dict]:
+        url = "https://mdblist.com/toplists/"
+        response = self._session.get(url, params={"public_list_name": query}, timeout=30)
+        response.raise_for_status()
+        return self._parse_public_list_cards(response.text)
+
+    @classmethod
+    def _parse_public_list_cards(cls, page_html: str) -> list[dict]:
+        results: list[dict] = []
+        seen: set[tuple[int, str]] = set()
+
+        for card_html in cls._PUBLIC_LIST_CARD_RE.findall(page_html or ""):
+            href_match = cls._HREF_RE.search(card_html)
+            title_match = cls._TITLE_RE.search(card_html)
+            list_id_match = cls._LIST_ID_RE.search(card_html)
+            media_match = cls._TYPE_RE.search(card_html)
+            if not href_match or not title_match or not list_id_match or not media_match:
+                continue
+
+            mediatype_raw = html.unescape(media_match.group("type")).strip().lower()
+            if mediatype_raw.startswith("movie"):
+                mediatype = "movie"
+            elif mediatype_raw.startswith("show") or mediatype_raw.startswith("tv"):
+                mediatype = "show"
+            else:
+                continue
+
+            list_id = int(list_id_match.group("id"))
+            key = (list_id, mediatype)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            href = href_match.group("href").strip("/")
+            slug = href.split("/", 1)[1] if "/" in href else href.removeprefix("lists/")
+            user_match = cls._USER_RE.search(card_html)
+            items_match = cls._ITEMS_RE.search(card_html)
+            likes_match = cls._LIKES_RE.search(card_html)
+
+            results.append(
+                {
+                    "id": list_id,
+                    "name": html.unescape(title_match.group("title")).strip(),
+                    "slug": slug,
+                    "user_name": html.unescape(user_match.group("user")).strip() if user_match else "",
+                    "description": "",
+                    "mediatype": mediatype,
+                    "items": int(items_match.group("items")) if items_match else 0,
+                    "likes": int(likes_match.group("likes")) if likes_match else 0,
+                    "type": "public",
+                    "private": False,
+                }
+            )
+
+        return results
 
     def get_list_items(self, list_id: int) -> list[dict]:
         """Fetch all items for a list, following offset pagination."""
@@ -95,6 +196,19 @@ class MdbListClient:
             if isinstance(values, list):
                 combined.extend(values)
         return combined
+
+    @staticmethod
+    def _extract_list_results(payload: list | dict) -> list[dict]:
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+
+        for key in ["results", "lists", "items", "data"]:
+            values = payload.get(key)
+            if isinstance(values, list):
+                return values
+        return []
 
     @staticmethod
     def _has_more(response: requests.Response, payload: list | dict) -> bool:

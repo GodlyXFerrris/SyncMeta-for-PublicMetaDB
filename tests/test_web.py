@@ -37,6 +37,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("SIMKL Lists", html)
         self.assertIn("AniList Lists", html)
         self.assertIn("MDBList Lists", html)
+        self.assertIn("Search public MDBList lists", html)
         self.assertIn("dot-mdblist", html)
         self.assertIn("If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
         self.assertIn("If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
@@ -52,7 +53,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Delete User Records", html)
         self.assertIn("Danger Zone", html)
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
-        self.assertIn("selected public Trakt lists", html)
+        self.assertIn("personal created lists, liked lists, and selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Watch History Source", html)
         self.assertIn("Only import SIMKL anime watch history", html)
@@ -62,8 +63,11 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Watch History", html)
         self.assertIn("Clear PMDB History", html)
         self.assertIn("Sync Resume Progress", html)
-        self.assertIn("Activity sync only runs from the dashboard buttons", html)
+        self.assertIn("Watch history only runs from the dashboard button", html)
+        self.assertIn("Resume progress also refreshes automatically every 10 minutes while background sync is on", html)
         self.assertIn("Watched history imports only add items that are not already watched in PublicMetaDB", html)
+        self.assertIn("RESULTS_PAGE_SIZE = 25", html)
+        self.assertIn("results-prev-page", html)
         self.assertIn('id="btn-stop"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
@@ -198,8 +202,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["status"], "pending")
         self.assertTrue(data["message"])
 
+    @patch("web.TraktClient.get_personal_lists_metadata")
     @patch("web.TraktClient.get_liked_lists_metadata")
-    def test_trakt_catalogs_liked_lists(self, mock_get_liked_lists_metadata) -> None:
+    def test_trakt_catalogs_personal_and_liked_lists(self, mock_get_liked_lists_metadata, mock_get_personal_lists_metadata) -> None:
+        mock_get_personal_lists_metadata.return_value = [{
+            "name": "My Anime Picks",
+            "user": "demo",
+            "slug": "my-anime-picks",
+            "source": "personal",
+            "item_count": 5,
+        }]
         mock_get_liked_lists_metadata.return_value = [{
             "name": "Anime",
             "user": "demo",
@@ -216,8 +228,9 @@ class WebTests(unittest.TestCase):
         data = response.get_json()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(data["items"]), 1)
-        self.assertEqual(data["items"][0]["slug"], "anime")
+        self.assertEqual(len(data["items"]), 2)
+        self.assertEqual(data["items"][0]["source"], "personal")
+        self.assertEqual(data["items"][1]["slug"], "anime")
 
     @patch("web.TraktClient.search_lists")
     def test_trakt_catalogs_search(self, mock_search_lists) -> None:
@@ -255,6 +268,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(data["items"][0]["id"], 7)
+
+    @patch("web.MdbListClient.search_public_lists")
+    def test_mdblist_lists_search(self, mock_search_public_lists) -> None:
+        mock_search_public_lists.return_value = [{
+            "id": 11,
+            "name": "Popular Movies",
+            "mediatype": "movie",
+            "user_name": "demo",
+        }]
+
+        response = self.client.post("/api/mdblist/lists", json={
+            "api_key": "mdb-key",
+            "query": "popular",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["query"], "popular")
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["id"], 11)
 
     def test_login_uses_session_and_masks_saved_secrets(self) -> None:
         profile = web._profile_store.create_profile("secret", {

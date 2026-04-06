@@ -59,12 +59,25 @@ SIMKL_HISTORY_STATUS_SCAN_ORDER = [
 class SimklClient:
     """Client for the SIMKL API v2."""
 
-    def __init__(self, config: SimklConfig):
+    def __init__(self, config: SimklConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
         self._tmdb_season_plan_cache: dict[int, list[tuple[int, int]]] = {}
         self._anime_root_cache: dict[int, dict] = {}
         self._anime_root_client = None
+        self._cancel_requested_callback = cancel_requested_callback
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            pass
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -222,16 +235,28 @@ class SimklClient:
         # Determine the PublicMetaDB-compatible media type
         if media_type == "movies":
             pmdb_type = "movie"
+        elif media_type == "anime":
+            anime_type = media.get("anime_type", "")
+            if not anime_type:
+                # anime_type is only present when SIMKL returns extended data.
+                # Fall back to checking IDs: real anime entries have a MAL or AniList ID;
+                # non-anime items accidentally added to the anime list typically don't.
+                ids_preview = media.get("ids", {})
+                if not ids_preview.get("mal") and not ids_preview.get("anilist"):
+                    logger.warning(
+                        "Skipping SIMKL anime entry '%s' (%s) — no anime_type, no MAL/AniList ID",
+                        media.get("title", "Unknown"),
+                        media.get("year", ""),
+                    )
+                    return None
+            # Anime movies must be looked up as "movie" in PMDB; everything else is "tv"
+            pmdb_type = "movie" if anime_type == "movie" else "tv"
         else:
-            pmdb_type = "tv"  # Both shows and anime map to "tv"
+            pmdb_type = "tv"  # Shows map to "tv"
 
-        if media_type == "anime":
-            root_ids = self._resolve_anime_root_ids(ids)
-            root_title = root_ids.get("root_title")
-            if root_ids.get("root_anilist"):
-                ids["root_anilist"] = root_ids["root_anilist"]
-            if root_ids.get("root_mal"):
-                ids["root_mal"] = root_ids["root_mal"]
+        # Root IDs are resolved lazily by the matcher only when direct lookup
+        # fails, avoiding AniList API calls for every item up front.
+        root_ids: dict[str, str] = {}
 
         return {
             "title": media.get("title", "Unknown"),
@@ -255,6 +280,15 @@ class SimklClient:
 
     def _resolve_anime_root_ids(self, ids: dict) -> dict[str, str]:
         anilist_id = ids.get("anilist")
+        if not anilist_id:
+            # Fallback: resolve the AniList ID from the MAL ID so we can still
+            # walk the prequel chain for entries where SIMKL omits anilist.
+            mal_id = ids.get("mal")
+            if mal_id:
+                try:
+                    anilist_id = self._lookup_anilist_id_by_mal(int(mal_id))
+                except (TypeError, ValueError):
+                    pass
         if not anilist_id:
             return {}
         try:
@@ -288,6 +322,17 @@ class SimklClient:
         root = self._anime_root_client._get_root_media(anilist_id)
         return {"root": root, "episode_offset": 0}
 
+    def _lookup_anilist_id_by_mal(self, mal_id: int) -> int | None:
+        """Return the AniList ID for a given MAL ID, or None if not found."""
+        if self._anime_root_client is None:
+            from .anilist_client import AniListClient
+
+            self._anime_root_client = AniListClient(AniListConfig())
+        get_id = getattr(self._anime_root_client, "get_anilist_id_by_mal", None)
+        if callable(get_id):
+            return get_id(mal_id)
+        return None
+
     def _get_anime_root_media(self, anilist_id: int) -> dict | None:
         context = self._get_anime_root_context(anilist_id)
         return context.get("root") if isinstance(context, dict) else None
@@ -311,7 +356,9 @@ class SimklClient:
         """Fetch SIMKL completed history as watched-once records."""
         history: list[dict] = []
         movie_history = self._get_completed_movie_history(since=since)
+        self._check_cancelled()
         show_history = self._get_show_history("shows", since=since)
+        self._check_cancelled()
         anime_history = self._get_show_history("anime", since=since)
         history.extend(movie_history)
         history.extend(show_history)
@@ -517,6 +564,7 @@ class SimklClient:
     def _get_show_history(self, media_key: str, since: str | None = None) -> list[dict]:
         history: list[dict] = []
         for status in SIMKL_HISTORY_STATUS_SCAN_ORDER:
+            self._check_cancelled()
             history.extend(self._get_show_history_for_status(media_key, status, since=since))
         return history
 

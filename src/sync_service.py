@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
-from .config import AppConfig
+from .anilist_client import AniListClient
+from .config import AniListConfig, AppConfig
 from .matcher import ItemMatcher
 from .mdblist_client import MdbListClient
 from .publicmetadb_client import PublicMetaDBClient
@@ -76,20 +78,58 @@ class SyncService:
         self,
         config: AppConfig,
         status_callback=None,
+        progress_callback=None,
         managed_lists: list[dict] | None = None,
         cancel_requested_callback=None,
         sync_modes: dict | None = None,
+        resolution_cache: dict | None = None,
+        failed_resolution_cache: dict | None = None,
     ):
         self._config = config
-        self._simkl = SimklClient(config.simkl)
-        self._trakt = TraktClient(config.trakt)
+        self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
+        self._trakt = TraktClient(config.trakt, cancel_requested_callback=cancel_requested_callback)
         self._mdblist = MdbListClient(config.mdblist)
         self._pmdb = PublicMetaDBClient(config.pmdb)
-        self._matcher = ItemMatcher(self._pmdb)
+        self._anilist_root_client = AniListClient(
+            config.anilist if config.anilist.enabled else AniListConfig()
+        )
+        self._matcher = ItemMatcher(
+            self._pmdb,
+            anime_root_resolver=self._make_anime_root_resolver(),
+            initial_cache=resolution_cache,
+            initial_failed_cache=failed_resolution_cache,
+        )
         self._status_callback = status_callback
+        self._progress_callback = progress_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
         self._cancel_requested_callback = cancel_requested_callback
         self._sync_modes = self._normalize_sync_modes(sync_modes, config)
+        self._last_progress_publish = 0.0
+        self._live_progress_rows: dict[str, dict] = {}
+
+    def _make_anime_root_resolver(self):
+        """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
+        client = self._anilist_root_client
+
+        def resolver(anilist_id: int | None, mal_id: int | None) -> dict | None:
+            if not anilist_id and mal_id:
+                anilist_id = client.get_anilist_id_by_mal(mal_id)
+            if not anilist_id:
+                return None
+            get_ctx = getattr(client, "_get_root_context", None)
+            if callable(get_ctx):
+                return get_ctx(anilist_id)
+            return None
+
+        return resolver
+
+    @property
+    def resolution_cache(self) -> dict[str, int]:
+        return self._matcher.resolution_cache
+
+    @property
+    def failed_resolution_cache(self) -> dict[str, str]:
+        return self._matcher.failed_resolution_cache
 
     @property
     def simkl(self) -> SimklClient:
@@ -112,15 +152,19 @@ class SyncService:
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
             all_stats.extend(self._sync_simkl())
+            self._publish_progress(all_stats, force=True)
 
             if self._config.anilist.enabled and self._config.anilist.selected_statuses:
                 all_stats.extend(self._sync_anilist())
+                self._publish_progress(all_stats, force=True)
 
             if self._config.trakt.enabled:
                 all_stats.extend(self._sync_trakt())
+                self._publish_progress(all_stats, force=True)
 
             if self._config.mdblist.enabled:
                 all_stats.extend(self._sync_mdblist())
+                self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["history"] or self._sync_modes["resume"]:
             activity_rows: list[SyncStats] = []
@@ -129,6 +173,7 @@ class SyncService:
             if self._config.trakt.enabled:
                 activity_rows.extend(self._sync_trakt_activity())
             all_stats.extend(self._merge_activity_stats(activity_rows))
+            self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["lists"] and not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
             desired_names = {stats.list_name for stats in all_stats if stats.list_name}
@@ -153,11 +198,12 @@ class SyncService:
             self._check_cancelled()
             for status_key in self._config.simkl.selected_statuses.get(simkl_type, []):
                 self._check_cancelled()
+                name = _status_list_name(simkl_type, status_key)
+                display_name = _display_status_name(simkl_type, status_key)
+                self._publish_pending_list(name, display_name, "SIMKL")
                 self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
-                name = _status_list_name(simkl_type, status_key)
-                display_name = _display_status_name(simkl_type, status_key)
                 description = (
                     f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
                     f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
@@ -206,7 +252,8 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        items = self._simkl.get_watched_history()
+        cursor = self._config.sync.simkl_history_cursor or None
+        items = self._simkl.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -217,6 +264,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
+        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
         stats.items_fetched = len(items)
 
         existing_counts: dict[str, int] = {}
@@ -308,7 +356,8 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        items = self._trakt.get_watched_history()
+        cursor = self._config.sync.trakt_history_cursor or None
+        items = self._trakt.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -317,6 +366,7 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
+        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -450,10 +500,11 @@ class SyncService:
 
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
-            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
-            items = client.get_status(status_key)
             name = _status_list_name("anime", status_key)
             display_name = _display_status_name("anime", status_key)
+            self._publish_pending_list(name, display_name, "AniList")
+            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
+            items = client.get_status(status_key)
             description = f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' anime from AniList"
             stats.append(
                 self._sync_list(
@@ -476,34 +527,51 @@ class SyncService:
         """Sync configured Trakt watchlist and list sources."""
         stats: list[SyncStats] = []
 
-        if self._config.trakt.sync_watchlist:
+        should_sync_watchlist_movies = self._config.trakt.sync_watchlist_movies and "movies" in self._config.sync.media_types
+        should_sync_watchlist_shows = self._config.trakt.sync_watchlist_shows and "shows" in self._config.sync.media_types
+        if should_sync_watchlist_movies or should_sync_watchlist_shows:
             self._check_cancelled()
+            if should_sync_watchlist_movies:
+                self._publish_pending_list(_status_list_name("movies", "watchlist"), _display_status_name("movies", "watchlist"), "Trakt")
+            if should_sync_watchlist_shows:
+                self._publish_pending_list(_status_list_name("shows", "watchlist"), _display_status_name("shows", "watchlist"), "Trakt")
             self._set_status("Fetching Trakt watchlist")
             watchlist_items = self._trakt.get_watchlist()
             grouped = {
                 "shows": [item for item in watchlist_items if item["media_type"] == "tv"],
                 "movies": [item for item in watchlist_items if item["media_type"] == "movie"],
             }
-            for media_type in self._config.sync.media_types:
-                self._check_cancelled()
-                if media_type not in {"shows", "movies"}:
-                    continue
-                items = grouped.get(media_type, [])
-                name = _status_list_name(media_type, "watchlist")
-                display_name = _display_status_name(media_type, "watchlist")
-                description = f"Auto-synced Trakt watchlist {_TYPE_LABELS.get(media_type, media_type)}"
+            if should_sync_watchlist_movies:
+                items = grouped.get("movies", [])
                 stats.append(
                     self._sync_list(
                         items,
-                        name,
-                        description,
-                        display_name=display_name,
+                        _status_list_name("movies", "watchlist"),
+                        "Auto-synced Trakt movie watchlist",
+                        display_name=_display_status_name("movies", "watchlist"),
                         source_name="Trakt",
                         is_public=self._config.sync.trakt_personal_visibility == "public",
                         selection={
                             "source": "trakt",
                             "kind": "watchlist",
-                            "media_type": media_type,
+                            "media_type": "movies",
+                        },
+                    )
+                )
+            if should_sync_watchlist_shows:
+                items = grouped.get("shows", [])
+                stats.append(
+                    self._sync_list(
+                        items,
+                        _status_list_name("shows", "watchlist"),
+                        "Auto-synced Trakt show watchlist",
+                        display_name=_display_status_name("shows", "watchlist"),
+                        source_name="Trakt",
+                        is_public=self._config.sync.trakt_personal_visibility == "public",
+                        selection={
+                            "source": "trakt",
+                            "kind": "watchlist",
+                            "media_type": "shows",
                         },
                     )
                 )
@@ -511,11 +579,12 @@ class SyncService:
         selected_lists = self._dedupe_trakt_lists(self._config.trakt.selected_lists)
         selected_default_lists = [item for item in selected_lists if item.get("source") == "default"]
         selected_liked_lists = [item for item in selected_lists if item.get("source") == "liked"]
-        selected_public_lists = [item for item in selected_lists if item.get("source") != "liked"]
-        selected_public_lists = [item for item in selected_public_lists if item.get("source") != "default"]
+        selected_personal_lists = [item for item in selected_lists if item.get("source") == "personal"]
+        selected_public_lists = [item for item in selected_lists if item.get("source") == "discover"]
 
         for trakt_list in selected_default_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], "Trakt")
             self._set_status(f"Fetching Trakt catalog {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_default_catalog(trakt_list.get("catalog_key") or trakt_list.get("slug", ""))
@@ -544,6 +613,7 @@ class SyncService:
             self._set_status("Fetching Trakt liked lists")
             for liked_list in self._trakt.get_liked_lists():
                 self._check_cancelled()
+                self._publish_pending_list(liked_list["name"], liked_list["name"], f"Trakt by {liked_list['user']}")
                 items = self._filter_trakt_items(liked_list["items"])
                 name = liked_list["name"]
                 description = f"Auto-synced liked Trakt list '{liked_list['name']}'"
@@ -558,42 +628,73 @@ class SyncService:
                         selection={
                             "source": "trakt",
                             "kind": "liked-auto",
+                            "list_source": "liked",
                             "user": liked_list.get("user", ""),
                             "slug": liked_list.get("slug", ""),
                             "name": liked_list.get("name", ""),
                         },
                     )
                 )
-        else:
-            for trakt_list in selected_liked_lists:
-                self._check_cancelled()
-                self._set_status(f"Fetching Trakt list {trakt_list['name']}")
-                items = self._filter_trakt_items(
-                    self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+
+        for trakt_list in selected_liked_lists:
+            self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
+            self._set_status(f"Fetching Trakt list {trakt_list['name']}")
+            items = self._filter_trakt_items(
+                self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+            )
+            name = trakt_list["name"]
+            description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name=f"Trakt by {trakt_list['user']}",
+                    is_public=self._config.sync.trakt_public_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "selected-list",
+                        "list_source": trakt_list.get("source", ""),
+                        "user": trakt_list.get("user", ""),
+                        "slug": trakt_list.get("slug", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
-                name = trakt_list["name"]
-                description = f"Auto-synced Trakt list '{trakt_list['name']}' by {trakt_list['user']}"
-                stats.append(
-                    self._sync_list(
-                        items,
-                        name,
-                        description,
-                        display_name=trakt_list["name"],
-                        source_name=f"Trakt by {trakt_list['user']}",
-                        is_public=self._config.sync.trakt_public_visibility == "public",
-                        selection={
-                            "source": "trakt",
-                            "kind": "selected-list",
-                            "list_source": trakt_list.get("source", ""),
-                            "user": trakt_list.get("user", ""),
-                            "slug": trakt_list.get("slug", ""),
-                            "name": trakt_list.get("name", ""),
-                        },
-                    )
+            )
+
+        for trakt_list in selected_personal_lists:
+            self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
+            self._set_status(f"Fetching Trakt list {trakt_list['name']}")
+            items = self._filter_trakt_items(
+                self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
+            )
+            name = trakt_list["name"]
+            description = f"Auto-synced your Trakt list '{trakt_list['name']}'"
+            stats.append(
+                self._sync_list(
+                    items,
+                    name,
+                    description,
+                    display_name=trakt_list["name"],
+                    source_name=f"Trakt by {trakt_list['user']}",
+                    is_public=self._config.sync.trakt_personal_visibility == "public",
+                    selection={
+                        "source": "trakt",
+                        "kind": "selected-list",
+                        "list_source": trakt_list.get("source", ""),
+                        "user": trakt_list.get("user", ""),
+                        "slug": trakt_list.get("slug", ""),
+                        "name": trakt_list.get("name", ""),
+                    },
                 )
+            )
 
         for trakt_list in selected_public_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -627,6 +728,7 @@ class SyncService:
 
         for mdblist in self._dedupe_mdblist_lists(self._config.mdblist.selected_lists):
             self._check_cancelled()
+            self._publish_pending_list(mdblist["name"], mdblist["name"], "MDBList")
             self._set_status(f"Fetching MDBList {mdblist['name']}")
             items = self._filter_mdblist_items(self._mdblist.get_list_items(mdblist["id"]))
             media_type = "movies" if mdblist["mediatype"] == "movie" else "shows"
@@ -726,11 +828,13 @@ class SyncService:
             source_name=source_name or "",
             items_fetched=len(source_items),
         )
+        self._remember_progress_row(stats)
         self._set_status(f"Processing {actual_list_name}")
         logger.info("Syncing '%s': %d source items", actual_list_name, len(source_items))
 
         if not source_items:
             logger.info("  No items for '%s', skipping", actual_list_name)
+            self._publish_progress([stats], force=True)
             return stats
 
         self._set_status(f"Resolving IDs for {actual_list_name}")
@@ -743,6 +847,7 @@ class SyncService:
                 stats.items_resolved += 1
             else:
                 stats.items_skipped_unresolved += 1
+            self._publish_progress([stats])
 
         if self._config.sync.dry_run:
             return self._dry_run_report(resolved, actual_list_name, stats)
@@ -760,6 +865,7 @@ class SyncService:
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
             logger.error("Failed to get/create list '%s': %s", actual_list_name, exc)
+            self._publish_progress([stats], force=True)
             return stats
 
         list_id = pmdb_list["id"]
@@ -776,11 +882,13 @@ class SyncService:
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
                 stats.items_skipped_duplicate += 1
+                self._publish_progress([stats])
                 continue
             desired_keys.add(key)
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1
+                self._publish_progress([stats])
                 continue
 
             try:
@@ -791,14 +899,17 @@ class SyncService:
                     "media_type": media_type,
                 }
                 stats.items_added += 1
+                self._publish_progress([stats])
             except Exception as exc:
                 message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"
                 stats.errors.append(message)
                 logger.error(message)
+                self._publish_progress([stats], force=True)
 
         if self._config.sync.remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
+            self._publish_progress([stats], force=True)
 
         return stats
 
@@ -862,6 +973,46 @@ class SyncService:
                 self._status_callback(status)
             except Exception:
                 logger.debug("Status callback failed", exc_info=True)
+
+    def _publish_progress(self, rows: list[SyncStats], force: bool = False) -> None:
+        if not self._progress_callback:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_progress_publish < 5.0:
+            return
+        try:
+            for row in rows:
+                self._remember_progress_row(row)
+            payload = list(self._live_progress_rows.values())
+            self._progress_callback(payload)
+            self._last_progress_publish = now
+        except Exception:
+            logger.debug("Progress callback failed", exc_info=True)
+
+    def _remember_progress_row(self, row: SyncStats) -> None:
+        key = f"{row.display_name or row.list_name or ''}|{row.source_name or ''}"
+        self._live_progress_rows[key] = {
+            "list_name": row.list_name,
+            "display_name": row.display_name,
+            "source_name": row.source_name,
+            "items_fetched": row.items_fetched,
+            "items_resolved": row.items_resolved,
+            "items_added": row.items_added,
+            "items_removed": row.items_removed,
+            "items_skipped_duplicate": row.items_skipped_duplicate,
+            "items_skipped_unresolved": row.items_skipped_unresolved,
+            "error_count": len(row.errors),
+        }
+
+    def _publish_pending_list(self, list_name: str, display_name: str, source_name: str) -> None:
+        self._publish_progress([
+            SyncStats(
+                list_name=list_name,
+                display_name=display_name,
+                source_name=source_name,
+                items_fetched=0,
+            )
+        ], force=True)
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:

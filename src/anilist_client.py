@@ -1,6 +1,7 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
 import logging
+import time
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -83,6 +84,14 @@ query ($id: Int) {
 }
 """
 
+_MAL_TO_ANILIST_QUERY = """
+query ($idMal: Int) {
+  Media(idMal: $idMal, type: ANIME) {
+    id
+  }
+}
+"""
+
 _ROOT_FORMAT_PRIORITY = {
     "TV": 0,
     "TV_SHORT": 0,
@@ -114,6 +123,7 @@ class AniListClient:
         retry = Retry(
             total=3,
             backoff_factor=1.5,
+            # 429 is handled manually in _query to honour the Retry-After header.
             status_forcelist=[500, 502, 503],
             allowed_methods=["POST"],
         )
@@ -121,10 +131,21 @@ class AniListClient:
         session.mount("https://", adapter)
         return session
 
-    def _query(self, query: str, variables: dict) -> dict | None:
+    def _query(self, query: str, variables: dict, _retries: int = 3) -> dict | None:
         logger.debug("AniList query variables=%s", variables)
         try:
             resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
+            if resp.status_code == 429 and _retries > 0:
+                # Honour the server-supplied Retry-After (seconds) rather than
+                # using blind exponential backoff.
+                retry_after = resp.headers.get("Retry-After") or resp.headers.get("X-RateLimit-Reset-After")
+                try:
+                    wait = max(1.0, min(float(retry_after), 120.0))
+                except (TypeError, ValueError):
+                    wait = 60.0
+                logger.warning("AniList rate limited; retrying in %.1fs (variables=%s)", wait, variables)
+                time.sleep(wait)
+                return self._query(query, variables, _retries=_retries - 1)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as exc:
@@ -134,6 +155,14 @@ class AniListClient:
             logger.error("AniList GraphQL errors: %s", data["errors"])
             return None
         return data.get("data")
+
+    def get_anilist_id_by_mal(self, mal_id: int) -> int | None:
+        """Resolve a MAL ID to its AniList ID, or None if not found."""
+        data = self._query(_MAL_TO_ANILIST_QUERY, {"idMal": mal_id})
+        media = (data or {}).get("Media")
+        if isinstance(media, dict):
+            return media.get("id")
+        return None
 
     def get_watching(self) -> list[dict]:
         """Fetch anime with status CURRENT (watching)."""
@@ -178,16 +207,11 @@ class AniListClient:
             "mal": mal_id,
         }
 
-        root_media = self._get_root_media(anilist_id) if anilist_id else None
+        # Root IDs are resolved lazily by the matcher only when direct lookup
+        # fails, avoiding an AniList API call for every item up front.
         root_anilist_id = None
         root_mal_id = None
         root_title = None
-        if root_media and root_media.get("id") != anilist_id:
-            root_anilist_id = root_media.get("id")
-            root_mal_id = root_media.get("idMal")
-            root_title = self._media_title(root_media)
-            ids["root_anilist"] = root_anilist_id
-            ids["root_mal"] = root_mal_id
 
         return {
             "title": title,

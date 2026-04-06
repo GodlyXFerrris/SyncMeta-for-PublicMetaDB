@@ -197,6 +197,8 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             username=trakt_username,
             enabled=bool(credentials["trakt"]["client_id"] and credentials["trakt"]["access_token"]),
             sync_watchlist=credentials["trakt"]["sync_watchlist"],
+            sync_watchlist_movies=credentials["trakt"]["sync_watchlist_movies"],
+            sync_watchlist_shows=credentials["trakt"]["sync_watchlist_shows"],
             sync_liked_lists=credentials["trakt"]["sync_liked_lists"],
             selected_lists=credentials["trakt"]["selected_lists"],
         ),
@@ -245,7 +247,8 @@ def _configured_sources(config: AppConfig) -> list[str]:
     if (
         config.trakt.enabled
         and (
-            config.trakt.sync_watchlist
+            config.trakt.sync_watchlist_movies
+            or config.trakt.sync_watchlist_shows
             or config.trakt.sync_liked_lists
             or config.trakt.selected_lists
             or config.sync.trakt_sync_watched_history
@@ -382,9 +385,12 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
         service = SyncService(
             _config_from_profile(profile, dry_run=dry_run, sync_modes=modes),
             status_callback=lambda status: _profile_store.update_sync_status(profile_id, status),
+            progress_callback=lambda results: _profile_store.update_sync_progress(profile_id, results),
             managed_lists=profile.get("managed_lists", []),
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
             sync_modes=modes,
+            resolution_cache=profile.get("resolution_cache", {}),
+            failed_resolution_cache=profile.get("failed_resolution_cache", {}),
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]
@@ -394,6 +400,8 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             dry_run=dry_run,
             managed_lists=service.managed_lists,
             sync_modes=modes,
+            resolution_cache=service.resolution_cache,
+            failed_resolution_cache=service.failed_resolution_cache,
         )
     except SyncCancelled:
         logger.info("Sync stopped for profile %s", profile_id[:8])
@@ -459,7 +467,17 @@ def _remove_managed_selection(profile: dict, managed_entry: dict) -> dict:
     if source == "trakt":
         kind = str(selection.get("kind", "")).strip().lower()
         if kind == "watchlist":
-            credentials["trakt"]["sync_watchlist"] = False
+            media_type = str(selection.get("media_type", "")).strip().lower()
+            if media_type == "movies":
+                credentials["trakt"]["sync_watchlist_movies"] = False
+            elif media_type == "shows":
+                credentials["trakt"]["sync_watchlist_shows"] = False
+            else:
+                credentials["trakt"]["sync_watchlist_movies"] = False
+                credentials["trakt"]["sync_watchlist_shows"] = False
+            credentials["trakt"]["sync_watchlist"] = (
+                credentials["trakt"]["sync_watchlist_movies"] or credentials["trakt"]["sync_watchlist_shows"]
+            )
             return credentials
         if kind == "default":
             catalog_key = str(selection.get("catalog_key", "")).strip()
@@ -540,8 +558,12 @@ def _remove_managed_selection(profile: dict, managed_entry: dict) -> dict:
             if str(item.get("name", "")).strip() != display_name
         ]
     elif source_name.startswith("Trakt"):
-        if display_name.startswith("Watchlist - "):
-            credentials["trakt"]["sync_watchlist"] = False
+        if display_name == _status_list_name("movies", "watchlist"):
+            credentials["trakt"]["sync_watchlist_movies"] = False
+            credentials["trakt"]["sync_watchlist"] = credentials["trakt"]["sync_watchlist_shows"]
+        elif display_name == _status_list_name("shows", "watchlist"):
+            credentials["trakt"]["sync_watchlist_shows"] = False
+            credentials["trakt"]["sync_watchlist"] = credentials["trakt"]["sync_watchlist_movies"]
         else:
             credentials["trakt"]["selected_lists"] = [
                 item for item in credentials["trakt"]["selected_lists"]
@@ -570,7 +592,13 @@ def _remove_matching_list_name(credentials: dict, list_name: str) -> dict:
         _status_list_name("shows", "watchlist"),
         _status_list_name("movies", "watchlist"),
     }:
-        credentials["trakt"]["sync_watchlist"] = False
+        if target == _status_list_name("movies", "watchlist"):
+            credentials["trakt"]["sync_watchlist_movies"] = False
+        if target == _status_list_name("shows", "watchlist"):
+            credentials["trakt"]["sync_watchlist_shows"] = False
+        credentials["trakt"]["sync_watchlist"] = (
+            credentials["trakt"]["sync_watchlist_movies"] or credentials["trakt"]["sync_watchlist_shows"]
+        )
 
     credentials["trakt"]["selected_lists"] = [
         item for item in credentials["trakt"]["selected_lists"]
@@ -894,7 +922,10 @@ def api_trakt_catalogs():
 
     try:
         client = TraktClient(TraktConfig(client_id=client_id, access_token=access_token))
-        items = client.search_lists(query) if query else client.get_liked_lists_metadata()
+        if query:
+            items = client.search_lists(query)
+        else:
+            items = client.get_personal_lists_metadata() + client.get_liked_lists_metadata()
     except Exception as exc:
         logger.exception("Failed to load Trakt catalogs")
         return _json_error(f"Failed to load Trakt catalogs: {exc}", 400)
@@ -907,6 +938,7 @@ def api_mdblist_lists():
     body = request.get_json(silent=True) or {}
     private_profile = _current_private_profile()
     api_key = str(body.get("api_key", "")).strip()
+    query = str(body.get("query", "")).strip()
     if not api_key and private_profile:
         api_key = private_profile["credentials"]["mdblist"]["api_key"]
 
@@ -915,12 +947,12 @@ def api_mdblist_lists():
 
     try:
         client = MdbListClient(MdbListConfig(api_key=api_key))
-        items = client.get_user_lists()
+        items = client.search_public_lists(query) if query else client.get_user_lists()
     except Exception as exc:
         logger.exception("Failed to load MDBList lists")
         return _json_error(f"Failed to load MDBList lists: {exc}", 400)
 
-    return jsonify({"items": items})
+    return jsonify({"items": items, "query": query})
 
 
 @app.route("/api/profile/save", methods=["POST"])

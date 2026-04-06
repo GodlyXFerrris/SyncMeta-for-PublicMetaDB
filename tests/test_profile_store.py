@@ -122,6 +122,37 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertFalse(stopped["sync_running"])
         self.assertFalse(stopped["sync_cancel_requested"])
         self.assertEqual(stopped["sync_status"], "Stopped")
+        self.assertEqual(stopped["history"][0]["status"], "stopped")
+
+    def test_sync_error_is_added_to_history(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+
+        failed = self.store.record_sync_error(created["profile_id"], "Boom")
+
+        self.assertEqual(failed["sync_status"], "Failed: Boom")
+        self.assertEqual(failed["history"][0]["status"], "failed")
+        self.assertEqual(failed["history"][0]["error_message"], "Boom")
+
+    def test_update_sync_progress_exposes_live_results(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+
+        updated = self.store.update_sync_progress(created["profile_id"], [{
+            "list_name": "Watching - Series",
+            "display_name": "Watching - Series",
+            "source_name": "SIMKL",
+            "items_fetched": 20,
+            "items_resolved": 12,
+            "items_added": 4,
+            "items_removed": 0,
+            "items_skipped_duplicate": 3,
+            "items_skipped_unresolved": 1,
+            "error_count": 0,
+        }])
+
+        self.assertEqual(len(updated["sync_live_results"]), 1)
+        self.assertEqual(updated["sync_live_results"][0]["items_fetched"], 20)
 
     def test_sync_success_persists_managed_lists(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
@@ -299,7 +330,7 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertFalse(loaded["credentials"]["trakt"]["default_catalogs_initialized"])
         self.assertEqual(loaded["credentials"]["trakt"]["selected_lists"], [])
 
-    def test_activity_sync_is_manual_only_even_when_enabled(self) -> None:
+    def test_history_is_manual_but_resume_is_auto_scheduled_when_enabled(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
             "trakt_sync_watched_history": True,
@@ -310,11 +341,11 @@ class ProfileStoreTests(unittest.TestCase):
         due_profiles = self.store.claim_due_profiles()
 
         self.assertIsNone(loaded["next_history_sync_at"])
-        self.assertIsNone(loaded["next_resume_sync_at"])
+        self.assertIsNotNone(loaded["next_resume_sync_at"])
         self.assertEqual(len(due_profiles), 1)
         self.assertTrue(due_profiles[0]["pending_sync_modes"]["lists"])
         self.assertFalse(due_profiles[0]["pending_sync_modes"]["history"])
-        self.assertFalse(due_profiles[0]["pending_sync_modes"]["resume"])
+        self.assertTrue(due_profiles[0]["pending_sync_modes"]["resume"])
 
     def test_normalize_profile_options_drops_legacy_simkl_resume_source(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
@@ -332,16 +363,27 @@ class ProfileStoreTests(unittest.TestCase):
         after_sync = self.store.record_sync_success(created["profile_id"], [{"list_name": "demo"}], dry_run=False)
         next_sync_before = after_sync["next_sync_at"]
 
-        updated = self.store.update_profile_by_id(created["profile_id"], self.credentials, {
-            **self.options,
-            "trakt_sync_watched_history": True,
-            "trakt_sync_resume_progress": True,
-        })
+        updated = self.store.update_profile_by_id(created["profile_id"], self.credentials, self.options)
 
         due_profiles = self.store.claim_due_profiles()
 
         self.assertEqual(updated["next_sync_at"], next_sync_before)
         self.assertEqual(due_profiles, [])
+
+    def test_update_profile_by_id_preserves_existing_next_resume_sync_time(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "trakt_sync_resume_progress": True,
+        })
+        initial = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+        next_resume_before = initial["next_resume_sync_at"]
+
+        updated = self.store.update_profile_by_id(created["profile_id"], self.credentials, {
+            **self.options,
+            "trakt_sync_resume_progress": True,
+        })
+
+        self.assertEqual(updated["next_resume_sync_at"], next_resume_before)
 
     def test_activity_only_sync_keeps_existing_last_list_results(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {

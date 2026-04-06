@@ -50,9 +50,17 @@ class TraktConfig:
     username: str = ""
     enabled: bool = False
     sync_watchlist: bool = True
+    sync_watchlist_movies: bool | None = None
+    sync_watchlist_shows: bool | None = None
     sync_liked_lists: bool = True
     selected_lists: list[dict] = field(default_factory=list)
     base_url: str = "https://api.trakt.tv"
+
+    def __post_init__(self) -> None:
+        if self.sync_watchlist_movies is None:
+            self.sync_watchlist_movies = self.sync_watchlist
+        if self.sync_watchlist_shows is None:
+            self.sync_watchlist_shows = self.sync_watchlist
 
 
 @dataclass
@@ -130,6 +138,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     else:
         cfg.trakt.enabled = bool(cfg.trakt.client_id and cfg.trakt.access_token)
     cfg.trakt.sync_watchlist = os.getenv("TRAKT_SYNC_WATCHLIST", "true").lower() == "true"
+    cfg.trakt.sync_watchlist_movies = os.getenv("TRAKT_SYNC_WATCHLIST_MOVIES", str(cfg.trakt.sync_watchlist)).lower() == "true"
+    cfg.trakt.sync_watchlist_shows = os.getenv("TRAKT_SYNC_WATCHLIST_SHOWS", str(cfg.trakt.sync_watchlist)).lower() == "true"
     cfg.trakt.sync_liked_lists = os.getenv("TRAKT_SYNC_LIKED_LISTS", "true").lower() == "true"
 
     anilist_enabled_env = os.getenv("ANILIST_ENABLED", "")
@@ -214,6 +224,10 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.trakt.enabled = trakt.get("enabled", bool(cfg.trakt.client_id and cfg.trakt.access_token))
     if not os.getenv("TRAKT_SYNC_WATCHLIST"):
         cfg.trakt.sync_watchlist = trakt.get("sync_watchlist", True)
+    if not os.getenv("TRAKT_SYNC_WATCHLIST_MOVIES"):
+        cfg.trakt.sync_watchlist_movies = trakt.get("sync_watchlist_movies", cfg.trakt.sync_watchlist)
+    if not os.getenv("TRAKT_SYNC_WATCHLIST_SHOWS"):
+        cfg.trakt.sync_watchlist_shows = trakt.get("sync_watchlist_shows", cfg.trakt.sync_watchlist)
     if not os.getenv("TRAKT_SYNC_LIKED_LISTS"):
         cfg.trakt.sync_liked_lists = trakt.get("sync_liked_lists", True)
     cfg.trakt.selected_lists = trakt.get("selected_lists", [])
@@ -306,13 +320,14 @@ def validate_config(cfg: AppConfig, sources: list[str] | None = None) -> list[st
         if not cfg.trakt.access_token:
             errors.append("TRAKT_ACCESS_TOKEN is required when Trakt is enabled")
         if (
-            not cfg.trakt.sync_watchlist
+            not cfg.trakt.sync_watchlist_movies
+            and not cfg.trakt.sync_watchlist_shows
             and not cfg.trakt.sync_liked_lists
             and not cfg.trakt.selected_lists
             and not cfg.sync.trakt_sync_watched_history
             and not cfg.sync.trakt_sync_resume_progress
         ):
-            errors.append("Enable at least one Trakt source: watchlist, liked lists, selected public lists, watched history, or resume progress")
+            errors.append("Enable at least one Trakt source: watchlist movies, watchlist shows, liked lists, selected lists, watched history, or resume progress")
 
     if check_mdblist and cfg.mdblist.enabled:
         if not cfg.mdblist.api_key:

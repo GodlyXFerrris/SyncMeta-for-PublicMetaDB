@@ -34,6 +34,10 @@
     .card,.panel,.form-section{background:var(--z950);border:1px solid var(--z900);border-radius:8px}
     .card{padding:18px}.card-label{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--z500);margin-bottom:6px;font-weight:600}.card-value{font-size:22px;font-weight:700;color:var(--z100)}.card-sub{font-size:12px;color:var(--z500);margin-top:4px}
     .panel{overflow:hidden;margin-bottom:20px}.panel-header{padding:14px 18px;border-bottom:1px solid var(--z900);font-size:14px;font-weight:700;color:var(--z100);display:flex;align-items:center;justify-content:space-between}.panel-body{padding:18px}
+    .table-scroll{overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch}
+    .table-scroll table{min-width:900px}
+    .table-pager{display:flex;justify-content:flex-end;align-items:center;gap:12px;padding:12px 18px 4px;color:var(--z500);font-size:12px;flex-wrap:wrap}
+    .table-pager-actions{display:flex;align-items:center;gap:8px;justify-content:flex-end}
     table{width:100%;border-collapse:collapse;font-size:13px} th{text-align:left;padding:10px 18px;color:var(--z500);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--z900)} td{padding:11px 18px;border-bottom:1px solid rgba(39,39,46,.3);color:var(--z300)} tr:last-child td{border-bottom:none}
     .num{text-align:right;font-variant-numeric:tabular-nums}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-dim{color:var(--z600)}.table-actions{text-align:right;white-space:nowrap;width:170px;min-width:170px}
     .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}.form-section{padding:20px;align-self:start}.form-section.full{grid-column:1 / -1}.form-section h3{font-size:15px;font-weight:700;color:var(--z100);margin-bottom:4px;display:flex;align-items:center;gap:8px}.desc{font-size:12px;color:var(--z500);margin-bottom:16px}
@@ -206,6 +210,12 @@
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
               <div class="hint">Needed to create a profile or sign in on a new device. After that, this browser uses a secure server-side session.</div>
             </div>
+            <div class="actions-bar" style="margin-top:4px">
+              <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+              <button class="btn" onclick="loadProfile()">Load Profile</button>
+              <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
+              <span class="save-flash" id="save-flash">Saved</span>
+            </div>
           </div>
           <div class="settings-columns">
             <div class="settings-stack settings-stack-left">
@@ -218,7 +228,6 @@
                 <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
                 <p class="desc">Connect AniList and choose which anime lists should sync into PublicMetaDB.</p>
                 <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty to sync anime from SIMKL</div></div>
-                <div class="form-row"><label>Access Token</label><input type="password" id="anilist-access-token" placeholder="Only for private lists" autocomplete="off"></div>
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
@@ -249,8 +258,9 @@
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Sync your Trakt watchlist, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
-                <input type="checkbox" id="trakt-watchlist-toggle" checked class="hidden">
+                <p class="desc">Sync your Trakt watchlist, personal created lists, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
+                <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
+                <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
                 <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses device auth here, so the redirect is only a dashboard requirement.</div></div>
                 <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
                 <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
@@ -295,10 +305,11 @@
                     <option value="off">Off</option>
                     <option value="trakt">Trakt</option>
                   </select>
-                  <div class="hint">Choose which service should import continue-watching progress when you press the dashboard button.</div>
+                  <div class="hint">Choose which service should import continue-watching progress. Trakt resume also refreshes automatically every 10 minutes while background sync is on.</div>
                 </div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Activity sync only runs from the dashboard buttons. Watched history imports only add items that are not already watched in PublicMetaDB.</div>
+                <div class="hint">Watch history only runs from the dashboard button. Resume progress also refreshes automatically every 10 minutes while background sync is on.</div>
+                <div class="hint">Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
               <div class="options-col">
                 <div class="form-row">
@@ -358,7 +369,7 @@
           </div>
           <div class="form-section full">
             <h3>Trakt Catalogs</h3>
-            <p class="desc">Choose what should sync from Trakt. Default covers your personal watchlist and recommendations, My Lists loads your liked lists, and Discover lets you search public Trakt lists.</p>
+            <p class="desc">Choose what should sync from Trakt. Default covers split movie/show watchlists plus recommendations, My Lists loads your created and liked lists, and Discover lets you search public Trakt lists.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
               <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
@@ -366,7 +377,7 @@
               <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
             </div>
             <div class="catalog-toolbar">
-              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load liked lists and search public lists.</span>
+              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load your personal and liked lists, or search public lists.</span>
               <div class="actions-bar" style="margin-top:0">
                 <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
                 <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
@@ -382,14 +393,22 @@
           </div>
           <div class="form-section full">
             <h3>MDBList Lists</h3>
-            <p class="desc">Refresh your MDBList lists, then select the personal or public-style catalogs you want to sync.</p>
+            <p class="desc">Choose personal MDBList lists from My Lists, or search public MDBList lists in Discover.</p>
+            <div class="catalog-tabs">
+              <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
+              <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>
+            </div>
             <div class="catalog-toolbar">
               <span class="actions-meta" id="mdblist-status">Enter your MDBList API key, then refresh your lists.</span>
               <div class="actions-bar" style="margin-top:0">
-                <button class="btn btn-sm" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
+                <button class="btn btn-sm" id="btn-mdblist-refresh" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
                 <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
                 <button class="btn btn-sm" type="button" onclick="deselectAllVisibleMdbListLists()">Deselect All</button>
               </div>
+            </div>
+            <div class="catalog-search hidden" id="mdblist-discover-search">
+              <input type="text" id="mdblist-discover-query" placeholder="Search public MDBList lists..." autocomplete="off">
+              <button class="btn btn-sm" type="button" onclick="searchMdbListLists()">Search</button>
             </div>
             <div class="catalog-list" id="mdblist-list"></div>
           </div>
@@ -401,12 +420,6 @@
               <div class="hint">Permanently deletes this profile, saved credentials, sync history, and local draft data from this browser. Type <span class="mono">DELETE</span> when asked to confirm.</div>
             </div>
           </div>
-        </div>
-        <div class="actions-bar">
-          <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
-          <button class="btn" onclick="loadProfile()">Load Profile</button>
-          <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
-          <span class="save-flash" id="save-flash">Saved</span>
         </div>
       </div>
     </div>
@@ -426,6 +439,7 @@
     const ENTERED_KEY = 'entered';
     const SIMKL_PIN_KEY = 'simkl_pin_state';
     const TRAKT_DEVICE_KEY = 'trakt_device_state';
+    const RESULTS_PAGE_SIZE = 25;
     const LINKED_SIMKL_STATUSES = {
       shows: ['watching', 'plantowatch'],
       movies: ['plantowatch'],
@@ -483,16 +497,20 @@
     let simklWasLinked = false;
     let anilistWasLinked = false;
     let traktCatalogTab = 'default';
+    let traktPersonalLists = [];
     let traktLikedLists = [];
     let traktDiscoverLists = [];
     let traktSelectedLists = [];
     let traktSyncAllLikedLists = false;
     let traktDefaultCatalogsInitialized = false;
+    let mdblistCatalogTab = 'my-lists';
     let mdblistLists = [];
+    let mdblistDiscoverLists = [];
     let mdblistSelectedLists = [];
     let sessionProfileId = '';
     let secretState = emptySecretState();
     let lastDashboardProfile = null;
+    let currentResultsPage = 1;
     let pendingDeleteListName = '';
     let deletingManagedListName = '';
     let pendingClearWatchHistory = false;
@@ -503,7 +521,6 @@
     function emptySecretState() {
       return {
         simkl: { client_secret_saved: false, access_token_saved: false },
-        anilist: { access_token_saved: false },
         trakt: { client_secret_saved: false, access_token_saved: false, refresh_token_saved: false },
         mdblist: { api_key_saved: false },
         pmdb: { api_key_saved: false },
@@ -638,7 +655,11 @@
         const key = `${user.toLowerCase()}/${slug.toLowerCase()}`;
         if (seen.has(key)) return;
         seen.add(key);
-        const source = item.source === 'discover' ? 'discover' : (item.source === 'default' ? 'default' : 'liked');
+        const source = item.source === 'discover'
+          ? 'discover'
+          : (item.source === 'default'
+            ? 'default'
+            : (item.source === 'personal' ? 'personal' : 'liked'));
         normalized.push({
           name: name,
           description: String(item.description || '').trim(),
@@ -696,7 +717,15 @@
       return !!(el('trakt-client-id').value.trim() && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved'));
     }
 
+    function isTraktWatchlistEnabled(mediaType) {
+      return mediaType === 'movies'
+        ? el('trakt-watchlist-movies-toggle').checked
+        : el('trakt-watchlist-shows-toggle').checked;
+    }
+
     function gatherCreds() {
+      const syncWatchlistMovies = el('trakt-watchlist-movies-toggle').checked;
+      const syncWatchlistShows = el('trakt-watchlist-shows-toggle').checked;
       return {
         simkl: {
           client_id: el('simkl-client-id').value.trim(),
@@ -706,7 +735,7 @@
         },
         anilist: {
           username: el('anilist-username').value.trim(),
-          access_token: el('anilist-access-token').value.trim(),
+          access_token: '',
           selected_statuses: anilistSelectedStatuses.slice(),
         },
         trakt: {
@@ -715,7 +744,9 @@
           access_token: el('trakt-access-token').value.trim(),
           refresh_token: el('trakt-refresh-token').value.trim(),
           username: '',
-          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_watchlist: syncWatchlistMovies || syncWatchlistShows,
+          sync_watchlist_movies: syncWatchlistMovies,
+          sync_watchlist_shows: syncWatchlistShows,
           sync_liked_lists: traktSyncAllLikedLists,
           default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
@@ -749,6 +780,8 @@
     }
 
     function gatherDraftCreds() {
+      const syncWatchlistMovies = el('trakt-watchlist-movies-toggle').checked;
+      const syncWatchlistShows = el('trakt-watchlist-shows-toggle').checked;
       return {
         simkl: {
           client_id: el('simkl-client-id').value.trim(),
@@ -761,7 +794,9 @@
         trakt: {
           client_id: el('trakt-client-id').value.trim(),
           username: '',
-          sync_watchlist: el('trakt-watchlist-toggle').checked,
+          sync_watchlist: syncWatchlistMovies || syncWatchlistShows,
+          sync_watchlist_movies: syncWatchlistMovies,
+          sync_watchlist_shows: syncWatchlistShows,
           sync_liked_lists: traktSyncAllLikedLists,
           default_catalogs_initialized: traktDefaultCatalogsInitialized,
           selected_lists: normalizeTraktSelectedLists(traktSelectedLists),
@@ -793,9 +828,6 @@
           client_secret_saved: !!simkl.client_secret_saved,
           access_token_saved: !!simkl.access_token_saved,
         },
-        anilist: {
-          access_token_saved: !!anilist.access_token_saved,
-        },
         trakt: {
           client_secret_saved: !!trakt.client_secret_saved,
           access_token_saved: !!trakt.access_token_saved,
@@ -816,24 +848,27 @@
       setSecretInputState('simkl-access-token', 'simkl', 'access_token_saved', 'From PIN auth or OAuth');
       simklSelectedStatuses = normalizeSimklSelectedStatuses(simkl.selected_statuses);
       el('anilist-username').value = anilist.username || '';
-      setSecretInputState('anilist-access-token', 'anilist', 'access_token_saved', 'Only for private lists');
       anilistSelectedStatuses = normalizeAniListSelectedStatuses(anilist.selected_statuses);
       el('trakt-client-id').value = trakt.client_id || '';
       setSecretInputState('trakt-client-secret', 'trakt', 'client_secret_saved', 'Required for device auth');
       setSecretInputState('trakt-access-token', 'trakt', 'access_token_saved', 'Filled after Trakt auth');
       setSecretInputState('trakt-refresh-token', 'trakt', 'refresh_token_saved', 'Saved for future refresh support');
-      el('trakt-watchlist-toggle').checked = trakt.sync_watchlist !== false;
+      const traktWatchlistLegacy = trakt.sync_watchlist !== false;
+      el('trakt-watchlist-movies-toggle').checked = trakt.sync_watchlist_movies !== undefined ? !!trakt.sync_watchlist_movies : traktWatchlistLegacy;
+      el('trakt-watchlist-shows-toggle').checked = trakt.sync_watchlist_shows !== undefined ? !!trakt.sync_watchlist_shows : traktWatchlistLegacy;
       traktSelectedLists = normalizeTraktSelectedLists(trakt.selected_lists || []);
       traktSyncAllLikedLists = !!trakt.sync_liked_lists && traktSelectedLists.length === 0;
       traktDefaultCatalogsInitialized = !!trakt.default_catalogs_initialized;
       if (!traktDefaultCatalogsInitialized) {
         traktSelectedLists = traktSelectedLists.filter(item => item.source !== 'default');
       }
+      traktPersonalLists = [];
       traktLikedLists = [];
       traktDiscoverLists = [];
       setSecretInputState('mdblist-api-key', 'mdblist', 'api_key_saved', 'From mdblist.com settings');
       mdblistSelectedLists = normalizeMdbListSelectedLists(mdblist.selected_lists || []);
       mdblistLists = [];
+      mdblistDiscoverLists = [];
       setSecretInputState('pmdb-api-key', 'pmdb', 'api_key_saved', 'pm-...');
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
@@ -876,12 +911,10 @@
       ensureLinkedSourceDefaults(false);
       renderActivityOptionVisibility();
       const creds = gatherCreds();
-      const simklHasStatuses = Object.values(creds.simkl.selected_statuses).some(items => items.length);
-      const opts = gatherOptions();
-      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved') && (simklHasStatuses || opts.activity_history_source === 'simkl')));
-      setDot('dot-anilist', !!(creds.anilist.username && creds.anilist.selected_statuses.length));
-      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved') && (creds.trakt.sync_watchlist || creds.trakt.sync_liked_lists || creds.trakt.selected_lists.length || opts.activity_history_source === 'trakt' || opts.activity_resume_source === 'trakt')));
-      setDot('dot-mdblist', !!(hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved') && creds.mdblist.selected_lists.length));
+      setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved')));
+      setDot('dot-anilist', !!creds.anilist.username);
+      setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved')));
+      setDot('dot-mdblist', hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved'));
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
     }
 
@@ -1090,21 +1123,26 @@
     function switchTraktTab(tab) {
       traktCatalogTab = tab;
       renderTraktCatalogs();
-      if (tab === 'my-lists' && !traktLikedLists.length && isTraktConnected()) {
+      if (tab === 'my-lists' && !traktPersonalLists.length && !traktLikedLists.length && isTraktConnected()) {
         refreshTraktLists(true);
       }
     }
 
-    function toggleTraktWatchlist() {
+    function toggleTraktWatchlist(mediaType) {
       traktDefaultCatalogsInitialized = true;
-      el('trakt-watchlist-toggle').checked = !el('trakt-watchlist-toggle').checked;
+      const targetId = mediaType === 'movies' ? 'trakt-watchlist-movies-toggle' : 'trakt-watchlist-shows-toggle';
+      el(targetId).checked = !el(targetId).checked;
       renderTraktCatalogs();
       updateDots();
       saveDraft();
     }
 
     function findTraktListByKey(key) {
-      const items = TRAKT_DEFAULT_CATALOGS.concat(traktLikedLists).concat(traktDiscoverLists).concat(traktSelectedLists);
+      const items = TRAKT_DEFAULT_CATALOGS
+        .concat(traktPersonalLists)
+        .concat(traktLikedLists)
+        .concat(traktDiscoverLists)
+        .concat(traktSelectedLists);
       for (const item of items) {
         if (traktListKey(item) === key) return item;
       }
@@ -1136,11 +1174,11 @@
     function enableAllLikedTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (!isTraktConnected()) {
-        showToast('Connect Trakt first so SyncMeta can read your liked lists.', true, false);
+        showToast('Connect Trakt first so SyncMeta can read your liked and personal lists.', true, false);
         return;
       }
       traktSyncAllLikedLists = true;
-      traktSelectedLists = traktSelectedLists.filter(item => item.source === 'discover');
+      traktSelectedLists = traktSelectedLists.filter(item => item.source !== 'liked');
       renderTraktCatalogs();
       updateDots();
       saveDraft();
@@ -1150,12 +1188,13 @@
     function selectAllVisibleTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
-        el('trakt-watchlist-toggle').checked = true;
+        el('trakt-watchlist-movies-toggle').checked = true;
+        el('trakt-watchlist-shows-toggle').checked = true;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(TRAKT_DEFAULT_CATALOGS));
       } else if (traktCatalogTab === 'enabled') {
         return;
       } else {
-        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const visible = traktCatalogTab === 'my-lists' ? traktPersonalLists.concat(traktLikedLists) : traktDiscoverLists;
         traktSelectedLists = normalizeTraktSelectedLists(traktSelectedLists.concat(visible));
         if (traktCatalogTab === 'my-lists') {
           traktSyncAllLikedLists = false;
@@ -1169,17 +1208,19 @@
     function deselectAllVisibleTraktLists() {
       traktDefaultCatalogsInitialized = true;
       if (traktCatalogTab === 'default') {
-        el('trakt-watchlist-toggle').checked = false;
+        el('trakt-watchlist-movies-toggle').checked = false;
+        el('trakt-watchlist-shows-toggle').checked = false;
         const defaultKeys = new Set(TRAKT_DEFAULT_CATALOGS.map(item => traktListKey(item)));
         traktSelectedLists = normalizeTraktSelectedLists(
           traktSelectedLists.filter(item => !defaultKeys.has(traktListKey(item)))
         );
       } else if (traktCatalogTab === 'enabled') {
-        el('trakt-watchlist-toggle').checked = false;
+        el('trakt-watchlist-movies-toggle').checked = false;
+        el('trakt-watchlist-shows-toggle').checked = false;
         traktSyncAllLikedLists = false;
         traktSelectedLists = [];
       } else {
-        const visible = traktCatalogTab === 'my-lists' ? traktLikedLists : traktDiscoverLists;
+        const visible = traktCatalogTab === 'my-lists' ? traktPersonalLists.concat(traktLikedLists) : traktDiscoverLists;
         const visibleKeys = new Set(visible.map(item => traktListKey(item)));
         traktSelectedLists = normalizeTraktSelectedLists(
           traktSelectedLists.filter(item => !visibleKeys.has(traktListKey(item)))
@@ -1195,6 +1236,11 @@
 
     function traktCatalogMeta(item) {
       if (item.source === 'default') return 'Trakt';
+      if (item.source === 'personal') {
+        const parts = ['Your Trakt list'];
+        if (item.item_count) parts.push(`${item.item_count} items`);
+        return parts.join(' · ');
+      }
       const parts = [`Trakt by ${item.user}`];
       if (item.item_count) parts.push(`${item.item_count} items`);
       if (item.likes) parts.push(`${item.likes} likes`);
@@ -1214,11 +1260,13 @@
       el('btn-trakt-select-all').textContent = traktCatalogTab === 'default' ? 'Enable All' : 'Select All';
       el('btn-trakt-deselect-all').textContent = traktCatalogTab === 'default' ? 'Disable All' : 'Deselect All';
 
-      const selectedCount = traktSelectedLists.length + (el('trakt-watchlist-toggle').checked ? 1 : 0) + (traktSyncAllLikedLists ? 1 : 0);
+      const watchlistCount = (isTraktWatchlistEnabled('movies') ? 1 : 0) + (isTraktWatchlistEnabled('shows') ? 1 : 0);
+      const selectedCount = traktSelectedLists.length + watchlistCount + (traktSyncAllLikedLists ? 1 : 0);
       if (!isTraktConnected()) {
-        setTraktCatalogStatus('Connect Trakt to load liked lists and search public lists.', false);
+        setTraktCatalogStatus('Connect Trakt to load your personal and liked lists, or search public lists.', false);
       } else if (traktSyncAllLikedLists) {
-        setTraktCatalogStatus(`Watchlist${el('trakt-watchlist-toggle').checked ? ' + ' : ' '}all liked Trakt lists will sync.`, false);
+        const watchlistLabel = watchlistCount ? `${watchlistCount} watchlist source${watchlistCount === 1 ? '' : 's'} + ` : '';
+        setTraktCatalogStatus(`${watchlistLabel}all liked Trakt lists will sync.`, false);
       } else if (selectedCount) {
         setTraktCatalogStatus(`${selectedCount} Trakt source${selectedCount === 1 ? '' : 's'} selected.`, false);
       } else {
@@ -1228,14 +1276,20 @@
       let rows = '';
       if (traktCatalogTab === 'default') {
         const defaultItems = [{
-          name: 'My Watchlist',
+          name: 'My Watchlist Movies',
           source: 'watchlist',
-          description: 'Imports your Trakt movie and show watchlist into PublicMetaDB.',
+          watchlistMediaType: 'movies',
+          description: 'Imports your Trakt movie watchlist into PublicMetaDB.',
+        }, {
+          name: 'My Watchlist Series',
+          source: 'watchlist',
+          watchlistMediaType: 'shows',
+          description: 'Imports your Trakt show watchlist into PublicMetaDB.',
         }].concat(TRAKT_DEFAULT_CATALOGS);
         rows = defaultItems.map(item => {
           const isWatchlist = item.source === 'watchlist';
-          const selected = isWatchlist ? el('trakt-watchlist-toggle').checked : isTraktListSelected(traktListKey(item));
-          const attrs = isWatchlist ? 'data-trakt-watchlist="1"' : `data-trakt-key="${esc(traktListKey(item))}"`;
+          const selected = isWatchlist ? isTraktWatchlistEnabled(item.watchlistMediaType) : isTraktListSelected(traktListKey(item));
+          const attrs = isWatchlist ? `data-trakt-watchlist="${esc(item.watchlistMediaType)}"` : `data-trakt-key="${esc(traktListKey(item))}"`;
           const meta = isWatchlist ? 'Trakt' : traktCatalogMeta(item);
           return `
             <div class="catalog-row ${selected ? 'selected' : ''}" ${attrs}>
@@ -1250,8 +1304,11 @@
         }).join('');
       } else if (traktCatalogTab === 'enabled') {
         const enabledItems = [];
-        if (el('trakt-watchlist-toggle').checked) {
-          enabledItems.push({ name: 'My Watchlist', meta: 'Trakt', key: null, removable: 'watchlist' });
+        if (isTraktWatchlistEnabled('movies')) {
+          enabledItems.push({ name: 'My Watchlist Movies', meta: 'Trakt', key: null, removable: 'watchlist', watchlistMediaType: 'movies' });
+        }
+        if (isTraktWatchlistEnabled('shows')) {
+          enabledItems.push({ name: 'My Watchlist Series', meta: 'Trakt', key: null, removable: 'watchlist', watchlistMediaType: 'shows' });
         }
         normalizeTraktSelectedLists(traktSelectedLists).forEach(item => {
           enabledItems.push({
@@ -1266,7 +1323,7 @@
         }
         rows = enabledItems.length
           ? enabledItems.map(item => `
-            <div class="catalog-row selected" ${item.key ? `data-trakt-key="${esc(item.key)}"` : ''} ${item.removable === 'watchlist' ? 'data-trakt-watchlist="1"' : ''} ${item.removable === 'liked-all' ? 'data-trakt-liked-all="1"' : ''}>
+            <div class="catalog-row selected" ${item.key ? `data-trakt-key="${esc(item.key)}"` : ''} ${item.removable === 'watchlist' ? `data-trakt-watchlist="${esc(item.watchlistMediaType)}"` : ''} ${item.removable === 'liked-all' ? 'data-trakt-liked-all="1"' : ''}>
               <div class="catalog-check">&#10003;</div>
               <div class="catalog-body">
                 <div class="catalog-title">${esc(item.name)}</div>
@@ -1277,11 +1334,11 @@
           : '<div class="empty">No Trakt sources enabled yet.</div>';
       } else {
         const items = traktCatalogTab === 'my-lists'
-          ? normalizeTraktSelectedLists(traktLikedLists.concat(traktSelectedLists.filter(item => item.source === 'liked')))
+          ? normalizeTraktSelectedLists(traktPersonalLists.concat(traktLikedLists).concat(traktSelectedLists.filter(item => item.source === 'personal' || item.source === 'liked')))
           : traktDiscoverLists;
         if (!items.length) {
           const emptyMessage = traktCatalogTab === 'my-lists'
-            ? 'No liked Trakt lists loaded yet. Connect Trakt and press Refresh My Lists.'
+            ? 'No Trakt personal or liked lists loaded yet. Connect Trakt and press Refresh My Lists.'
             : 'Search for a public Trakt list to add it here.';
           rows = `<div class="empty">${emptyMessage}</div>`;
         } else {
@@ -1303,8 +1360,8 @@
       }
 
       el('trakt-catalog-list').innerHTML = rows;
-      document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist="1"]').forEach(node => {
-        node.addEventListener('click', toggleTraktWatchlist);
+      document.querySelectorAll('#trakt-catalog-list [data-trakt-watchlist]').forEach(node => {
+        node.addEventListener('click', () => toggleTraktWatchlist(node.dataset.traktWatchlist));
       });
       document.querySelectorAll('#trakt-catalog-list [data-trakt-liked-all="1"]').forEach(node => {
         node.addEventListener('click', () => {
@@ -1321,26 +1378,29 @@
 
     async function refreshTraktLists(silent) {
       if (!isTraktConnected()) {
-        if (!silent) showToast('Connect Trakt first to load your liked lists.', true, false);
+        if (!silent) showToast('Connect Trakt first to load your Trakt lists.', true, false);
         return;
       }
-      setTraktCatalogStatus('Loading your liked Trakt lists...', false);
+      setTraktCatalogStatus('Loading your Trakt lists...', false);
       try {
         const payload = { client_id: el('trakt-client-id').value.trim() };
         const token = el('trakt-access-token').value.trim();
         if (token) payload.access_token = token;
         const result = await apiPost('/api/trakt/catalogs', payload);
         if (!result.ok) {
-          setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt liked lists.'), true);
+          setTraktCatalogStatus(formatApiError(result.data, 'Could not load Trakt lists.'), true);
           return;
         }
-        traktLikedLists = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
+        const items = Array.isArray(result.data.items) ? normalizeTraktSelectedLists(result.data.items) : [];
+        traktPersonalLists = items.filter(item => item.source === 'personal');
+        traktLikedLists = items.filter(item => item.source === 'liked');
         renderTraktCatalogs();
         if (!silent) {
-          showToast(traktLikedLists.length ? 'Trakt liked lists loaded.' : 'No liked Trakt lists found.', false, true);
+          const total = traktPersonalLists.length + traktLikedLists.length;
+          showToast(total ? `Loaded ${total} Trakt list${total === 1 ? '' : 's'}.` : 'No Trakt personal or liked lists found.', false, true);
         }
       } catch {
-        setTraktCatalogStatus('Network error while loading Trakt liked lists.', true);
+        setTraktCatalogStatus('Network error while loading Trakt lists.', true);
       }
     }
 
@@ -1380,8 +1440,13 @@
       node.style.color = isError ? 'var(--red)' : '';
     }
 
+    function switchMdbListTab(tab) {
+      mdblistCatalogTab = tab === 'discover' ? 'discover' : 'my-lists';
+      renderMdbListLists();
+    }
+
     function findMdbListByKey(key) {
-      const items = mdblistLists.concat(mdblistSelectedLists);
+      const items = mdblistLists.concat(mdblistDiscoverLists).concat(mdblistSelectedLists);
       for (const item of items) {
         if (mdbListKey(item) === key) return item;
       }
@@ -1409,20 +1474,29 @@
     }
 
     function renderMdbListLists() {
+      document.querySelectorAll('[data-mdblist-tab]').forEach(node => {
+        node.classList.toggle('active', node.dataset.mdblistTab === mdblistCatalogTab);
+      });
+      el('mdblist-discover-search').classList.toggle('hidden', mdblistCatalogTab !== 'discover');
+      el('btn-mdblist-refresh').classList.toggle('hidden', mdblistCatalogTab !== 'my-lists');
+
       if (!hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved')) {
         setMdbListStatus('Enter your MDBList API key, then refresh your lists.', false);
       } else if (mdblistSelectedLists.length) {
         setMdbListStatus(`${mdblistSelectedLists.length} MDBList list${mdblistSelectedLists.length === 1 ? '' : 's'} selected.`, false);
+      } else if (mdblistCatalogTab === 'discover') {
+        setMdbListStatus('Search public MDBList lists to add them here.', false);
       } else {
         setMdbListStatus('Refresh your MDBList lists, then choose what should sync.', false);
       }
 
-      const items = mdblistLists.length
-        ? normalizeMdbListSelectedLists(mdblistLists.concat(mdblistSelectedLists))
-        : mdblistSelectedLists;
+      const baseItems = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : mdblistLists;
+      const items = baseItems.length
+        ? normalizeMdbListSelectedLists(baseItems.concat(mdblistSelectedLists))
+        : (mdblistCatalogTab === 'discover' ? [] : mdblistSelectedLists);
 
       if (!items.length) {
-        el('mdblist-list').innerHTML = '<div class="empty">No MDBList lists loaded yet.</div>';
+        el('mdblist-list').innerHTML = `<div class="empty">${mdblistCatalogTab === 'discover' ? 'Search for a public MDBList list to add it here.' : 'No MDBList lists loaded yet.'}</div>`;
         return;
       }
 
@@ -1453,14 +1527,16 @@
     }
 
     function selectAllVisibleMdbListLists() {
-      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(mdblistLists.length ? mdblistLists : mdblistSelectedLists));
+      const visible = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : (mdblistLists.length ? mdblistLists : mdblistSelectedLists);
+      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(visible));
       renderMdbListLists();
       updateDots();
       saveDraft();
     }
 
     function deselectAllVisibleMdbListLists() {
-      const visibleKeys = new Set((mdblistLists.length ? mdblistLists : mdblistSelectedLists).map(item => mdbListKey(item)));
+      const visible = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : (mdblistLists.length ? mdblistLists : mdblistSelectedLists);
+      const visibleKeys = new Set(visible.map(item => mdbListKey(item)));
       mdblistSelectedLists = normalizeMdbListSelectedLists(
         mdblistSelectedLists.filter(item => !visibleKeys.has(mdbListKey(item)))
       );
@@ -1491,6 +1567,33 @@
         }
       } catch {
         setMdbListStatus('Network error while loading MDBList lists.', true);
+      }
+    }
+
+    async function searchMdbListLists() {
+      const apiKey = el('mdblist-api-key').value.trim();
+      if (!apiKey && !hasSavedSecret('mdblist', 'api_key_saved')) {
+        showToast('Enter your MDBList API key first.', true, false);
+        return;
+      }
+      const query = el('mdblist-discover-query').value.trim();
+      if (!query) {
+        showToast('Enter a search term for MDBList lists.', true, false);
+        return;
+      }
+      setMdbListStatus(`Searching MDBList for "${query}"...`, false);
+      try {
+        const payload = { query: query };
+        if (apiKey) payload.api_key = apiKey;
+        const result = await apiPost('/api/mdblist/lists', payload);
+        if (!result.ok) {
+          setMdbListStatus(formatApiError(result.data, 'Could not search MDBList lists.'), true);
+          return;
+        }
+        mdblistDiscoverLists = Array.isArray(result.data.items) ? normalizeMdbListSelectedLists(result.data.items) : [];
+        renderMdbListLists();
+      } catch {
+        setMdbListStatus('Network error while searching MDBList lists.', true);
       }
     }
 
@@ -1767,6 +1870,7 @@
 
     function renderEmptyDashboard(message) {
       lastDashboardProfile = null;
+      currentResultsPage = 1;
       pendingDeleteListName = '';
       deletingManagedListName = '';
       el('cards').innerHTML = `
@@ -1809,8 +1913,11 @@
         deletingManagedListName = '';
       }
 
-      const results = profile.last_results || [];
+      const results = profile.sync_running && Array.isArray(profile.sync_live_results) && profile.sync_live_results.length
+        ? profile.sync_live_results
+        : (profile.last_results || []);
       const history = profile.history || [];
+      const visibleHistory = history.slice(0, 25);
       const options = profile.options || {};
       const totals = results.reduce((acc, row) => {
         acc.fetched += row.items_fetched || 0;
@@ -1831,7 +1938,7 @@
       el('cards').innerHTML = `
         <div class="card"><div class="card-label">Last Sync</div><div class="card-value">${profile.last_sync ? timeAgo(profile.last_sync) : 'Never'}</div><div class="card-sub">${lastSyncSub}</div></div>
         <div class="card"><div class="card-label">Items Fetched</div><div class="card-value">${totals.fetched}</div><div class="card-sub">${totals.resolved} resolved</div></div>
-        <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:${totals.added > 0 ? 'var(--green)' : 'var(--z100)'}">${totals.added}</div><div class="card-sub">${totals.removed} removed</div></div>
+        <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:${totals.added > 0 ? 'var(--green)' : 'var(--z100)'}">${totals.added}</div><div class="card-sub" style="color:${totals.removed > 0 ? 'var(--red)' : 'var(--z500)'}">${totals.removed} removed</div></div>
         <div class="card"><div class="card-label">Issues</div><div class="card-value" style="color:${totals.unresolved + totals.errors > 0 ? 'var(--orange)' : 'var(--z600)'}">${totals.unresolved + totals.errors}</div><div class="card-sub">${totals.unresolved} unresolved, ${totals.errors} errors</div></div>
       `;
 
@@ -1845,11 +1952,21 @@
         ? `Profile ${profileShort} - ${liveStatus}${liveStamp ? ` - ${liveStamp}` : ''}`
         : `Profile ${profileShort} - ${nextSyncText}`;
 
-      el('results-time').textContent = profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '';
+      el('results-time').textContent = profile.sync_running
+        ? 'Live progress'
+        : (profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '');
       if (!results.length) {
+        currentResultsPage = 1;
         el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';
       } else {
-        el('results-body').innerHTML = `<table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table>`;
+        const totalPages = Math.max(1, Math.ceil(results.length / RESULTS_PAGE_SIZE));
+        currentResultsPage = Math.min(Math.max(1, currentResultsPage), totalPages);
+        const startIndex = (currentResultsPage - 1) * RESULTS_PAGE_SIZE;
+        const pagedResults = results.slice(startIndex, startIndex + RESULTS_PAGE_SIZE);
+        const pagerHtml = totalPages > 1
+          ? `<div class="table-pager"><div class="table-pager-actions"><span>Showing ${startIndex + 1}-${startIndex + pagedResults.length} of ${results.length}</span><span>·</span><span>Page ${currentResultsPage} of ${totalPages}</span><button class="btn btn-sm" type="button" id="results-prev-page" ${currentResultsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn btn-sm" type="button" id="results-next-page" ${currentResultsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>`
+          : '';
+        el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${pagedResults.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-red' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>${pagerHtml}`;
         document.querySelectorAll('[data-delete-list]').forEach(node => {
           node.addEventListener('click', () => armDeleteManagedList(node.dataset.deleteList));
         });
@@ -1859,12 +1976,16 @@
         document.querySelectorAll('[data-delete-cancel]').forEach(node => {
           node.addEventListener('click', () => cancelDeleteManagedList(node.dataset.deleteCancel));
         });
+        const prevPage = el('results-prev-page');
+        const nextPage = el('results-next-page');
+        if (prevPage) prevPage.addEventListener('click', () => { currentResultsPage = Math.max(1, currentResultsPage - 1); renderDashboard(lastDashboardProfile); });
+        if (nextPage) nextPage.addEventListener('click', () => { currentResultsPage += 1; renderDashboard(lastDashboardProfile); });
       }
 
       if (!history.length) {
         el('history-body').innerHTML = '<div class="empty">No history yet.</div>';
       } else {
-        el('history-body').innerHTML = history.map(entry => {
+        const historyHtml = visibleHistory.map(entry => {
           const summary = (entry.results || []).reduce((acc, row) => {
             acc.added += row.items_added || 0;
             acc.removed += row.items_removed || 0;
@@ -1872,8 +1993,23 @@
             return acc;
           }, { added: 0, removed: 0, errors: 0 });
           const mode = entry.dry_run ? ' <span class="c-dim">dry run</span>' : '';
-          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}</span><div class="history-stats"><span class="c-green">+${summary.added}</span><span class="c-orange">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : ''}</div></div>`;
+          const entryStatus = String(entry.status || 'completed').toLowerCase();
+          let statusBadge = '';
+          if (entryStatus === 'failed') {
+            statusBadge = ' <span class="c-red">failed</span>';
+          } else if (entryStatus === 'stopped') {
+            statusBadge = ' <span class="c-orange">stopped</span>';
+          }
+          const errorDetail = entry.error_message ? `<span class="c-red">1 err</span>` : '';
+          const statsHtml = entryStatus === 'failed' && !summary.added && !summary.removed && !summary.errors
+            ? `${errorDetail}`
+            : `<span class="c-green">+${summary.added}</span><span class="c-red">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : errorDetail}`;
+          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}${statusBadge}</span><div class="history-stats">${statsHtml}</div></div>`;
         }).join('');
+        const historyNote = history.length > visibleHistory.length
+          ? `<div class="panel-body" style="padding-top:12px;padding-bottom:0;color:var(--z500);font-size:12px">Showing the newest ${visibleHistory.length} of ${history.length} sync runs.</div>`
+          : '';
+        el('history-body').innerHTML = `${historyHtml}${historyNote}`;
       }
 
       const stopping = !!profile.sync_cancel_requested;
@@ -1921,7 +2057,7 @@
         : (options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       if (!source || source === 'off') return 'Run this manually from the button above.';
       if (mode === 'history') return `${source.toUpperCase()} watched imports`;
-      return `${source.toUpperCase()} continue watching sync`;
+      return `${source.toUpperCase()} continue watching sync · auto every 10 minutes`;
     }
 
     function updateClearHistoryButtons(show, canUse) {
@@ -2248,7 +2384,7 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
@@ -2285,7 +2421,7 @@
       populateForm({
         simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-        trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+        trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
@@ -2337,7 +2473,7 @@
     const draftCreds = loadJson(CREDS_KEY, {
       simkl: { selected_statuses: DEFAULT_SIMKL_STATUSES },
       anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
-      trakt: { sync_watchlist: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
+      trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
