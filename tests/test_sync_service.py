@@ -222,6 +222,43 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
         return service, pmdb
 
+    def test_live_progress_publishes_pending_row_before_list_finishes(self) -> None:
+        progress_events: list[list[dict]] = []
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={
+                    "shows": ["watching"],
+                    "movies": [],
+                    "anime": [],
+                },
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows"],
+            ),
+        )
+        service = SyncService(config, progress_callback=lambda rows: progress_events.append(rows))
+        service._simkl = StubSimklClient()
+        service._matcher = StubMatcher()
+        service._pmdb = StubPMDBClient()
+
+        service.run()
+
+        self.assertGreaterEqual(len(progress_events), 2)
+        self.assertTrue(any(
+            any(row.get("display_name") == "Watching - Series" and row.get("items_fetched") == 0 for row in event)
+            for event in progress_events
+        ))
+        self.assertTrue(any(
+            any(row.get("display_name") == "Watching - Series" and row.get("items_fetched") == 1 for row in event)
+            for event in progress_events
+        ))
+
     def test_deletes_disabled_managed_lists_when_enabled(self) -> None:
         service, pmdb = self.build_service(delete_disabled_lists=True)
 

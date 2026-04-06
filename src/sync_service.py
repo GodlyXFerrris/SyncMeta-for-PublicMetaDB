@@ -163,11 +163,12 @@ class SyncService:
             self._check_cancelled()
             for status_key in self._config.simkl.selected_statuses.get(simkl_type, []):
                 self._check_cancelled()
+                name = _status_list_name(simkl_type, status_key)
+                display_name = _display_status_name(simkl_type, status_key)
+                self._publish_pending_list(name, display_name, "SIMKL")
                 self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
-                name = _status_list_name(simkl_type, status_key)
-                display_name = _display_status_name(simkl_type, status_key)
                 description = (
                     f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
                     f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
@@ -460,10 +461,11 @@ class SyncService:
 
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
-            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
-            items = client.get_status(status_key)
             name = _status_list_name("anime", status_key)
             display_name = _display_status_name("anime", status_key)
+            self._publish_pending_list(name, display_name, "AniList")
+            self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
+            items = client.get_status(status_key)
             description = f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' anime from AniList"
             stats.append(
                 self._sync_list(
@@ -490,6 +492,10 @@ class SyncService:
         should_sync_watchlist_shows = self._config.trakt.sync_watchlist_shows and "shows" in self._config.sync.media_types
         if should_sync_watchlist_movies or should_sync_watchlist_shows:
             self._check_cancelled()
+            if should_sync_watchlist_movies:
+                self._publish_pending_list(_status_list_name("movies", "watchlist"), _display_status_name("movies", "watchlist"), "Trakt")
+            if should_sync_watchlist_shows:
+                self._publish_pending_list(_status_list_name("shows", "watchlist"), _display_status_name("shows", "watchlist"), "Trakt")
             self._set_status("Fetching Trakt watchlist")
             watchlist_items = self._trakt.get_watchlist()
             grouped = {
@@ -539,6 +545,7 @@ class SyncService:
 
         for trakt_list in selected_default_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], "Trakt")
             self._set_status(f"Fetching Trakt catalog {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_default_catalog(trakt_list.get("catalog_key") or trakt_list.get("slug", ""))
@@ -567,6 +574,7 @@ class SyncService:
             self._set_status("Fetching Trakt liked lists")
             for liked_list in self._trakt.get_liked_lists():
                 self._check_cancelled()
+                self._publish_pending_list(liked_list["name"], liked_list["name"], f"Trakt by {liked_list['user']}")
                 items = self._filter_trakt_items(liked_list["items"])
                 name = liked_list["name"]
                 description = f"Auto-synced liked Trakt list '{liked_list['name']}'"
@@ -591,6 +599,7 @@ class SyncService:
 
         for trakt_list in selected_liked_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -618,6 +627,7 @@ class SyncService:
 
         for trakt_list in selected_personal_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -645,6 +655,7 @@ class SyncService:
 
         for trakt_list in selected_public_lists:
             self._check_cancelled()
+            self._publish_pending_list(trakt_list["name"], trakt_list["name"], f"Trakt by {trakt_list['user']}")
             self._set_status(f"Fetching Trakt list {trakt_list['name']}")
             items = self._filter_trakt_items(
                 self._trakt.get_list_items(trakt_list["user"], trakt_list["slug"])
@@ -678,6 +689,7 @@ class SyncService:
 
         for mdblist in self._dedupe_mdblist_lists(self._config.mdblist.selected_lists):
             self._check_cancelled()
+            self._publish_pending_list(mdblist["name"], mdblist["name"], "MDBList")
             self._set_status(f"Fetching MDBList {mdblist['name']}")
             items = self._filter_mdblist_items(self._mdblist.get_list_items(mdblist["id"]))
             media_type = "movies" if mdblist["mediatype"] == "movie" else "shows"
@@ -939,7 +951,7 @@ class SyncService:
             logger.debug("Progress callback failed", exc_info=True)
 
     def _remember_progress_row(self, row: SyncStats) -> None:
-        key = row.list_name or row.display_name or f"activity:{row.source_name}"
+        key = f"{row.display_name or row.list_name or ''}|{row.source_name or ''}"
         self._live_progress_rows[key] = {
             "list_name": row.list_name,
             "display_name": row.display_name,
@@ -952,6 +964,16 @@ class SyncService:
             "items_skipped_unresolved": row.items_skipped_unresolved,
             "error_count": len(row.errors),
         }
+
+    def _publish_pending_list(self, list_name: str, display_name: str, source_name: str) -> None:
+        self._publish_progress([
+            SyncStats(
+                list_name=list_name,
+                display_name=display_name,
+                source_name=source_name,
+                items_fetched=0,
+            )
+        ], force=True)
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:
