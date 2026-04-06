@@ -35,7 +35,6 @@ The project is built around the web UI, persistent profiles, and Docker-first de
 
 - Anime list sync
 - Public username sync
-- Optional token for private lists
 
 ### Trakt
 
@@ -252,7 +251,7 @@ The selected resume source runs when you press `Sync Resume Progress`.
 ## Source Notes
 
 - SIMKL app setup may ask for a redirect URL, but SyncMeta uses PIN auth in the UI.
-- AniList only needs a token for private lists.
+- AniList sync uses your public username in the web UI.
 - Trakt app setup may ask for a redirect URL, but SyncMeta uses device auth in the UI.
 - MDBList uses an API key from your MDBList account for both My Lists and public-list search.
 - PublicMetaDB needs your API key from [publicmetadb.com/api-docs](https://publicmetadb.com/api-docs).

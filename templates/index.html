@@ -228,7 +228,6 @@
                 <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
                 <p class="desc">Connect AniList and choose which anime lists should sync into PublicMetaDB.</p>
                 <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty to sync anime from SIMKL</div></div>
-                <div class="form-row"><label>Access Token</label><input type="password" id="anilist-access-token" placeholder="Only for private lists" autocomplete="off"></div>
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
@@ -519,7 +518,6 @@
     function emptySecretState() {
       return {
         simkl: { client_secret_saved: false, access_token_saved: false },
-        anilist: { access_token_saved: false },
         trakt: { client_secret_saved: false, access_token_saved: false, refresh_token_saved: false },
         mdblist: { api_key_saved: false },
         pmdb: { api_key_saved: false },
@@ -722,7 +720,7 @@
         },
         anilist: {
           username: el('anilist-username').value.trim(),
-          access_token: el('anilist-access-token').value.trim(),
+          access_token: '',
           selected_statuses: anilistSelectedStatuses.slice(),
         },
         trakt: {
@@ -809,9 +807,6 @@
           client_secret_saved: !!simkl.client_secret_saved,
           access_token_saved: !!simkl.access_token_saved,
         },
-        anilist: {
-          access_token_saved: !!anilist.access_token_saved,
-        },
         trakt: {
           client_secret_saved: !!trakt.client_secret_saved,
           access_token_saved: !!trakt.access_token_saved,
@@ -832,7 +827,6 @@
       setSecretInputState('simkl-access-token', 'simkl', 'access_token_saved', 'From PIN auth or OAuth');
       simklSelectedStatuses = normalizeSimklSelectedStatuses(simkl.selected_statuses);
       el('anilist-username').value = anilist.username || '';
-      setSecretInputState('anilist-access-token', 'anilist', 'access_token_saved', 'Only for private lists');
       anilistSelectedStatuses = normalizeAniListSelectedStatuses(anilist.selected_statuses);
       el('trakt-client-id').value = trakt.client_id || '';
       setSecretInputState('trakt-client-secret', 'trakt', 'client_secret_saved', 'Required for device auth');
@@ -894,7 +888,7 @@
       renderActivityOptionVisibility();
       const creds = gatherCreds();
       setDot('dot-simkl', !!(creds.simkl.client_id && hasSecretInputOrSaved('simkl-access-token', 'simkl', 'access_token_saved')));
-      setDot('dot-anilist', !!(creds.anilist.username || hasSecretInputOrSaved('anilist-access-token', 'anilist', 'access_token_saved')));
+      setDot('dot-anilist', !!creds.anilist.username);
       setDot('dot-trakt', !!(creds.trakt.client_id && hasSecretInputOrSaved('trakt-access-token', 'trakt', 'access_token_saved')));
       setDot('dot-mdblist', hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved'));
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
