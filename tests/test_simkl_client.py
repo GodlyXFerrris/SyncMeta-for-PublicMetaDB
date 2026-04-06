@@ -185,6 +185,18 @@ class RecordingSimklClient(SimklClient):
             }
         return None
 
+    def _get_anime_root_media(self, anilist_id: int) -> dict | None:
+        if anilist_id == 177937:
+            return {
+                "id": 140960,
+                "idMal": 48675,
+                "title": {
+                    "romaji": "SPY x FAMILY",
+                    "english": "SPY x FAMILY",
+                },
+            }
+        return None
+
     @staticmethod
     def _fetch_tmdb_season_plan(tmdb_id: int) -> list[tuple[int, int]]:
         if tmdb_id == 7005:
@@ -215,6 +227,27 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(client.paths, ["/sync/all-items/anime/plan%20to%20watch"])
         self.assertEqual(grouped["anime"][0]["title"], "Demo Anime")
         self.assertEqual(grouped["anime"][0]["anilist_id"], "44")
+
+    def test_normalize_anime_item_adds_root_series_ids(self) -> None:
+        client = RecordingSimklClient()
+
+        normalized = client._normalize_item(
+            {
+                "show": {
+                    "title": "SPY x FAMILY Season 3",
+                    "year": 2025,
+                    "ids": {"anilist": 177937, "mal": 59027},
+                },
+                "status": "watching",
+            },
+            "anime",
+        )
+
+        self.assertEqual(normalized["root_anilist_id"], "140960")
+        self.assertEqual(normalized["root_mal_id"], "48675")
+        self.assertEqual(normalized["root_title"], "SPY x FAMILY")
+        self.assertEqual(normalized["ids"]["root_anilist"], "140960")
+        self.assertEqual(normalized["ids"]["root_mal"], "48675")
 
     def test_get_watched_history_parses_movies_shows_and_anime(self) -> None:
         client = RecordingSimklClient()

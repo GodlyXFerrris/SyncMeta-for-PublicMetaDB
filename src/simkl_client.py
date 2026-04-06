@@ -11,7 +11,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-from .config import SimklConfig
+from .config import AniListConfig, SimklConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +63,8 @@ class SimklClient:
         self._config = config
         self._session = self._build_session()
         self._tmdb_season_plan_cache: dict[int, list[tuple[int, int]]] = {}
+        self._anime_root_cache: dict[int, dict] = {}
+        self._anime_root_client = None
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -214,12 +216,22 @@ class SimklClient:
             return None
 
         ids = media.get("ids", {})
+        root_ids: dict[str, str] = {}
+        root_title = None
 
         # Determine the PublicMetaDB-compatible media type
         if media_type == "movies":
             pmdb_type = "movie"
         else:
             pmdb_type = "tv"  # Both shows and anime map to "tv"
+
+        if media_type == "anime":
+            root_ids = self._resolve_anime_root_ids(ids)
+            root_title = root_ids.get("root_title")
+            if root_ids.get("root_anilist"):
+                ids["root_anilist"] = root_ids["root_anilist"]
+            if root_ids.get("root_mal"):
+                ids["root_mal"] = root_ids["root_mal"]
 
         return {
             "title": media.get("title", "Unknown"),
@@ -230,12 +242,53 @@ class SimklClient:
             "tmdb_id": str(ids["tmdb"]) if ids.get("tmdb") else None,
             "mal_id": str(ids["mal"]) if ids.get("mal") else None,
             "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+            "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+            "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+            "root_title": root_title,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
             "status": entry.get("status"),
             "added_at": entry.get("added_to_watchlist_at"),
         }
+
+    def _resolve_anime_root_ids(self, ids: dict) -> dict[str, str]:
+        anilist_id = ids.get("anilist")
+        if not anilist_id:
+            return {}
+        try:
+            anilist_int = int(anilist_id)
+        except (TypeError, ValueError):
+            return {}
+        if anilist_int in self._anime_root_cache:
+            return dict(self._anime_root_cache[anilist_int])
+        root_media = self._get_anime_root_media(anilist_int)
+        if not isinstance(root_media, dict) or root_media.get("id") == anilist_int:
+            self._anime_root_cache[anilist_int] = {}
+            return {}
+        resolved = {
+            "root_anilist": str(root_media["id"]) if root_media.get("id") else "",
+            "root_mal": str(root_media["idMal"]) if root_media.get("idMal") else "",
+            "root_title": self._anime_root_title(root_media),
+        }
+        self._anime_root_cache[anilist_int] = resolved
+        return dict(resolved)
+
+    def _get_anime_root_media(self, anilist_id: int) -> dict | None:
+        if self._anime_root_client is None:
+            from .anilist_client import AniListClient
+
+            self._anime_root_client = AniListClient(AniListConfig())
+        return self._anime_root_client._get_root_media(anilist_id)
+
+    @staticmethod
+    def _anime_root_title(media: dict) -> str | None:
+        if not isinstance(media, dict):
+            return None
+        title = media.get("title")
+        if isinstance(title, dict):
+            return title.get("english") or title.get("romaji")
+        return None
 
     # ── Activities (for delta sync) ───────────────────────────────
 
