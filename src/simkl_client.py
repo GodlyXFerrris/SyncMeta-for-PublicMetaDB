@@ -59,12 +59,13 @@ SIMKL_HISTORY_STATUS_SCAN_ORDER = [
 class SimklClient:
     """Client for the SIMKL API v2."""
 
-    def __init__(self, config: SimklConfig):
+    def __init__(self, config: SimklConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
         self._tmdb_season_plan_cache: dict[int, list[tuple[int, int]]] = {}
         self._anime_root_cache: dict[int, dict] = {}
         self._anime_root_client = None
+        self._cancel_requested_callback = cancel_requested_callback
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
