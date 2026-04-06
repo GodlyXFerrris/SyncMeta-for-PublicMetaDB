@@ -390,6 +390,7 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
             sync_modes=modes,
             resolution_cache=profile.get("resolution_cache", {}),
+            failed_resolution_cache=profile.get("failed_resolution_cache", {}),
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]
@@ -400,6 +401,7 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             managed_lists=service.managed_lists,
             sync_modes=modes,
             resolution_cache=service.resolution_cache,
+            failed_resolution_cache=service.failed_resolution_cache,
         )
     except SyncCancelled:
         logger.info("Sync stopped for profile %s", profile_id[:8])

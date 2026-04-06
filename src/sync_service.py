@@ -83,6 +83,7 @@ class SyncService:
         cancel_requested_callback=None,
         sync_modes: dict | None = None,
         resolution_cache: dict | None = None,
+        failed_resolution_cache: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
@@ -96,6 +97,7 @@ class SyncService:
             self._pmdb,
             anime_root_resolver=self._make_anime_root_resolver(),
             initial_cache=resolution_cache,
+            initial_failed_cache=failed_resolution_cache,
         )
         self._status_callback = status_callback
         self._progress_callback = progress_callback
@@ -124,6 +126,10 @@ class SyncService:
     @property
     def resolution_cache(self) -> dict[str, int]:
         return self._matcher.resolution_cache
+
+    @property
+    def failed_resolution_cache(self) -> dict[str, str]:
+        return self._matcher.failed_resolution_cache
 
     @property
     def simkl(self) -> SimklClient:

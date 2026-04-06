@@ -1,6 +1,7 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
 import logging
+import time
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -122,17 +123,29 @@ class AniListClient:
         retry = Retry(
             total=3,
             backoff_factor=1.5,
-            status_forcelist=[429, 500, 502, 503],
+            # 429 is handled manually in _query to honour the Retry-After header.
+            status_forcelist=[500, 502, 503],
             allowed_methods=["POST"],
         )
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("https://", adapter)
         return session
 
-    def _query(self, query: str, variables: dict) -> dict | None:
+    def _query(self, query: str, variables: dict, _retries: int = 3) -> dict | None:
         logger.debug("AniList query variables=%s", variables)
         try:
             resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
+            if resp.status_code == 429 and _retries > 0:
+                # Honour the server-supplied Retry-After (seconds) rather than
+                # using blind exponential backoff.
+                retry_after = resp.headers.get("Retry-After") or resp.headers.get("X-RateLimit-Reset-After")
+                try:
+                    wait = max(1.0, min(float(retry_after), 120.0))
+                except (TypeError, ValueError):
+                    wait = 60.0
+                logger.warning("AniList rate limited; retrying in %.1fs (variables=%s)", wait, variables)
+                time.sleep(wait)
+                return self._query(query, variables, _retries=_retries - 1)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as exc:

@@ -1,6 +1,7 @@
 """Matching logic to resolve SIMKL items to PublicMetaDB TMDB IDs."""
 
 import logging
+import time
 
 from .publicmetadb_client import PublicMetaDBClient
 
@@ -20,11 +21,20 @@ _ROOT_LOOKUP_CHAIN = [
     ("anilist", "root_anilist_id"),
 ]
 
+# Failed resolutions are remembered for this long before being retried.
+_FAILED_CACHE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+
 
 class ItemMatcher:
     """Resolve normalized items to TMDB IDs usable by PublicMetaDB."""
 
-    def __init__(self, pmdb: PublicMetaDBClient, anime_root_resolver=None, initial_cache: dict | None = None):
+    def __init__(
+        self,
+        pmdb: PublicMetaDBClient,
+        anime_root_resolver=None,
+        initial_cache: dict | None = None,
+        initial_failed_cache: dict[str, str] | None = None,
+    ):
         self._pmdb = pmdb
         # Pre-populate with persisted resolutions from a previous sync run so
         # unchanged items resolve instantly without any external API calls.
@@ -33,20 +43,68 @@ class ItemMatcher:
         # Returns {"root": media_dict, ...} from the AniList prequel chain.
         # Used as a last resort for anime sequels that fail all direct lookups.
         self._anime_root_resolver = anime_root_resolver
+        # Failed resolutions keyed by cache_key → unix timestamp of failure.
+        # Items in here are skipped until the TTL expires, avoiding redundant
+        # AniList chain-walks and PMDB lookups for permanently unresolvable entries.
+        self._failed_cache: dict[str, float] = self._load_failed_cache(initial_failed_cache)
+
+    @staticmethod
+    def _load_failed_cache(raw: dict[str, str] | None) -> dict[str, float]:
+        """Convert persisted ISO-timestamp failed cache to float unix timestamps."""
+        if not raw:
+            return {}
+        result: dict[str, float] = {}
+        now = time.time()
+        cutoff = now - _FAILED_CACHE_TTL_SECONDS
+        for key, iso in raw.items():
+            try:
+                import datetime
+                ts = datetime.datetime.fromisoformat(iso).timestamp()
+                if ts > cutoff:
+                    result[key] = ts
+            except Exception:
+                pass
+        return result
 
     @property
     def resolution_cache(self) -> dict[str, int]:
         """Return only successful resolutions for persistence (excludes failures)."""
         return {k: v for k, v in self._cache.items() if isinstance(v, int)}
 
+    @property
+    def failed_resolution_cache(self) -> dict[str, str]:
+        """Return recent failed resolutions as {cache_key: iso_timestamp} for persistence."""
+        import datetime
+        now = time.time()
+        cutoff = now - _FAILED_CACHE_TTL_SECONDS
+        return {
+            key: datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).isoformat()
+            for key, ts in self._failed_cache.items()
+            if ts > cutoff
+        }
+
     def resolve_tmdb_id(self, item: dict) -> int | None:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""
         cache_key = self._cache_key(item)
+
+        # Return cached success immediately.
         if cache_key in self._cache:
             return self._cache[cache_key]
 
+        # Skip items that recently failed to resolve — no point retrying within TTL.
+        failed_at = self._failed_cache.get(cache_key)
+        if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
+            return None
+
         tmdb_id = self._try_resolve(item)
         self._cache[cache_key] = tmdb_id
+
+        if tmdb_id is None:
+            self._failed_cache[cache_key] = time.time()
+        else:
+            # Clear any stale failure record now that we have a result.
+            self._failed_cache.pop(cache_key, None)
+
         return tmdb_id
 
     def _try_resolve(self, item: dict) -> int | None:
@@ -162,6 +220,7 @@ class ItemMatcher:
     def _cache_key(item: dict) -> str:
         ids = item.get("ids", {})
         return (
+            f"{item.get('media_type', '')}:"
             f"{ids.get('simkl', '')}:"
             f"{item.get('imdb_id', '')}:"
             f"{item.get('tmdb_id', '')}:"
