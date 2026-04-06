@@ -52,7 +52,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Delete User Records", html)
         self.assertIn("Danger Zone", html)
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
-        self.assertIn("selected public Trakt lists", html)
+        self.assertIn("personal created lists, liked lists, and selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Watch History Source", html)
         self.assertIn("Only import SIMKL anime watch history", html)
@@ -198,8 +198,16 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["status"], "pending")
         self.assertTrue(data["message"])
 
+    @patch("web.TraktClient.get_personal_lists_metadata")
     @patch("web.TraktClient.get_liked_lists_metadata")
-    def test_trakt_catalogs_liked_lists(self, mock_get_liked_lists_metadata) -> None:
+    def test_trakt_catalogs_personal_and_liked_lists(self, mock_get_liked_lists_metadata, mock_get_personal_lists_metadata) -> None:
+        mock_get_personal_lists_metadata.return_value = [{
+            "name": "My Anime Picks",
+            "user": "demo",
+            "slug": "my-anime-picks",
+            "source": "personal",
+            "item_count": 5,
+        }]
         mock_get_liked_lists_metadata.return_value = [{
             "name": "Anime",
             "user": "demo",
@@ -216,8 +224,9 @@ class WebTests(unittest.TestCase):
         data = response.get_json()
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(data["items"]), 1)
-        self.assertEqual(data["items"][0]["slug"], "anime")
+        self.assertEqual(len(data["items"]), 2)
+        self.assertEqual(data["items"][0]["source"], "personal")
+        self.assertEqual(data["items"][1]["slug"], "anime")
 
     @patch("web.TraktClient.search_lists")
     def test_trakt_catalogs_search(self, mock_search_lists) -> None:

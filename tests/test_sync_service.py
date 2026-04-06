@@ -284,6 +284,7 @@ class SyncServiceTests(unittest.TestCase):
         config.trakt.sync_liked_lists = False
         config.trakt.selected_lists = [
             {"name": "Recommended Movies", "user": "me", "slug": "recommended-movies", "source": "default", "catalog_key": "recommended-movies"},
+            {"name": "My TV Picks", "user": "me", "slug": "my-tv-picks", "source": "personal"},
             {"name": "Public Liked", "user": "demo", "slug": "public-liked", "source": "liked"},
             {"name": "Discover Picks", "user": "demo", "slug": "discover-picks", "source": "discover"},
         ]
@@ -308,6 +309,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertFalse(visibility_by_name["Watchlist - Movies"])
         self.assertFalse(visibility_by_name["Watchlist - Series"])
         self.assertFalse(visibility_by_name["Recommended Movies"])
+        self.assertFalse(visibility_by_name["My TV Picks"])
         self.assertTrue(visibility_by_name["Public Liked"])
         self.assertTrue(visibility_by_name["Discover Picks"])
         self.assertTrue(visibility_by_name["Popular Netflix Movies"])
