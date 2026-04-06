@@ -1,7 +1,6 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
 import logging
-import time
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -84,6 +83,14 @@ query ($id: Int) {
 }
 """
 
+_MAL_TO_ANILIST_QUERY = """
+query ($idMal: Int) {
+  Media(idMal: $idMal, type: ANIME) {
+    id
+  }
+}
+"""
+
 _ROOT_FORMAT_PRIORITY = {
     "TV": 0,
     "TV_SHORT": 0,
@@ -102,7 +109,6 @@ class AniListClient:
         self._session = self._build_session()
         self._root_cache: dict[int, dict | None] = {}
         self._root_context_cache: dict[int, dict | None] = {}
-        self._rate_limited_until = 0.0
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -116,7 +122,7 @@ class AniListClient:
         retry = Retry(
             total=3,
             backoff_factor=1.5,
-            status_forcelist=[500, 502, 503],
+            status_forcelist=[429, 500, 502, 503],
             allowed_methods=["POST"],
         )
         adapter = HTTPAdapter(max_retries=retry)
@@ -124,26 +130,26 @@ class AniListClient:
         return session
 
     def _query(self, query: str, variables: dict) -> dict | None:
-        if self._rate_limited_until > time.time():
-            logger.info("AniList root lookups temporarily paused after rate limiting")
-            return None
         logger.debug("AniList query variables=%s", variables)
         try:
             resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
             resp.raise_for_status()
             data = resp.json()
         except requests.RequestException as exc:
-            response = getattr(exc, "response", None)
-            status_code = getattr(response, "status_code", None)
-            if status_code == 429 or "429" in str(exc):
-                self._rate_limited_until = time.time() + 300
-                logger.warning("AniList rate limited; skipping further root lookups for 5 minutes")
             logger.warning("AniList request failed for variables=%s: %s", variables, exc)
             return None
         if "errors" in data:
             logger.error("AniList GraphQL errors: %s", data["errors"])
             return None
         return data.get("data")
+
+    def get_anilist_id_by_mal(self, mal_id: int) -> int | None:
+        """Resolve a MAL ID to its AniList ID, or None if not found."""
+        data = self._query(_MAL_TO_ANILIST_QUERY, {"idMal": mal_id})
+        media = (data or {}).get("Media")
+        if isinstance(media, dict):
+            return media.get("id")
+        return None
 
     def get_watching(self) -> list[dict]:
         """Fetch anime with status CURRENT (watching)."""
