@@ -123,9 +123,13 @@ class AniListClient:
 
     def _query(self, query: str, variables: dict) -> dict | None:
         logger.debug("AniList query variables=%s", variables)
-        resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as exc:
+            logger.warning("AniList request failed for variables=%s: %s", variables, exc)
+            return None
         if "errors" in data:
             logger.error("AniList GraphQL errors: %s", data["errors"])
             return None

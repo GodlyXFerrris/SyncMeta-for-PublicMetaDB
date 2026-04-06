@@ -1,5 +1,7 @@
 import unittest
 
+import requests
+
 from src.anilist_client import AniListClient
 from src.config import AniListConfig
 
@@ -77,6 +79,19 @@ class AniListClientTests(unittest.TestCase):
 
         self.assertEqual(context["root"]["id"], 140960)
         self.assertEqual(context["episode_offset"], 25)
+
+    def test_query_returns_none_on_http_error(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+
+        class _Resp:
+            def raise_for_status(self) -> None:
+                raise requests.HTTPError("404 Client Error: Not Found for url: https://graphql.anilist.co/")
+
+        client._session.post = lambda *args, **kwargs: _Resp()
+
+        result = client._query("query {}", {"id": 1})
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":
