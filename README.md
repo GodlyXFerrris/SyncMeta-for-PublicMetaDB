@@ -9,12 +9,12 @@ SyncMeta is a self-hosted web app that syncs selected content from:
 
 into [PublicMetaDB](https://publicmetadb.com/api-docs).
 
-It is built around the web UI, persistent profiles, and Docker-first deployment. Each user saves a profile, connects their own source accounts, chooses what should sync, and lets the server keep those lists updated.
+The project is built around the web UI, persistent profiles, and Docker-first deployment. Each user saves a profile, connects their own source accounts, chooses what should sync, and lets the server keep those lists updated in the background.
 
 ## What SyncMeta Does
 
 - Syncs selected lists into PublicMetaDB
-- Supports one profile per user with UUID + password
+- Uses one profile per user with UUID + password
 - Stores source credentials securely on the server for background list sync
 - Supports private/public visibility per source group
 - Can remove items that no longer exist in the source
@@ -49,7 +49,8 @@ It is built around the web UI, persistent profiles, and Docker-first deployment.
 
 ### MDBList
 
-- Account lists
+- My Lists from your account
+- Public list search in the web UI
 - Per-list selection in the web UI
 
 ## Docker Setup
@@ -74,10 +75,10 @@ services:
 
 What this does:
 
-- runs the web app
-- exposes port `8080`
-- stores profile data in `./data`
-- keeps the scheduler inside the web process
+- Runs the web app
+- Exposes port `8080`
+- Stores profile data in `./data`
+- Keeps the scheduler inside the web process
 
 Stop it with:
 
@@ -101,16 +102,16 @@ Then open:
 
 In the web UI:
 
-- create a profile UUID
-- choose a password
-- save the profile
+- Create a profile UUID
+- Choose a password
+- Save the profile
 
 That profile stores:
 
-- source settings
-- selected lists
-- activity sync settings
-- encrypted source credentials
+- Source settings
+- Selected lists
+- Activity sync settings
+- Encrypted source credentials
 
 ### 3. Add your accounts
 
@@ -130,7 +131,8 @@ Examples:
 - SIMKL `Plan to Watch` anime
 - AniList `Planning`
 - Trakt watchlist
-- selected MDBList lists
+- Selected MDBList lists
+- Public MDBList lists from Discover
 
 ### 5. Run the dashboard actions
 
@@ -214,12 +216,13 @@ List sync can:
 
 - add new items
 - remove items that no longer exist in the source
-- delete SyncMeta-managed PMDB lists if you disable them and enable that option
+- Delete SyncMeta-managed PMDB lists if you disable them and enable that option
 
 List names stay clean, for example:
 
 - `Watching - Series`
 - `Plan to Watch - Movies`
+- `Watching - Anime`
 - `Planning - Anime`
 - `Recommended Movies`
 
@@ -251,7 +254,7 @@ The selected resume source runs when you press `Sync Resume Progress`.
 - SIMKL app setup may ask for a redirect URL, but SyncMeta uses PIN auth in the UI.
 - AniList only needs a token for private lists.
 - Trakt app setup may ask for a redirect URL, but SyncMeta uses device auth in the UI.
-- MDBList uses an API key from your MDBList account.
+- MDBList uses an API key from your MDBList account for both My Lists and public-list search.
 - PublicMetaDB needs your API key from [publicmetadb.com/api-docs](https://publicmetadb.com/api-docs).
 
 ## Main Routes
@@ -271,8 +274,8 @@ The selected resume source runs when you press `Sync Resume Progress`.
 - `/api/simkl/pin/check` - poll SIMKL PIN auth
 - `/api/trakt/device/start` - start Trakt device auth
 - `/api/trakt/device/check` - poll Trakt device auth
-- `/api/trakt/catalogs` - load Trakt lists
-- `/api/mdblist/lists` - load MDBList lists
+- `/api/trakt/catalogs` - load or search Trakt lists
+- `/api/mdblist/lists` - load or search MDBList lists
 
 ## Local Run Without Docker
 
