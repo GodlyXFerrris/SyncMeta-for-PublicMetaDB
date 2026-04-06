@@ -186,14 +186,23 @@ class RecordingSimklClient(SimklClient):
         return None
 
     def _get_anime_root_media(self, anilist_id: int) -> dict | None:
+        context = self._get_anime_root_context(anilist_id)
+        if isinstance(context, dict):
+            return context.get("root")
+        return None
+
+    def _get_anime_root_context(self, anilist_id: int) -> dict | None:
         if anilist_id == 177937:
             return {
-                "id": 140960,
-                "idMal": 48675,
-                "title": {
-                    "romaji": "SPY x FAMILY",
-                    "english": "SPY x FAMILY",
+                "root": {
+                    "id": 140960,
+                    "idMal": 48675,
+                    "title": {
+                        "romaji": "SPY x FAMILY",
+                        "english": "SPY x FAMILY",
+                    },
                 },
+                "episode_offset": 25,
             }
         return None
 
@@ -246,6 +255,7 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(normalized["root_anilist_id"], "140960")
         self.assertEqual(normalized["root_mal_id"], "48675")
         self.assertEqual(normalized["root_title"], "SPY x FAMILY")
+        self.assertEqual(normalized["root_episode_offset"], 25)
         self.assertEqual(normalized["ids"]["root_anilist"], "140960")
         self.assertEqual(normalized["ids"]["root_mal"], "48675")
 

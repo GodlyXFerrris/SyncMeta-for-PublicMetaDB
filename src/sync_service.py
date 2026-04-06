@@ -231,6 +231,7 @@ class SyncService:
         for item in items:
             self._check_cancelled()
             item = self._resolve_activity_item(item)
+            item = self._remap_simkl_anime_history_item(item)
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -267,7 +268,7 @@ class SyncService:
                 resolved = self._resolve_activity_item(item)
                 aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
                 if aggregate_rows:
-                    expanded.extend(aggregate_rows)
+                    expanded.extend(self._remap_simkl_anime_history_item(row) for row in aggregate_rows)
                 else:
                     logger.info(
                         "Skipping aggregate SIMKL anime history for '%s' because it could not be safely mapped to concrete seasons/episodes",
@@ -276,6 +277,32 @@ class SyncService:
                 continue
             expanded.append(item)
         return self._dedupe_activity_history_items(expanded)
+
+    def _remap_simkl_anime_history_item(self, item: dict) -> dict:
+        if str(item.get("simkl_type", "")).strip().lower() != "anime":
+            return item
+        if str(item.get("media_type", "")).strip().lower() != "tv":
+            return item
+        try:
+            offset = int(item.get("root_episode_offset") or 0)
+            tmdb_id = int(item.get("tmdb_id") or 0)
+            episode = int(item.get("episode") or 0)
+        except (TypeError, ValueError):
+            return item
+        if offset <= 0 or tmdb_id <= 0 or episode <= 0:
+            return item
+        try:
+            season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
+        except Exception:
+            return item
+        positive_seasons = [(season_number, count) for season_number, count in season_plan if season_number > 0 and count > 0]
+        if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
+            return {
+                **item,
+                "season": 1,
+                "episode": offset + episode,
+            }
+        return item
 
     def _sync_simkl_resume_progress(self) -> SyncStats:
         stats = SyncStats(

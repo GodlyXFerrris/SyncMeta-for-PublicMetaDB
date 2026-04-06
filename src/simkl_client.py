@@ -245,6 +245,7 @@ class SimklClient:
             "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
             "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
             "root_title": root_title,
+            "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
@@ -262,7 +263,8 @@ class SimklClient:
             return {}
         if anilist_int in self._anime_root_cache:
             return dict(self._anime_root_cache[anilist_int])
-        root_media = self._get_anime_root_media(anilist_int)
+        root_context = self._get_anime_root_context(anilist_int)
+        root_media = root_context.get("root") if isinstance(root_context, dict) else None
         if not isinstance(root_media, dict) or root_media.get("id") == anilist_int:
             self._anime_root_cache[anilist_int] = {}
             return {}
@@ -270,16 +272,25 @@ class SimklClient:
             "root_anilist": str(root_media["id"]) if root_media.get("id") else "",
             "root_mal": str(root_media["idMal"]) if root_media.get("idMal") else "",
             "root_title": self._anime_root_title(root_media),
+            "root_episode_offset": str(root_context.get("episode_offset", 0) or 0) if isinstance(root_context, dict) else "0",
         }
         self._anime_root_cache[anilist_int] = resolved
         return dict(resolved)
 
-    def _get_anime_root_media(self, anilist_id: int) -> dict | None:
+    def _get_anime_root_context(self, anilist_id: int) -> dict | None:
         if self._anime_root_client is None:
             from .anilist_client import AniListClient
 
             self._anime_root_client = AniListClient(AniListConfig())
-        return self._anime_root_client._get_root_media(anilist_id)
+        get_context = getattr(self._anime_root_client, "_get_root_context", None)
+        if callable(get_context):
+            return get_context(anilist_id)
+        root = self._anime_root_client._get_root_media(anilist_id)
+        return {"root": root, "episode_offset": 0}
+
+    def _get_anime_root_media(self, anilist_id: int) -> dict | None:
+        context = self._get_anime_root_context(anilist_id)
+        return context.get("root") if isinstance(context, dict) else None
 
     @staticmethod
     def _anime_root_title(media: dict) -> str | None:
@@ -430,6 +441,11 @@ class SimklClient:
         ids = show.get("ids", {}) or {}
         title = show.get("title", "Unknown")
         tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
+        root_ids = self._resolve_anime_root_ids(ids) if media_key == "anime" else {}
+        if root_ids.get("root_anilist"):
+            ids["root_anilist"] = root_ids["root_anilist"]
+        if root_ids.get("root_mal"):
+            ids["root_mal"] = root_ids["root_mal"]
         fallback_watched_at = (
             entry.get("last_watched_at")
             or entry.get("last_watched")
@@ -456,6 +472,10 @@ class SimklClient:
                 "imdb_id": ids.get("imdb"),
                 "mal_id": str(ids["mal"]) if ids.get("mal") else None,
                 "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+                "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+                "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+                "root_title": root_ids.get("root_title"),
+                "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
                 "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
                 "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
                 "ids": ids,
@@ -685,6 +705,11 @@ class SimklClient:
             return []
 
         ids = show.get("ids", {}) or {}
+        root_ids = self._resolve_anime_root_ids(ids)
+        if root_ids.get("root_anilist"):
+            ids["root_anilist"] = root_ids["root_anilist"]
+        if root_ids.get("root_mal"):
+            ids["root_mal"] = root_ids["root_mal"]
         watched_count = entry.get("watched_episodes_count")
         total_count = entry.get("total_episodes_count")
         try:
@@ -730,6 +755,10 @@ class SimklClient:
             "imdb_id": ids.get("imdb"),
             "mal_id": str(ids["mal"]) if ids.get("mal") else None,
             "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+            "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+            "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+            "root_title": root_ids.get("root_title"),
+            "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,

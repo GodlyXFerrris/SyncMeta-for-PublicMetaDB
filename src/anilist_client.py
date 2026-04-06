@@ -46,6 +46,7 @@ query ($id: Int) {
   Media(id: $id, type: ANIME) {
     id
     idMal
+    episodes
     format
     seasonYear
     startDate {
@@ -63,6 +64,7 @@ query ($id: Int) {
         node {
           id
           idMal
+          episodes
           format
           seasonYear
           startDate {
@@ -98,6 +100,7 @@ class AniListClient:
         self._config = config
         self._session = self._build_session()
         self._root_cache: dict[int, dict | None] = {}
+        self._root_context_cache: dict[int, dict | None] = {}
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -202,8 +205,18 @@ class AniListClient:
         }
 
     def _get_root_media(self, media_id: int) -> dict | None:
+        context = self._get_root_context(media_id)
+        return (context or {}).get("root")
+
+    def _get_root_context(self, media_id: int) -> dict | None:
+        if media_id in self._root_context_cache:
+            return self._root_context_cache[media_id]
+
         if media_id in self._root_cache:
-            return self._root_cache[media_id]
+            root = self._root_cache[media_id]
+            context = {"root": root, "episode_offset": 0}
+            self._root_context_cache[media_id] = context
+            return context
 
         seen: set[int] = set()
         chain: list[dict] = []
@@ -223,12 +236,28 @@ class AniListClient:
             current_id = prequel.get("id")
 
         root = self._pick_root_candidate(chain)
+        chronological_chain = list(reversed(chain))
+        running_offset = 0
+        context_by_id: dict[int, dict] = {}
+        for media in chronological_chain:
+            candidate_id = media.get("id")
+            if candidate_id:
+                context_by_id[int(candidate_id)] = {
+                    "root": root,
+                    "episode_offset": running_offset,
+                }
+            try:
+                running_offset += int(media.get("episodes") or 0)
+            except (TypeError, ValueError):
+                pass
         for candidate in chain:
             candidate_id = candidate.get("id")
             if candidate_id:
                 self._root_cache[int(candidate_id)] = root
+                self._root_context_cache[int(candidate_id)] = context_by_id.get(int(candidate_id), {"root": root, "episode_offset": 0})
         self._root_cache[media_id] = root
-        return root
+        self._root_context_cache[media_id] = context_by_id.get(media_id, {"root": root, "episode_offset": 0})
+        return self._root_context_cache[media_id]
 
     @classmethod
     def _pick_prequel(cls, edges: list[dict]) -> dict | None:

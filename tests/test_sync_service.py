@@ -33,6 +33,11 @@ class StubSimklClient:
     def expand_aggregate_history_item(self, item: dict) -> list[dict]:
         return []
 
+    def _get_tmdb_season_plan_cached(self, tmdb_id: int) -> list[tuple[int, int]]:
+        if tmdb_id == 9501:
+            return [(1, 25), (2, 0)]
+        return []
+
 
 class StubMatcher:
     def resolve_tmdb_id(self, item: dict) -> int | None:
@@ -619,6 +624,63 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_fetched, 0)
         self.assertEqual(watched_stats.items_added, 0)
         self.assertEqual(pmdb.watched, [])
+
+    def test_simkl_history_remaps_sequel_anime_into_single_root_season(self) -> None:
+        class OffsetAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [
+                    {
+                        "tmdb_id": 9501,
+                        "media_type": "tv",
+                        "simkl_type": "anime",
+                        "season": 1,
+                        "episode": 1,
+                        "watched_at": "2026-04-01T13:00:00Z",
+                        "title": "Hell's Paradise 2",
+                        "root_episode_offset": 13,
+                    },
+                    {
+                        "tmdb_id": 9501,
+                        "media_type": "tv",
+                        "simkl_type": "anime",
+                        "season": 1,
+                        "episode": 12,
+                        "watched_at": "2026-04-01T13:00:00Z",
+                        "title": "Hell's Paradise 2",
+                        "root_episode_offset": 13,
+                    },
+                ]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = OffsetAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        service.run()
+
+        self.assertEqual(
+            [(item["season"], item["episode"]) for item in pmdb.watched],
+            [(1, 14), (1, 25)],
+        )
 
     def test_history_sync_always_fetches_full_source_history(self) -> None:
         config = AppConfig(
