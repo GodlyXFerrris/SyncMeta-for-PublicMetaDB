@@ -134,6 +134,26 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(failed["history"][0]["status"], "failed")
         self.assertEqual(failed["history"][0]["error_message"], "Boom")
 
+    def test_update_sync_progress_exposes_live_results(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        self.store.claim_profile_for_sync(created["profile_id"], "secret")
+
+        updated = self.store.update_sync_progress(created["profile_id"], [{
+            "list_name": "Watching - Series",
+            "display_name": "Watching - Series",
+            "source_name": "SIMKL",
+            "items_fetched": 20,
+            "items_resolved": 12,
+            "items_added": 4,
+            "items_removed": 0,
+            "items_skipped_duplicate": 3,
+            "items_skipped_unresolved": 1,
+            "error_count": 0,
+        }])
+
+        self.assertEqual(len(updated["sync_live_results"]), 1)
+        self.assertEqual(updated["sync_live_results"][0]["items_fetched"], 20)
+
     def test_sync_success_persists_managed_lists(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
 

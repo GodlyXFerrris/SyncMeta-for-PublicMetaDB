@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from .config import AppConfig
@@ -76,6 +77,7 @@ class SyncService:
         self,
         config: AppConfig,
         status_callback=None,
+        progress_callback=None,
         managed_lists: list[dict] | None = None,
         cancel_requested_callback=None,
         sync_modes: dict | None = None,
@@ -87,9 +89,12 @@ class SyncService:
         self._pmdb = PublicMetaDBClient(config.pmdb)
         self._matcher = ItemMatcher(self._pmdb)
         self._status_callback = status_callback
+        self._progress_callback = progress_callback
         self._managed_lists = self._normalize_managed_lists(managed_lists)
         self._cancel_requested_callback = cancel_requested_callback
         self._sync_modes = self._normalize_sync_modes(sync_modes, config)
+        self._last_progress_publish = 0.0
+        self._live_progress_rows: dict[str, dict] = {}
 
     @property
     def simkl(self) -> SimklClient:
@@ -112,15 +117,19 @@ class SyncService:
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
             all_stats.extend(self._sync_simkl())
+            self._publish_progress(all_stats, force=True)
 
             if self._config.anilist.enabled and self._config.anilist.selected_statuses:
                 all_stats.extend(self._sync_anilist())
+                self._publish_progress(all_stats, force=True)
 
             if self._config.trakt.enabled:
                 all_stats.extend(self._sync_trakt())
+                self._publish_progress(all_stats, force=True)
 
             if self._config.mdblist.enabled:
                 all_stats.extend(self._sync_mdblist())
+                self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["history"] or self._sync_modes["resume"]:
             activity_rows: list[SyncStats] = []
@@ -129,6 +138,7 @@ class SyncService:
             if self._config.trakt.enabled:
                 activity_rows.extend(self._sync_trakt_activity())
             all_stats.extend(self._merge_activity_stats(activity_rows))
+            self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["lists"] and not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
             desired_names = {stats.list_name for stats in all_stats if stats.list_name}
@@ -767,11 +777,13 @@ class SyncService:
             source_name=source_name or "",
             items_fetched=len(source_items),
         )
+        self._remember_progress_row(stats)
         self._set_status(f"Processing {actual_list_name}")
         logger.info("Syncing '%s': %d source items", actual_list_name, len(source_items))
 
         if not source_items:
             logger.info("  No items for '%s', skipping", actual_list_name)
+            self._publish_progress([stats], force=True)
             return stats
 
         self._set_status(f"Resolving IDs for {actual_list_name}")
@@ -784,6 +796,7 @@ class SyncService:
                 stats.items_resolved += 1
             else:
                 stats.items_skipped_unresolved += 1
+            self._publish_progress([stats])
 
         if self._config.sync.dry_run:
             return self._dry_run_report(resolved, actual_list_name, stats)
@@ -801,6 +814,7 @@ class SyncService:
         except Exception as exc:
             stats.errors.append(f"Failed to get/create list: {exc}")
             logger.error("Failed to get/create list '%s': %s", actual_list_name, exc)
+            self._publish_progress([stats], force=True)
             return stats
 
         list_id = pmdb_list["id"]
@@ -817,11 +831,13 @@ class SyncService:
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
                 stats.items_skipped_duplicate += 1
+                self._publish_progress([stats])
                 continue
             desired_keys.add(key)
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1
+                self._publish_progress([stats])
                 continue
 
             try:
@@ -832,14 +848,17 @@ class SyncService:
                     "media_type": media_type,
                 }
                 stats.items_added += 1
+                self._publish_progress([stats])
             except Exception as exc:
                 message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"
                 stats.errors.append(message)
                 logger.error(message)
+                self._publish_progress([stats], force=True)
 
         if self._config.sync.remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
+            self._publish_progress([stats], force=True)
 
         return stats
 
@@ -903,6 +922,36 @@ class SyncService:
                 self._status_callback(status)
             except Exception:
                 logger.debug("Status callback failed", exc_info=True)
+
+    def _publish_progress(self, rows: list[SyncStats], force: bool = False) -> None:
+        if not self._progress_callback:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_progress_publish < 5.0:
+            return
+        try:
+            for row in rows:
+                self._remember_progress_row(row)
+            payload = list(self._live_progress_rows.values())
+            self._progress_callback(payload)
+            self._last_progress_publish = now
+        except Exception:
+            logger.debug("Progress callback failed", exc_info=True)
+
+    def _remember_progress_row(self, row: SyncStats) -> None:
+        key = row.list_name or row.display_name or f"activity:{row.source_name}"
+        self._live_progress_rows[key] = {
+            "list_name": row.list_name,
+            "display_name": row.display_name,
+            "source_name": row.source_name,
+            "items_fetched": row.items_fetched,
+            "items_resolved": row.items_resolved,
+            "items_added": row.items_added,
+            "items_removed": row.items_removed,
+            "items_skipped_duplicate": row.items_skipped_duplicate,
+            "items_skipped_unresolved": row.items_skipped_unresolved,
+            "error_count": len(row.errors),
+        }
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:

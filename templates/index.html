@@ -1913,7 +1913,9 @@
         deletingManagedListName = '';
       }
 
-      const results = profile.last_results || [];
+      const results = profile.sync_running && Array.isArray(profile.sync_live_results) && profile.sync_live_results.length
+        ? profile.sync_live_results
+        : (profile.last_results || []);
       const history = profile.history || [];
       const visibleHistory = history.slice(0, 25);
       const options = profile.options || {};
@@ -1950,7 +1952,9 @@
         ? `Profile ${profileShort} - ${liveStatus}${liveStamp ? ` - ${liveStamp}` : ''}`
         : `Profile ${profileShort} - ${nextSyncText}`;
 
-      el('results-time').textContent = profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '';
+      el('results-time').textContent = profile.sync_running
+        ? 'Live progress'
+        : (profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '');
       if (!results.length) {
         currentResultsPage = 1;
         el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';

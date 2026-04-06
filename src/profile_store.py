@@ -528,6 +528,7 @@ class ProfileStore:
             "updated_at": raw_profile.get("updated_at") or created_at,
             "last_sync": raw_profile.get("last_sync"),
             "last_results": list(raw_profile.get("last_results", [])),
+            "sync_live_results": list(raw_profile.get("sync_live_results", [])),
             "sync_running": False,
             "sync_cancel_requested": False,
             "sync_error": raw_profile.get("sync_error"),
@@ -566,6 +567,7 @@ class ProfileStore:
             "updated_at": profile.get("updated_at"),
             "last_sync": profile.get("last_sync"),
             "last_results": copy.deepcopy(profile.get("last_results", [])),
+            "sync_live_results": copy.deepcopy(profile.get("sync_live_results", [])),
             "sync_error": profile.get("sync_error"),
             "sync_status": profile.get("sync_status"),
             "sync_started_at": profile.get("sync_started_at"),
@@ -680,6 +682,7 @@ class ProfileStore:
             "updated_at": profile.get("updated_at"),
             "last_sync": profile.get("last_sync"),
             "last_results": copy.deepcopy(profile.get("last_results", [])),
+            "sync_live_results": copy.deepcopy(profile.get("sync_live_results", [])),
             "sync_running": bool(profile.get("sync_running")),
             "sync_cancel_requested": bool(profile.get("sync_cancel_requested")),
             "sync_error": profile.get("sync_error"),
@@ -717,6 +720,7 @@ class ProfileStore:
             "updated_at": now,
             "last_sync": None,
             "last_results": [],
+            "sync_live_results": [],
             "sync_running": False,
             "sync_cancel_requested": False,
             "sync_error": None,
@@ -772,6 +776,7 @@ class ProfileStore:
             profile["sync_error"] = None
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
+                profile["sync_live_results"] = []
                 if normalized_options["auto_sync"]:
                     profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
                 else:
@@ -803,6 +808,7 @@ class ProfileStore:
             profile["sync_error"] = None
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
+                profile["sync_live_results"] = []
                 if normalized_options["auto_sync"]:
                     profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
                 else:
@@ -831,6 +837,7 @@ class ProfileStore:
             profile["sync_status"] = "Queued"
             profile["sync_started_at"] = now
             profile["sync_updated_at"] = now
+            profile["sync_live_results"] = []
             self._save_locked()
             claimed = copy.deepcopy(profile)
             claimed["pending_sync_modes"] = self._normalize_sync_modes(sync_modes)
@@ -848,6 +855,7 @@ class ProfileStore:
             profile["sync_status"] = "Queued"
             profile["sync_started_at"] = now
             profile["sync_updated_at"] = now
+            profile["sync_live_results"] = []
             self._save_locked()
             claimed = copy.deepcopy(profile)
             claimed["pending_sync_modes"] = self._normalize_sync_modes(sync_modes)
@@ -886,6 +894,7 @@ class ProfileStore:
                 profile["sync_status"] = "Queued"
                 profile["sync_started_at"] = now_iso
                 profile["sync_updated_at"] = now_iso
+                profile["sync_live_results"] = []
                 claimed = copy.deepcopy(profile)
                 claimed["pending_sync_modes"] = due_modes
                 due_profiles.append(claimed)
@@ -915,6 +924,7 @@ class ProfileStore:
                     for row in results
                     if str(row.get("list_name", "")).strip()
                 ]
+            profile["sync_live_results"] = []
             if managed_lists is not None:
                 profile["managed_lists"] = _normalize_managed_lists(managed_lists)
             self._merge_activity_results(profile, results, now)
@@ -949,6 +959,7 @@ class ProfileStore:
             profile["sync_status"] = f"Failed: {error_message}"
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
+            profile["sync_live_results"] = []
             self._append_history_entry(
                 profile,
                 now,
@@ -992,6 +1003,7 @@ class ProfileStore:
             profile["sync_status"] = "Stopped"
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
+            profile["sync_live_results"] = []
             self._append_history_entry(profile, now, dry_run, results=[], status="stopped")
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
             self._save_locked()
@@ -1003,6 +1015,18 @@ class ProfileStore:
             profile = self._profiles[normalized_id]
             now = utc_now_iso()
             profile["sync_status"] = status
+            profile["sync_updated_at"] = now
+            if profile["sync_started_at"] is None:
+                profile["sync_started_at"] = now
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
+    def update_sync_progress(self, profile_id: str, results: list[dict]) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            now = utc_now_iso()
+            profile["sync_live_results"] = copy.deepcopy(results or [])
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
