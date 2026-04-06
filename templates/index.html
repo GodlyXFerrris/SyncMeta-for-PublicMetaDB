@@ -392,14 +392,22 @@
           </div>
           <div class="form-section full">
             <h3>MDBList Lists</h3>
-            <p class="desc">Refresh your MDBList lists, then select the personal or public-style catalogs you want to sync.</p>
+            <p class="desc">Choose personal MDBList lists from My Lists, or search public MDBList lists in Discover.</p>
+            <div class="catalog-tabs">
+              <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
+              <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>
+            </div>
             <div class="catalog-toolbar">
               <span class="actions-meta" id="mdblist-status">Enter your MDBList API key, then refresh your lists.</span>
               <div class="actions-bar" style="margin-top:0">
-                <button class="btn btn-sm" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
+                <button class="btn btn-sm" id="btn-mdblist-refresh" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
                 <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
                 <button class="btn btn-sm" type="button" onclick="deselectAllVisibleMdbListLists()">Deselect All</button>
               </div>
+            </div>
+            <div class="catalog-search hidden" id="mdblist-discover-search">
+              <input type="text" id="mdblist-discover-query" placeholder="Search public MDBList lists..." autocomplete="off">
+              <button class="btn btn-sm" type="button" onclick="searchMdbListLists()">Search</button>
             </div>
             <div class="catalog-list" id="mdblist-list"></div>
           </div>
@@ -493,7 +501,9 @@
     let traktSelectedLists = [];
     let traktSyncAllLikedLists = false;
     let traktDefaultCatalogsInitialized = false;
+    let mdblistCatalogTab = 'my-lists';
     let mdblistLists = [];
+    let mdblistDiscoverLists = [];
     let mdblistSelectedLists = [];
     let sessionProfileId = '';
     let secretState = emptySecretState();
@@ -840,6 +850,7 @@
       setSecretInputState('mdblist-api-key', 'mdblist', 'api_key_saved', 'From mdblist.com settings');
       mdblistSelectedLists = normalizeMdbListSelectedLists(mdblist.selected_lists || []);
       mdblistLists = [];
+      mdblistDiscoverLists = [];
       setSecretInputState('pmdb-api-key', 'pmdb', 'api_key_saved', 'pm-...');
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
@@ -1386,8 +1397,13 @@
       node.style.color = isError ? 'var(--red)' : '';
     }
 
+    function switchMdbListTab(tab) {
+      mdblistCatalogTab = tab === 'discover' ? 'discover' : 'my-lists';
+      renderMdbListLists();
+    }
+
     function findMdbListByKey(key) {
-      const items = mdblistLists.concat(mdblistSelectedLists);
+      const items = mdblistLists.concat(mdblistDiscoverLists).concat(mdblistSelectedLists);
       for (const item of items) {
         if (mdbListKey(item) === key) return item;
       }
@@ -1415,20 +1431,29 @@
     }
 
     function renderMdbListLists() {
+      document.querySelectorAll('[data-mdblist-tab]').forEach(node => {
+        node.classList.toggle('active', node.dataset.mdblistTab === mdblistCatalogTab);
+      });
+      el('mdblist-discover-search').classList.toggle('hidden', mdblistCatalogTab !== 'discover');
+      el('btn-mdblist-refresh').classList.toggle('hidden', mdblistCatalogTab !== 'my-lists');
+
       if (!hasSecretInputOrSaved('mdblist-api-key', 'mdblist', 'api_key_saved')) {
         setMdbListStatus('Enter your MDBList API key, then refresh your lists.', false);
       } else if (mdblistSelectedLists.length) {
         setMdbListStatus(`${mdblistSelectedLists.length} MDBList list${mdblistSelectedLists.length === 1 ? '' : 's'} selected.`, false);
+      } else if (mdblistCatalogTab === 'discover') {
+        setMdbListStatus('Search public MDBList lists to add them here.', false);
       } else {
         setMdbListStatus('Refresh your MDBList lists, then choose what should sync.', false);
       }
 
-      const items = mdblistLists.length
-        ? normalizeMdbListSelectedLists(mdblistLists.concat(mdblistSelectedLists))
-        : mdblistSelectedLists;
+      const baseItems = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : mdblistLists;
+      const items = baseItems.length
+        ? normalizeMdbListSelectedLists(baseItems.concat(mdblistSelectedLists))
+        : (mdblistCatalogTab === 'discover' ? [] : mdblistSelectedLists);
 
       if (!items.length) {
-        el('mdblist-list').innerHTML = '<div class="empty">No MDBList lists loaded yet.</div>';
+        el('mdblist-list').innerHTML = `<div class="empty">${mdblistCatalogTab === 'discover' ? 'Search for a public MDBList list to add it here.' : 'No MDBList lists loaded yet.'}</div>`;
         return;
       }
 
@@ -1459,14 +1484,16 @@
     }
 
     function selectAllVisibleMdbListLists() {
-      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(mdblistLists.length ? mdblistLists : mdblistSelectedLists));
+      const visible = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : (mdblistLists.length ? mdblistLists : mdblistSelectedLists);
+      mdblistSelectedLists = normalizeMdbListSelectedLists(mdblistSelectedLists.concat(visible));
       renderMdbListLists();
       updateDots();
       saveDraft();
     }
 
     function deselectAllVisibleMdbListLists() {
-      const visibleKeys = new Set((mdblistLists.length ? mdblistLists : mdblistSelectedLists).map(item => mdbListKey(item)));
+      const visible = mdblistCatalogTab === 'discover' ? mdblistDiscoverLists : (mdblistLists.length ? mdblistLists : mdblistSelectedLists);
+      const visibleKeys = new Set(visible.map(item => mdbListKey(item)));
       mdblistSelectedLists = normalizeMdbListSelectedLists(
         mdblistSelectedLists.filter(item => !visibleKeys.has(mdbListKey(item)))
       );
@@ -1497,6 +1524,33 @@
         }
       } catch {
         setMdbListStatus('Network error while loading MDBList lists.', true);
+      }
+    }
+
+    async function searchMdbListLists() {
+      const apiKey = el('mdblist-api-key').value.trim();
+      if (!apiKey && !hasSavedSecret('mdblist', 'api_key_saved')) {
+        showToast('Enter your MDBList API key first.', true, false);
+        return;
+      }
+      const query = el('mdblist-discover-query').value.trim();
+      if (!query) {
+        showToast('Enter a search term for MDBList lists.', true, false);
+        return;
+      }
+      setMdbListStatus(`Searching MDBList for "${query}"...`, false);
+      try {
+        const payload = { query: query };
+        if (apiKey) payload.api_key = apiKey;
+        const result = await apiPost('/api/mdblist/lists', payload);
+        if (!result.ok) {
+          setMdbListStatus(formatApiError(result.data, 'Could not search MDBList lists.'), true);
+          return;
+        }
+        mdblistDiscoverLists = Array.isArray(result.data.items) ? normalizeMdbListSelectedLists(result.data.items) : [];
+        renderMdbListLists();
+      } catch {
+        setMdbListStatus('Network error while searching MDBList lists.', true);
       }
     }
 

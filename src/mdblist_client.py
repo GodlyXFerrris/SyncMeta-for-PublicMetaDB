@@ -51,6 +51,35 @@ class MdbListClient:
         items = [self._normalize_list_metadata(item) for item in payload]
         return [item for item in items if item]
 
+    def search_public_lists(self, query: str) -> list[dict]:
+        """Search public MDBList lists."""
+        query = str(query or "").strip()
+        if not query:
+            return []
+
+        attempts = [
+            ("/search/lists", {"query": query}),
+            ("/lists/search", {"query": query}),
+        ]
+
+        last_error: Exception | None = None
+        for path, params in attempts:
+            try:
+                response = self._get(path, params)
+                payload = response.json() or []
+                batch = self._extract_list_results(payload)
+                items = [self._normalize_list_metadata(item) for item in batch]
+                return [item for item in items if item and not item.get("private")]
+            except requests.HTTPError as exc:
+                last_error = exc
+                if exc.response is not None and exc.response.status_code == 404:
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        return []
+
     def get_list_items(self, list_id: int) -> list[dict]:
         """Fetch all items for a list, following offset pagination."""
         offset = 0
@@ -95,6 +124,19 @@ class MdbListClient:
             if isinstance(values, list):
                 combined.extend(values)
         return combined
+
+    @staticmethod
+    def _extract_list_results(payload: list | dict) -> list[dict]:
+        if isinstance(payload, list):
+            return payload
+        if not isinstance(payload, dict):
+            return []
+
+        for key in ["results", "lists", "items", "data"]:
+            values = payload.get(key)
+            if isinstance(values, list):
+                return values
+        return []
 
     @staticmethod
     def _has_more(response: requests.Response, payload: list | dict) -> bool:

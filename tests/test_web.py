@@ -37,6 +37,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("SIMKL Lists", html)
         self.assertIn("AniList Lists", html)
         self.assertIn("MDBList Lists", html)
+        self.assertIn("Search public MDBList lists", html)
         self.assertIn("dot-mdblist", html)
         self.assertIn("If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
         self.assertIn("If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
@@ -257,6 +258,26 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(data["items"][0]["id"], 7)
+
+    @patch("web.MdbListClient.search_public_lists")
+    def test_mdblist_lists_search(self, mock_search_public_lists) -> None:
+        mock_search_public_lists.return_value = [{
+            "id": 11,
+            "name": "Popular Movies",
+            "mediatype": "movie",
+            "user_name": "demo",
+        }]
+
+        response = self.client.post("/api/mdblist/lists", json={
+            "api_key": "mdb-key",
+            "query": "popular",
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["query"], "popular")
+        self.assertEqual(len(data["items"]), 1)
+        self.assertEqual(data["items"][0]["id"], 11)
 
     def test_login_uses_session_and_masks_saved_secrets(self) -> None:
         profile = web._profile_store.create_profile("secret", {

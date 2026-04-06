@@ -907,6 +907,7 @@ def api_mdblist_lists():
     body = request.get_json(silent=True) or {}
     private_profile = _current_private_profile()
     api_key = str(body.get("api_key", "")).strip()
+    query = str(body.get("query", "")).strip()
     if not api_key and private_profile:
         api_key = private_profile["credentials"]["mdblist"]["api_key"]
 
@@ -915,12 +916,12 @@ def api_mdblist_lists():
 
     try:
         client = MdbListClient(MdbListConfig(api_key=api_key))
-        items = client.get_user_lists()
+        items = client.search_public_lists(query) if query else client.get_user_lists()
     except Exception as exc:
         logger.exception("Failed to load MDBList lists")
         return _json_error(f"Failed to load MDBList lists: {exc}", 400)
 
-    return jsonify({"items": items})
+    return jsonify({"items": items, "query": query})
 
 
 @app.route("/api/profile/save", methods=["POST"])
