@@ -490,7 +490,6 @@
       { name: 'Recommended Series', user: 'default', slug: 'recommended-series', source: 'default', catalog_key: 'recommended-series', description: 'Trakt default catalog' },
     ];
     let polling = null;
-    let pollingController = null;
     let simklPinPoller = null;
     let traktDevicePoller = null;
     let simklSelectedStatuses = cloneSimklStatuses(DEFAULT_SIMKL_STATUSES);
@@ -1023,12 +1022,11 @@
       link.addEventListener('click', () => switchView(link.dataset.nav));
     });
 
-    async function apiPost(url, payload, { signal } = {}) {
+    async function apiPost(url, payload) {
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        signal,
       });
       let data = {};
       try {
@@ -2085,7 +2083,7 @@
       cancel.classList.toggle('hidden', !pendingClearWatchHistory);
       arm.disabled = !canUse || busy;
       confirm.disabled = !canUse || busy;
-      cancel.disabled = busy;
+      cancel.disabled = false;  // Always allow dismissing the armed state
       confirm.textContent = busy ? 'Clearing...' : 'Confirm Clear';
     }
 
@@ -2236,12 +2234,8 @@
     }
 
     async function fetchStatus(includeCredentials) {
-      // Abort any previous in-flight status request before starting a new one.
-      if (pollingController) pollingController.abort();
-      pollingController = new AbortController();
-      const signal = pollingController.signal;
       try {
-        const result = await apiPost('/api/profile/status', { include_credentials: !!includeCredentials }, { signal });
+        const result = await apiPost('/api/profile/status', { include_credentials: !!includeCredentials });
         if (!result.ok) {
           if (!includeCredentials) renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
           return;
@@ -2252,8 +2246,7 @@
         }
         renderDashboard(profile);
         return profile;
-      } catch (e) {
-        if (e && e.name === 'AbortError') return null;
+      } catch {
         if (!includeCredentials) renderEmptyDashboard('Status is temporarily unavailable.');
         return null;
       }
@@ -2366,8 +2359,6 @@
       el('btn-stop').disabled = true;
       el('btn-stop').textContent = 'Stopping...';
       el('sync-label').textContent = 'Stopping...';
-      // Abort any in-flight polling request so fetchStatus can restart immediately.
-      if (pollingController) { pollingController.abort(); pollingController = null; }
 
       try {
         const result = await apiPost('/api/profile/sync/stop', {});
@@ -2380,10 +2371,11 @@
           return;
         }
 
-        if (result.data.profile) {
-          renderDashboard(result.data.profile);
-        }
-        showToast('Stopping sync...', false, true);
+        showToast('Stopping sync — waiting for current task to finish...', false, true);
+        // Re-render with the server-returned profile so sync_cancel_requested is reflected,
+        // then ensure polling is running so we catch the moment sync_running flips to false.
+        if (result.data.profile) renderDashboard(result.data.profile);
+        if (!polling) polling = setInterval(fetchStatus, 2000);
         fetchStatus();
       } catch {
         el('btn-stop').disabled = false;

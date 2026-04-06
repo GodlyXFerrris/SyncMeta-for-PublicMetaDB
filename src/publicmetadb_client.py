@@ -278,6 +278,60 @@ class PublicMetaDBClient:
             raise
         return None
 
+    def create_id_mapping(
+        self,
+        tmdb_id: int,
+        media_type: str,
+        id_type: str,
+        id_value: str,
+    ) -> bool:
+        """Submit a new external ID → TMDB mapping to PMDB for community benefit.
+
+        id_type must be one of: imdb, tvdb, mal, anilist, anidb, trakt.
+        Returns True if the mapping was accepted.
+        """
+        try:
+            resp = self._post("/api/external/mappings", {
+                "tmdb_id": tmdb_id,
+                "media_type": media_type,
+                "id_type": id_type,
+                "id_value": str(id_value),
+            })
+            return bool(resp and resp.get("success"))
+        except requests.HTTPError:
+            return False
+
+    # ── Anime seasons ──────────────────────────────────────────────
+
+    def get_anime_seasons(self, tmdb_id: int) -> list[dict]:
+        """Fetch PMDB anime season mappings for a TMDB show.
+
+        Each entry maps a logical anime season (season_number) to a TMDB
+        season/episode range via tmdb_season, tmdb_episode_start, tmdb_episode_end.
+        Results are cached per tmdb_id for the lifetime of this client instance.
+        """
+        cache = getattr(self, "_anime_seasons_cache", None)
+        if cache is None:
+            cache = {}
+            object.__setattr__(self, "_anime_seasons_cache", cache)
+        if tmdb_id in cache:
+            return cache[tmdb_id]
+        try:
+            resp = self._get("/api/external/anime-seasons", params={"tmdb_id": tmdb_id})
+            if isinstance(resp, list):
+                seasons = resp
+            elif isinstance(resp, dict):
+                seasons = resp.get("items") or resp.get("seasons") or []
+            else:
+                seasons = []
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                seasons = []
+            else:
+                raise
+        cache[tmdb_id] = seasons
+        return seasons
+
     # ── List management ────────────────────────────────────────────
 
     def get_lists(self) -> list[dict]:

@@ -353,18 +353,75 @@ class SyncService:
             return item
         if offset <= 0 or tmdb_id <= 0 or episode <= 0:
             return item
+
+        # Preferred path: use PMDB anime-season mappings for accurate multi-season remapping.
+        # Each entry contains: season_number (logical), episode_count, tmdb_season,
+        # tmdb_episode_start, tmdb_episode_end — giving us a full franchise episode map.
+        try:
+            anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+            if anime_seasons:
+                remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
+                if remapped:
+                    return {**item, **remapped}
+        except Exception:
+            pass
+
+        # Fallback: use the TMDB season plan (only works reliably for single-season shows).
         try:
             season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
         except Exception:
             return item
-        positive_seasons = [(season_number, count) for season_number, count in season_plan if season_number > 0 and count > 0]
+        positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
         if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-            return {
-                **item,
-                "season": 1,
-                "episode": offset + episode,
-            }
+            return {**item, "season": 1, "episode": offset + episode}
         return item
+
+    @staticmethod
+    def _map_episode_via_anime_seasons(seasons: list[dict], offset: int, episode: int) -> dict | None:
+        """Map an anime episode (offset + episode) to a TMDB season/episode using PMDB data.
+
+        PMDB anime-seasons entries are sorted by logical season_number and each carries
+        episode_count (total eps in that arc), tmdb_season, tmdb_episode_start, and
+        tmdb_episode_end. We accumulate episode counts to find which logical season
+        the absolute episode falls in, then translate to TMDB season + episode.
+        """
+        absolute = offset + episode
+
+        # Only use entries that have all required fields.
+        valid = [
+            s for s in seasons
+            if s.get("season_number") is not None
+            and s.get("episode_count")
+            and s.get("tmdb_season") is not None
+            and s.get("tmdb_episode_start") is not None
+        ]
+        if not valid:
+            return None
+
+        # Sort by logical season order.
+        valid.sort(key=lambda s: int(s.get("season_number") or 0))
+
+        cumulative = 0
+        for s in valid:
+            try:
+                ep_count = int(s["episode_count"])
+                tmdb_season = int(s["tmdb_season"])
+                tmdb_start = int(s["tmdb_episode_start"])
+            except (TypeError, ValueError):
+                return None  # Can't continue if any required field is malformed
+            if ep_count <= 0:
+                return None
+
+            season_abs_start = cumulative + 1
+            season_abs_end = cumulative + ep_count
+
+            if season_abs_start <= absolute <= season_abs_end:
+                episode_within_season = tmdb_start + (absolute - season_abs_start)
+                return {"season": tmdb_season, "episode": episode_within_season}
+
+            cumulative += ep_count
+
+        return None
 
     def _sync_trakt_watched_history(self) -> SyncStats:
         stats = SyncStats(
@@ -862,6 +919,11 @@ class SyncService:
             if tmdb_id is not None:
                 resolved.append({**item, "resolved_tmdb_id": tmdb_id})
                 stats.items_resolved += 1
+                # If SIMKL/AniList gave us a non-TMDB ID that we resolved via
+                # the external-ID lookup chain, contribute that mapping back to
+                # PMDB so the community benefits from the resolution.
+                if not item.get("tmdb_id") and not self._config.sync.dry_run:
+                    self._contribute_id_mapping(item, tmdb_id)
             else:
                 stats.items_skipped_unresolved += 1
             self._publish_progress([stats])
@@ -934,6 +996,35 @@ class SyncService:
             self._publish_progress([stats], force=True)
 
         return stats
+
+    def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
+        """Silently contribute a resolved external ID mapping back to PMDB.
+
+        When we resolve a TMDB ID via MAL/AniList/IMDB/TVDB (because the item
+        had no TMDB ID), we submit that mapping to PMDB so the community can
+        benefit from it on future lookups.  Failures are logged at DEBUG level
+        and never propagate to the caller.
+        """
+        media_type = item.get("media_type", "")
+        # Pick the best available external ID to contribute (prefer the most specific).
+        for id_type, item_key in [
+            ("mal", "mal_id"),
+            ("anilist", "anilist_id"),
+            ("imdb", "imdb_id"),
+            ("tvdb", "tvdb_id"),
+            ("anidb", "anidb_id"),
+        ]:
+            id_value = item.get(item_key) or (item.get("ids") or {}).get(id_type)
+            if id_value:
+                try:
+                    self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
+                    logger.debug(
+                        "Contributed %s mapping: %s=%s → tmdb_id=%d",
+                        media_type, id_type, id_value, tmdb_id,
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to contribute ID mapping: %s", exc)
+                return  # Only contribute one mapping per item
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
         logger.info("[DRY RUN] Would sync %d resolved items to '%s'", len(resolved), list_name)
