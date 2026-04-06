@@ -206,6 +206,12 @@
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
               <div class="hint">Needed to create a profile or sign in on a new device. After that, this browser uses a secure server-side session.</div>
             </div>
+            <div class="actions-bar" style="margin-top:4px">
+              <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+              <button class="btn" onclick="loadProfile()">Load Profile</button>
+              <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
+              <span class="save-flash" id="save-flash">Saved</span>
+            </div>
           </div>
           <div class="settings-columns">
             <div class="settings-stack settings-stack-left">
@@ -401,12 +407,6 @@
               <div class="hint">Permanently deletes this profile, saved credentials, sync history, and local draft data from this browser. Type <span class="mono">DELETE</span> when asked to confirm.</div>
             </div>
           </div>
-        </div>
-        <div class="actions-bar">
-          <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
-          <button class="btn" onclick="loadProfile()">Load Profile</button>
-          <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
-          <span class="save-flash" id="save-flash">Saved</span>
         </div>
       </div>
     </div>
