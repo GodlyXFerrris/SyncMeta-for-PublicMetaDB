@@ -1833,7 +1833,7 @@
       el('cards').innerHTML = `
         <div class="card"><div class="card-label">Last Sync</div><div class="card-value">${profile.last_sync ? timeAgo(profile.last_sync) : 'Never'}</div><div class="card-sub">${lastSyncSub}</div></div>
         <div class="card"><div class="card-label">Items Fetched</div><div class="card-value">${totals.fetched}</div><div class="card-sub">${totals.resolved} resolved</div></div>
-        <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:${totals.added > 0 ? 'var(--green)' : 'var(--z100)'}">${totals.added}</div><div class="card-sub">${totals.removed} removed</div></div>
+        <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:${totals.added > 0 ? 'var(--green)' : 'var(--z100)'}">${totals.added}</div><div class="card-sub" style="color:${totals.removed > 0 ? 'var(--red)' : 'var(--z500)'}">${totals.removed} removed</div></div>
         <div class="card"><div class="card-label">Issues</div><div class="card-value" style="color:${totals.unresolved + totals.errors > 0 ? 'var(--orange)' : 'var(--z600)'}">${totals.unresolved + totals.errors}</div><div class="card-sub">${totals.unresolved} unresolved, ${totals.errors} errors</div></div>
       `;
 
@@ -1851,7 +1851,7 @@
       if (!results.length) {
         el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';
       } else {
-        el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>`;
+        el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${results.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-red' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>`;
         document.querySelectorAll('[data-delete-list]').forEach(node => {
           node.addEventListener('click', () => armDeleteManagedList(node.dataset.deleteList));
         });
@@ -1874,7 +1874,7 @@
             return acc;
           }, { added: 0, removed: 0, errors: 0 });
           const mode = entry.dry_run ? ' <span class="c-dim">dry run</span>' : '';
-          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}</span><div class="history-stats"><span class="c-green">+${summary.added}</span><span class="c-orange">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : ''}</div></div>`;
+          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}</span><div class="history-stats"><span class="c-green">+${summary.added}</span><span class="c-red">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : ''}</div></div>`;
         }).join('');
       }
 
