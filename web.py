@@ -65,6 +65,8 @@ ANILIST_STATUS_BY_LABEL = {
     "watching": "CURRENT",
     "planning": "PLANNING",
     "completed": "COMPLETED",
+    "completed ona": "COMPLETED_ONA",
+    "completed movie": "COMPLETED_MOVIE",
     "paused": "PAUSED",
     "dropped": "DROPPED",
 }
