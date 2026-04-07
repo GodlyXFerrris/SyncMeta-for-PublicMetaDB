@@ -186,6 +186,7 @@ class AniListClient:
     # Maps synthetic status keys (used in config/UI) to (base_status, format_filter).
     _FORMAT_FILTER_MAP: dict[str, tuple[str, str]] = {
         "COMPLETED_ONA": ("COMPLETED", "ONA"),
+        "COMPLETED_OVA": ("COMPLETED", "OVA"),
         "COMPLETED_MOVIE": ("COMPLETED", "MOVIE"),
     }
 
@@ -241,10 +242,13 @@ class AniListClient:
         root_mal_id = None
         root_title = None
 
+        fmt = str(media.get("format") or "").strip().upper()
+        media_type = "movie" if fmt == "MOVIE" else "tv"
+
         return {
             "title": title,
             "year": media.get("seasonYear"),
-            "media_type": "tv",
+            "media_type": media_type,
             "simkl_type": "anime",
             "imdb_id": None,
             "tmdb_id": None,

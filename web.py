@@ -66,6 +66,7 @@ ANILIST_STATUS_BY_LABEL = {
     "planning": "PLANNING",
     "completed": "COMPLETED",
     "completed ona": "COMPLETED_ONA",
+    "completed ova": "COMPLETED_OVA",
     "completed movie": "COMPLETED_MOVIE",
     "paused": "PAUSED",
     "dropped": "DROPPED",

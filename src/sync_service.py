@@ -41,6 +41,7 @@ _STATUS_LABELS = {
     "PAUSED": "Paused",
     "DROPPED": "Dropped",
     "COMPLETED_ONA": "Completed ONA",
+    "COMPLETED_OVA": "Completed OVA",
     "COMPLETED_MOVIE": "Completed Movie",
 }
 
