@@ -178,7 +178,7 @@ class SimklClient:
             api_type = self._api_type(media_type)
             raw = self._get(f"/sync/all-items/{api_type}/{quote(api_status, safe='')}")
             if not raw:
-                logger.info("No items found for status '%s' and type '%s'", status, media_type)
+                logger.debug("No items found for status '%s' and type '%s'", status, media_type)
                 continue
             raw_items = raw.get(media_type, [])
             items = []
@@ -626,19 +626,6 @@ class SimklClient:
                 items = raw.get("anime", [])
             elif media_key == "anime" and isinstance(raw.get("shows"), list):
                 items = raw.get("shows", [])
-        logger.info(
-            "SIMKL %s history status '%s': raw_items=%d",
-            media_key,
-            status,
-            len(items),
-        )
-        if items:
-            logger.info(
-                "SIMKL %s history sample for '%s': %s",
-                media_key,
-                status,
-                self._describe_history_entry(items[0]),
-            )
         history: list[dict] = []
         for entry in items:
             show = self._show_payload(entry)
@@ -646,11 +633,19 @@ class SimklClient:
                 continue
             history.extend(self._extract_episode_history(entry, show, media_key))
         logger.info(
-            "SIMKL %s history status '%s' yielded %d normalized episode entries",
+            "  SIMKL %s / %s: %d shows → %d episode entries",
             media_key,
             status,
+            len(items),
             len(history),
         )
+        if items:
+            logger.debug(
+                "  SIMKL %s / %s sample: %s",
+                media_key,
+                status,
+                self._describe_history_entry(items[0]),
+            )
         return history
 
     def _extract_episode_history(self, entry: dict, show: dict, media_key: str) -> list[dict]:

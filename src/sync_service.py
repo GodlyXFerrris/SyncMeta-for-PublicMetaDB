@@ -147,14 +147,20 @@ class SyncService:
         """Execute a full sync cycle. Returns stats per synced list."""
         self._check_cancelled()
         self._set_status("Preparing sync")
-        logger.info(
-            "Starting sync (dry_run=%s, remove_missing=%s)",
-            self._config.sync.dry_run,
-            self._config.sync.remove_missing,
-        )
+        flags = []
+        if self._config.sync.dry_run:
+            flags.append("DRY RUN")
+        if self._config.sync.remove_missing:
+            flags.append("remove_missing")
+        flag_str = f"  [{', '.join(flags)}]" if flags else ""
+        logger.info("═" * 60)
+        logger.info("▶  SYNC STARTED%s", flag_str)
+        logger.info("   modes: %s", ", ".join(k for k, v in self._sync_modes.items() if v) or "none")
+        logger.info("═" * 60)
 
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
+            logger.info("── List Sync ──────────────────────────────────────────")
             anilist_enabled = (
                 self._config.anilist.enabled
                 and bool(self._config.anilist.selected_statuses)
@@ -191,6 +197,7 @@ class SyncService:
                 self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["history"] or self._sync_modes["resume"]:
+            logger.info("── Watch History / Resume ─────────────────────────────")
             activity_rows: list[SyncStats] = []
             if self._config.simkl.access_token:
                 activity_rows.extend(self._sync_simkl_activity())
@@ -1141,10 +1148,10 @@ class SyncService:
         )
         self._remember_progress_row(stats)
         self._set_status(f"Processing {actual_list_name}")
-        logger.info("Syncing '%s': %d source items", actual_list_name, len(source_items))
+        logger.info("  ┌ '%s'  (%d source items)", actual_list_name, len(source_items))
 
         if not source_items:
-            logger.info("  No items for '%s', skipping", actual_list_name)
+            logger.debug("  │ No items, skipping '%s'", actual_list_name)
             self._publish_progress([stats], force=True)
             return stats
 
@@ -1221,14 +1228,11 @@ class SyncService:
                 else:
                     message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): API returned no result"
                     stats.errors.append(message)
-                    logger.warning(message)
                 self._publish_progress([stats])
             except SyncCancelled:
                 raise
             except Exception as exc:
-                message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}"
-                stats.errors.append(message)
-                logger.error(message)
+                stats.errors.append(f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}")
                 self._publish_progress([stats], force=True)
 
         if self._config.sync.remove_missing:
@@ -1236,6 +1240,16 @@ class SyncService:
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
             self._publish_progress([stats], force=True)
 
+        logger.info(
+            "  └ '%s'  resolved=%d  added=%d  dup=%d  unresolved=%d  removed=%d%s",
+            actual_list_name,
+            stats.items_resolved,
+            stats.items_added,
+            stats.items_skipped_duplicate,
+            stats.items_skipped_unresolved,
+            stats.items_removed,
+            f"  ⚠ {len(stats.errors)} error(s)" if stats.errors else "",
+        )
         return stats
 
     def _prewarm_simkl_anime_cache(self) -> None:
@@ -1320,10 +1334,15 @@ class SyncService:
                 return  # Only contribute one mapping per item
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
-        logger.info("[DRY RUN] Would sync %d resolved items to '%s'", len(resolved), list_name)
+        logger.info(
+            "  └ [DRY RUN] '%s'  would add=%d  unresolved=%d",
+            list_name,
+            len(resolved),
+            stats.items_skipped_unresolved,
+        )
         for item in resolved:
-            logger.info(
-                "  [DRY RUN] %s (year=%s, tmdb=%s, type=%s)",
+            logger.debug(
+                "    [DRY RUN] %s  year=%s  tmdb=%s  type=%s",
                 item["title"],
                 item.get("year"),
                 item["resolved_tmdb_id"],
@@ -1340,11 +1359,13 @@ class SyncService:
                 try:
                     self._pmdb.remove_item_from_list(list_id, item["id"])
                     removed += 1
-                    logger.info("Removed stale item tmdb=%s from list %s", item.get("tmdb_id"), list_id)
+                    logger.debug("Removed stale item tmdb=%s from list %s", item.get("tmdb_id"), list_id)
                 except SyncCancelled:
                     raise
                 except Exception as exc:
                     logger.error("Failed to remove item %s: %s", item.get("id"), exc)
+        if removed:
+            logger.info("  │ Removed %d stale item(s) from list %s", removed, list_id)
         return removed
 
     @staticmethod
@@ -1359,20 +1380,31 @@ class SyncService:
 
     @staticmethod
     def _log_results(all_stats: list[SyncStats]) -> None:
+        total_added = sum(s.items_added for s in all_stats)
+        total_removed = sum(s.items_removed for s in all_stats)
+        total_errors = sum(len(s.errors) for s in all_stats)
+
+        logger.info("── Sync Summary ───────────────────────────────────────────")
         for stats in all_stats:
-            logger.info(
-                "'%s': fetched=%d resolved=%d added=%d removed=%d dup=%d unresolved=%d errors=%d",
-                stats.list_name,
-                stats.items_fetched,
-                stats.items_resolved,
-                stats.items_added,
-                stats.items_removed,
-                stats.items_skipped_duplicate,
-                stats.items_skipped_unresolved,
-                len(stats.errors),
-            )
+            if not stats.list_name and not stats.items_fetched and not stats.items_added and not stats.errors:
+                continue
+            parts = [f"added={stats.items_added}"]
+            if stats.items_removed:
+                parts.append(f"removed={stats.items_removed}")
+            if stats.items_skipped_duplicate:
+                parts.append(f"dup={stats.items_skipped_duplicate}")
+            if stats.items_skipped_unresolved:
+                parts.append(f"unresolved={stats.items_skipped_unresolved}")
+            if stats.errors:
+                parts.append(f"⚠ errors={len(stats.errors)}")
+            logger.info("  %-45s %s", f"'{stats.display_name or stats.list_name}'", "  ".join(parts))
             for err in stats.errors:
-                logger.error("  Error: %s", err)
+                logger.error("    ✗ %s", err)
+
+        logger.info("── Total: added=%d  removed=%d  errors=%d ─────────────────",
+                    total_added, total_removed, total_errors)
+        logger.info("▶  SYNC COMPLETE")
+        logger.info("═" * 60)
 
     def _set_status(self, status: str) -> None:
         self._check_cancelled()
