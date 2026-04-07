@@ -26,7 +26,6 @@ _TYPE_LABELS = {
     "shows": "Series",
     "movies": "Movies",
     "anime": "Anime",
-    "anime_movie": "Anime Movies",
 }
 
 _STATUS_LABELS = {
@@ -209,10 +208,6 @@ class SyncService:
     def _sync_simkl(self) -> list[SyncStats]:
         """Sync all configured SIMKL lists."""
         media_types = list(self._config.sync.media_types)
-        anilist_handles_tv_anime = (
-            self._config.anilist.enabled
-            and bool(self._config.anilist.selected_statuses)
-        )
 
         stats: list[SyncStats] = []
         if not media_types:
@@ -224,13 +219,6 @@ class SyncService:
             if not statuses:
                 continue
 
-            # When AniList handles TV anime, only extract SIMKL anime movies.
-            # We still need to fetch the SIMKL anime list but filter client-side.
-            anime_movies_only = simkl_type == "anime" and anilist_handles_tv_anime
-
-            if anime_movies_only:
-                logger.info("AniList enabled — fetching SIMKL anime only for movies")
-
             for status_key in statuses:
                 self._check_cancelled()
 
@@ -238,26 +226,12 @@ class SyncService:
                 grouped = self._simkl.get_status(status_key, [simkl_type])
                 items = grouped.get(simkl_type, [])
 
-                if anime_movies_only:
-                    # Only keep items where _normalize_item set media_type="movie"
-                    # (i.e. anime_type == "movie" or single-episode heuristic)
-                    items = [item for item in items if item.get("media_type") == "movie"]
-                    if not items:
-                        logger.info("No anime movies found for SIMKL status '%s', skipping", status_key)
-                        continue
-                    name = _status_list_name("anime_movie", status_key)
-                    display_name = _display_status_name("anime_movie", status_key)
-                    description = (
-                        f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
-                        f"anime movies from SIMKL"
-                    )
-                else:
-                    name = _status_list_name(simkl_type, status_key)
-                    display_name = _display_status_name(simkl_type, status_key)
-                    description = (
-                        f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
-                        f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
-                    )
+                name = _status_list_name(simkl_type, status_key)
+                display_name = _display_status_name(simkl_type, status_key)
+                description = (
+                    f"Auto-synced '{_STATUS_LABELS.get(status_key, status_key)}' "
+                    f"{_TYPE_LABELS.get(simkl_type, simkl_type)} from SIMKL"
+                )
 
                 self._publish_pending_list(name, display_name, "SIMKL")
 
@@ -273,7 +247,6 @@ class SyncService:
                             "source": "simkl",
                             "media_type": simkl_type,
                             "status": status_key,
-                            "anime_movies_only": anime_movies_only,
                         },
                     )
                 )
@@ -359,7 +332,74 @@ class SyncService:
                 raise
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+
+        # Second pass: for completed TV anime, mark the entire TMDB season watched.
+        # Individual episode history may be incomplete (e.g. only first cour tracked),
+        # so if the user marked a show "completed" on SIMKL we trust that and stamp
+        # the whole season rather than relying solely on per-episode records.
+        self._sync_completed_anime_seasons(stats, existing_counts)
         return stats
+
+    def _sync_completed_anime_seasons(self, stats: SyncStats, existing_counts: dict[str, int]) -> None:
+        """Mark entire TMDB seasons watched for anime the user completed on SIMKL."""
+        try:
+            grouped = self._simkl.get_status("completed", ["anime"])
+            items = grouped.get("anime", [])
+        except Exception as exc:
+            logger.warning("Could not fetch SIMKL completed anime for season-level sync: %s", exc)
+            return
+
+        for item in items:
+            self._check_cancelled()
+            if item.get("media_type") == "movie":
+                continue  # movies are handled as individual watched entries
+
+            resolved = self._resolve_activity_item(item)
+            tmdb_id = resolved.get("tmdb_id")
+            if not tmdb_id:
+                continue
+
+            # Determine the correct TMDB season using anime-seasons mapping when
+            # the item is a sequel (offset > 0 means it's not the root season).
+            offset = int(resolved.get("root_episode_offset") or 0)
+            tmdb_season = 1
+            if offset > 0:
+                try:
+                    anime_seasons = self._pmdb.get_anime_seasons(int(tmdb_id))
+                    if anime_seasons:
+                        remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, 1)
+                        if remapped:
+                            tmdb_season = remapped.get("season", 1)
+                except Exception:
+                    pass
+
+            season_key = f"{tmdb_id}:tv:{tmdb_season}:"
+            if existing_counts.get(season_key, 0) > 0:
+                stats.items_skipped_duplicate += 1
+                continue
+
+            if self._config.sync.dry_run:
+                existing_counts[season_key] = 1
+                stats.items_added += 1
+                continue
+
+            try:
+                self._set_status("Marking completed anime seasons in PublicMetaDB")
+                self._pmdb.mark_watched(
+                    tmdb_id=int(tmdb_id),
+                    media_type="tv",
+                    season=tmdb_season,
+                    watched_at=item.get("last_watched_at") or item.get("watched_at"),
+                    dedupe=True,
+                )
+                existing_counts[season_key] = 1
+                stats.items_added += 1
+            except SyncCancelled:
+                raise
+            except Exception as exc:
+                stats.errors.append(
+                    f"Failed to mark completed season for '{item.get('title', 'Unknown')}': {exc}"
+                )
 
     def _expand_simkl_aggregate_history(self, items: list[dict]) -> list[dict]:
         expanded: list[dict] = []
