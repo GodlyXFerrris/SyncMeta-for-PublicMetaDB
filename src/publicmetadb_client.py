@@ -150,57 +150,78 @@ class PublicMetaDBClient:
         """Delete all watched history using bulk deletes grouped by title.
 
         Strategy:
-          1. Fetch the full history (paginated) to collect unique (tmdb_id, media_type) pairs.
-          2. Issue one bulk DELETE per unique title — this wipes every play record for
-             that title in a single API call instead of one call per episode entry.
-        This reduces API calls from O(total plays) to O(unique titles).
+          1. Fetch a page of history to collect unique (tmdb_id, media_type) pairs.
+          2. Bulk-delete all unique titles from that page concurrently.
+          3. Repeat until the API returns an empty page.
+
+        Looping after each round handles the case where a single fetch doesn't
+        return all entries at once (e.g. API page-size cap). Each bulk DELETE
+        wipes every play record for a title in one API call.
         """
-        all_items = self.get_watched_history()
-        if not all_items:
-            return 0
+        total_deleted = 0
+        all_seen: set[tuple] = set()
 
-        # Collect unique (tmdb_id, media_type) pairs preserving insertion order.
-        seen: set[tuple] = set()
-        unique_titles: list[tuple[int, str]] = []
-        for item in all_items:
-            tmdb_id = item.get("tmdb_id")
-            media_type = item.get("media_type")
-            if not tmdb_id or not media_type:
-                continue
-            key = (int(tmdb_id), str(media_type))
-            if key not in seen:
-                seen.add(key)
-                unique_titles.append(key)
+        while True:
+            # Always fetch page 1 — after bulk deletes the remaining entries
+            # shift up, so re-fetching page 1 catches whatever is still there.
+            resp = self._get("/api/external/watched", params={"page": 1, "perPage": 500})
+            if not resp:
+                break
+            if isinstance(resp, list):
+                items = resp
+            else:
+                items = list(resp.get("items", []))
 
-        if not unique_titles:
-            return 0
+            if not items:
+                break
 
-        # Count total play entries we're about to wipe (for the return value).
-        entry_count = len(all_items)
+            # Collect unique titles not already deleted in a previous round.
+            unique_titles: list[tuple[int, str]] = []
+            for item in items:
+                tmdb_id = item.get("tmdb_id")
+                media_type = item.get("media_type")
+                if not tmdb_id or not media_type:
+                    continue
+                key = (int(tmdb_id), str(media_type))
+                if key not in all_seen:
+                    all_seen.add(key)
+                    unique_titles.append(key)
 
-        # Bulk-delete concurrently — each title is fully independent.
-        deleted_titles = 0
-        with ThreadPoolExecutor(max_workers=10) as pool:
-            futures = {
-                pool.submit(self.bulk_delete_watched, tmdb_id, media_type): (tmdb_id, media_type)
-                for tmdb_id, media_type in unique_titles
-            }
-            for future in as_completed(futures):
-                tmdb_id, media_type = futures[future]
-                try:
-                    if future.result():
-                        deleted_titles += 1
-                except Exception as exc:
-                    logger.warning(
-                        "Error bulk-deleting watched history for tmdb_id=%s (%s): %s",
-                        tmdb_id, media_type, exc,
-                    )
+            if not unique_titles:
+                # All remaining items were already bulk-deleted; nothing left to do.
+                break
 
-        logger.info(
-            "Cleared watched history: %d unique titles bulk-deleted (%d total play entries)",
-            deleted_titles, entry_count,
-        )
-        return entry_count
+            # Bulk-delete this round's titles concurrently.
+            round_deleted = 0
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                futures = {
+                    pool.submit(self.bulk_delete_watched, tmdb_id, media_type): (tmdb_id, media_type)
+                    for tmdb_id, media_type in unique_titles
+                }
+                for future in as_completed(futures):
+                    tmdb_id, media_type = futures[future]
+                    try:
+                        if future.result():
+                            round_deleted += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "Error bulk-deleting watched history for tmdb_id=%s (%s): %s",
+                            tmdb_id, media_type, exc,
+                        )
+
+            total_deleted += round_deleted
+            logger.info(
+                "Clear round: %d titles deleted this round (%d total so far)",
+                round_deleted, total_deleted,
+            )
+
+            if round_deleted == 0:
+                # Nothing was deleted despite having items — avoid an infinite loop.
+                logger.warning("Clear stopped: items remain but none could be deleted")
+                break
+
+        logger.info("Cleared watched history: %d unique titles bulk-deleted", total_deleted)
+        return total_deleted
 
     # Resume / continue watching
 
