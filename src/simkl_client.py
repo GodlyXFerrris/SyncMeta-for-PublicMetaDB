@@ -242,12 +242,13 @@ class SimklClient:
             pmdb_type = "movie"
         elif media_type == "anime":
             anime_type = str(media.get("anime_type") or "").strip().lower()
+            # SIMKL sometimes uses a generic "type" field instead of "anime_type".
+            generic_type = str(media.get("type") or "").strip().lower()
             ids_check = media.get("ids", {})
             mal_id = ids_check.get("mal")
             anilist_id = ids_check.get("anilist")
 
-            # Gate 1: anime_type must be recognised OR item must have a MAL/AniList ID.
-            # This catches Western cartoons, live-action shows, etc. added by mistake.
+            # Gate 1: if anime_type is present it must be a recognised value.
             if anime_type and anime_type not in _VALID_ANIME_TYPES:
                 logger.warning(
                     "Skipping SIMKL anime entry '%s' (%s) — unrecognised anime_type '%s'",
@@ -255,37 +256,33 @@ class SimklClient:
                 )
                 return None
 
-            if not anime_type and not mal_id and not anilist_id:
+            # Gate 2: always require a MAL or AniList ID.
+            # Real anime productions always have at least one of these; non-anime
+            # content that ends up in a user's SIMKL anime list (e.g. Soccer Aid,
+            # Radioresepsjonen, Western cartoons) typically has neither.
+            if not mal_id and not anilist_id:
                 logger.warning(
-                    "Skipping SIMKL anime entry '%s' (%s) — no anime_type and no MAL/AniList ID",
+                    "Skipping SIMKL anime entry '%s' (%s) — no MAL or AniList ID",
                     media.get("title", "Unknown"), media.get("year", ""),
                 )
                 return None
 
-            # Gate 2: require a MAL ID for items that have no recognised anime_type.
-            # This rejects real non-anime that happens to have an AniList entry
-            # (e.g. some Western shows have MAL pages but are not anime).
-            if not anime_type and not mal_id:
-                logger.warning(
-                    "Skipping SIMKL anime entry '%s' (%s) — no anime_type and no MAL ID (AniList-only entries may not be anime)",
-                    media.get("title", "Unknown"), media.get("year", ""),
-                )
-                return None
-
-            # Anime movies must be looked up as "movie" in PMDB; everything else is "tv".
-            # When anime_type is absent, check episode/season counts as a heuristic:
-            # a single-entry show with 1 episode and no seasons is likely a movie.
-            if anime_type == "movie":
+            # Determine PMDB media type.
+            # Check anime_type first, then fall back to SIMKL's generic "type"
+            # field (used on some list endpoints instead of anime_type), then
+            # use an episode-count heuristic for entries without either field.
+            effective_type = anime_type or generic_type
+            if effective_type in {"movie", "film"}:
                 pmdb_type = "movie"
-            elif not anime_type:
+            elif effective_type:
+                pmdb_type = "tv"
+            else:
                 ep_count = media.get("total_episodes") or media.get("episodes")
                 try:
                     ep_count = int(ep_count)
                 except (TypeError, ValueError):
                     ep_count = None
                 pmdb_type = "movie" if ep_count == 1 else "tv"
-            else:
-                pmdb_type = "tv"
         else:
             pmdb_type = "tv"  # Shows map to "tv"
 
@@ -762,8 +759,15 @@ class SimklClient:
 
     @staticmethod
     def _is_movie_like_anime_history(entry: dict, show: dict) -> bool:
-        anime_type = str(entry.get("anime_type") or show.get("anime_type") or show.get("type") or "").strip().lower()
-        if anime_type in {"movie", "film"}:
+        # Check every field SIMKL might use to signal "this is a movie".
+        type_str = str(
+            entry.get("anime_type")
+            or show.get("anime_type")
+            or entry.get("type")
+            or show.get("type")
+            or ""
+        ).strip().lower()
+        if type_str in {"movie", "film"}:
             return True
         episodes = entry.get("episodes") or show.get("episodes")
         seasons = entry.get("seasons") or show.get("seasons")
