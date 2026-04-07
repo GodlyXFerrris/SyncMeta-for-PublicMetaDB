@@ -183,11 +183,24 @@ class AniListClient:
         """Fetch anime with status PLANNING (plan to watch)."""
         return self.get_status(ANILIST_STATUS_PLAN_TO_WATCH)
 
+    # Maps synthetic status keys (used in config/UI) to (base_status, format_filter).
+    _FORMAT_FILTER_MAP: dict[str, tuple[str, str]] = {
+        "COMPLETED_ONA": ("COMPLETED", "ONA"),
+        "COMPLETED_MOVIE": ("COMPLETED", "MOVIE"),
+    }
+
     def get_status(self, status: str) -> list[dict]:
-        """Fetch anime for any supported AniList status."""
+        """Fetch anime for any supported AniList status.
+
+        Synthetic statuses like COMPLETED_ONA / COMPLETED_MOVIE fetch the
+        underlying base status and post-filter by AniList media format.
+        """
+        if status in self._FORMAT_FILTER_MAP:
+            base_status, fmt = self._FORMAT_FILTER_MAP[status]
+            return self._fetch_list(base_status, format_filter=fmt)
         return self._fetch_list(status)
 
-    def _fetch_list(self, status: str) -> list[dict]:
+    def _fetch_list(self, status: str, format_filter: str | None = None) -> list[dict]:
         data = self._query(_LIST_QUERY, {"userName": self._config.username, "status": status})
         if not data:
             return []
@@ -199,11 +212,15 @@ class AniListClient:
         items = []
         for lst in collection.get("lists", []):
             for entry in lst.get("entries", []):
-                normalized = self._normalize(entry.get("media", {}))
+                media = entry.get("media", {})
+                if format_filter and media.get("format") != format_filter:
+                    continue
+                normalized = self._normalize(media)
                 if normalized:
                     items.append(normalized)
 
-        logger.info("AniList: fetched %d anime for status '%s'", len(items), status)
+        label = f"{status}:{format_filter}" if format_filter else status
+        logger.info("AniList: fetched %d anime for status '%s'", len(items), label)
         return items
 
     def _normalize(self, media: dict) -> dict | None:
