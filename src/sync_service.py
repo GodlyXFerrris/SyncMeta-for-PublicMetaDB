@@ -422,22 +422,41 @@ class SyncService:
         return self._dedupe_activity_history_items(expanded)
 
     def _remap_simkl_anime_history_item(self, item: dict) -> dict:
+        """Remap a SIMKL anime TV history item to the correct PMDB season+episode.
+
+        Resolution chain (first success wins):
+          1. Fribb anime-lists  →  PMDB anime-seasons  (TVDB season → exact TMDB range)
+          2. Fribb anime-lists  →  direct TVDB season  (tvdb_season == tmdb_season heuristic)
+          3. PMDB anime-seasons with absolute offset    (legacy path, offset-based)
+          4. Single-season TMDB heuristic              (only for shows with 1 TMDB season)
+        """
         if str(item.get("simkl_type", "")).strip().lower() != "anime":
             return item
         if str(item.get("media_type", "")).strip().lower() != "tv":
             return item
+
         try:
-            offset = int(item.get("root_episode_offset") or 0)
-            tmdb_id = int(item.get("tmdb_id") or 0)
             episode = int(item.get("episode") or 0)
+            tmdb_id = int(item.get("tmdb_id") or 0)
+            offset = int(item.get("root_episode_offset") or 0)
         except (TypeError, ValueError):
             return item
-        if offset <= 0 or tmdb_id <= 0 or episode <= 0:
+        if episode <= 0:
             return item
 
-        # Preferred path: use PMDB anime-season mappings for accurate multi-season remapping.
-        # Each entry contains: season_number (logical), episode_count, tmdb_season,
-        # tmdb_episode_start, tmdb_episode_end — giving us a full franchise episode map.
+        # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
+        fribb = self._lookup_fribb_entry(item)
+        if fribb is not None:
+            remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
+            if remapped:
+                return {**item, **remapped}
+
+        # Remaining paths only make sense when there is a non-zero offset
+        # (offset == 0 means the item IS the root season; no remapping needed).
+        if offset <= 0 or tmdb_id <= 0:
+            return item
+
+        # ── Path 3: PMDB anime-seasons with absolute episode offset ─────────────
         try:
             anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
             if anime_seasons:
@@ -447,28 +466,129 @@ class SyncService:
         except Exception:
             pass
 
-        # Fallback: use the TMDB season plan (only works reliably for single-season shows).
+        # ── Path 4: Single-season TMDB heuristic ───────────────────────────────
         try:
             season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
+            positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
+            if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
+                return {**item, "season": 1, "episode": offset + episode}
         except Exception:
-            return item
-        positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
-        if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-            return {**item, "season": 1, "episode": offset + episode}
+            pass
+
         return item
+
+    def _lookup_fribb_entry(self, item: dict) -> dict | None:
+        """Return the Fribb anime-lists entry for this SIMKL item, or None."""
+        from . import fribb_client
+        ids = item.get("ids") or {}
+
+        for id_key in ("anilist_id", "root_anilist_id"):
+            raw = item.get(id_key) or ids.get("anilist") or ids.get("root_anilist")
+            if raw:
+                try:
+                    entry = fribb_client.lookup_by_anilist(int(raw))
+                    if entry:
+                        return entry
+                except (TypeError, ValueError):
+                    pass
+
+        for id_key in ("mal_id", "root_mal_id"):
+            raw = item.get(id_key) or ids.get("mal") or ids.get("root_mal")
+            if raw:
+                try:
+                    entry = fribb_client.lookup_by_mal(int(raw))
+                    if entry:
+                        return entry
+                except (TypeError, ValueError):
+                    pass
+
+        return None
+
+    def _remap_via_fribb(self, fribb: dict, item_tmdb_id: int, episode: int) -> dict | None:
+        """Use Fribb's TVDB season info + PMDB anime-seasons for accurate remapping.
+
+        Fribb gives us which TVDB season this AniList/MAL entry belongs to and the
+        episode offset within that season.  PMDB anime-seasons maps TVDB season
+        (stored as season_number) to a TMDB season + episode range.  When PMDB
+        data is unavailable we fall back to assuming tvdb_season == tmdb_season,
+        which is correct for the vast majority of modern seasonal anime.
+        """
+        tvdb_season_raw = fribb.get("thetvdb_season")
+        if tvdb_season_raw is None:
+            return None
+        try:
+            tvdb_season = int(tvdb_season_raw)
+            tvdb_epoffset = int(fribb.get("thetvdb_epoffset") or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if tvdb_season <= 0:
+            return None  # Season 0 = specials; leave untouched
+
+        # Episode number within the TVDB season
+        tvdb_episode = tvdb_epoffset + episode
+
+        # Prefer the Fribb-provided TMDB ID when the item doesn't have one
+        # (Fribb's themoviedb is the TMDB ID for the franchise root).
+        tmdb_id = item_tmdb_id
+        fribb_tmdb = fribb.get("themoviedb")
+        if not tmdb_id and fribb_tmdb:
+            try:
+                tmdb_id = int(fribb_tmdb)
+            except (TypeError, ValueError):
+                pass
+
+        # Try PMDB anime-seasons: season_number in PMDB == TVDB season number.
+        if tmdb_id > 0:
+            try:
+                anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+                if anime_seasons:
+                    remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode)
+                    if remapped:
+                        out = {"season": remapped["season"], "episode": remapped["episode"]}
+                        if tmdb_id != item_tmdb_id:
+                            out["tmdb_id"] = tmdb_id
+                        return out
+            except Exception:
+                pass
+
+        # Fallback: tvdb_season == tmdb_season holds for most shows where each
+        # cour / arc gets its own TMDB season (AoT, DanDaDan, etc.).
+        out: dict = {"season": tvdb_season, "episode": tvdb_episode}
+        if tmdb_id > 0 and tmdb_id != item_tmdb_id:
+            out["tmdb_id"] = tmdb_id
+        return out
+
+    @staticmethod
+    def _map_episode_via_tvdb_season(
+        seasons: list[dict], tvdb_season: int, tvdb_episode: int
+    ) -> dict | None:
+        """Map a TVDB season+episode to a TMDB season+episode using PMDB anime-seasons.
+
+        PMDB stores the community mapping as: season_number (= TVDB season) →
+        tmdb_season + tmdb_episode_start.  We find the matching entry and compute
+        the TMDB episode from the start offset.
+        """
+        for s in seasons:
+            try:
+                if int(s["season_number"]) != tvdb_season:
+                    continue
+                tmdb_season = int(s["tmdb_season"])
+                tmdb_start = int(s["tmdb_episode_start"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            return {"season": tmdb_season, "episode": tmdb_start + (tvdb_episode - 1)}
+        return None
 
     @staticmethod
     def _map_episode_via_anime_seasons(seasons: list[dict], offset: int, episode: int) -> dict | None:
-        """Map an anime episode (offset + episode) to a TMDB season/episode using PMDB data.
+        """Legacy path: map absolute episode (offset + episode) via PMDB anime-seasons.
 
-        PMDB anime-seasons entries are sorted by logical season_number and each carries
-        episode_count (total eps in that arc), tmdb_season, tmdb_episode_start, and
-        tmdb_episode_end. We accumulate episode counts to find which logical season
-        the absolute episode falls in, then translate to TMDB season + episode.
+        Used when Fribb data is unavailable.  Accumulates episode_count across
+        sorted season entries to locate which arc the absolute episode falls in.
         """
         absolute = offset + episode
 
-        # Only use entries that have all required fields.
         valid = [
             s for s in seasons
             if s.get("season_number") is not None
@@ -479,7 +599,6 @@ class SyncService:
         if not valid:
             return None
 
-        # Sort by logical season order.
         valid.sort(key=lambda s: int(s.get("season_number") or 0))
 
         cumulative = 0
@@ -489,7 +608,7 @@ class SyncService:
                 tmdb_season = int(s["tmdb_season"])
                 tmdb_start = int(s["tmdb_episode_start"])
             except (TypeError, ValueError):
-                return None  # Can't continue if any required field is malformed
+                return None
             if ep_count <= 0:
                 return None
 
@@ -497,8 +616,10 @@ class SyncService:
             season_abs_end = cumulative + ep_count
 
             if season_abs_start <= absolute <= season_abs_end:
-                episode_within_season = tmdb_start + (absolute - season_abs_start)
-                return {"season": tmdb_season, "episode": episode_within_season}
+                return {
+                    "season": tmdb_season,
+                    "episode": tmdb_start + (absolute - season_abs_start),
+                }
 
             cumulative += ep_count
 
