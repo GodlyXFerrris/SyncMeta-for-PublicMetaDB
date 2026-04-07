@@ -304,15 +304,11 @@ class SyncService:
         stats.history_cursor = self._latest_history_cursor(items, cursor or "")
         stats.items_fetched = len(items)
 
-        # Fetch completed anime once.  Used in two ways:
-        #   1. Skip per-episode records for shows the user finished — a single
-        #      season-level mark is cleaner than dozens of individual entries.
-        #   2. Pass directly to _sync_completed_anime_seasons to avoid a second
-        #      API call for the same data.
+        # Fetch completed anime list up-front so we can use it as a fallback
+        # for shows where SIMKL has no per-episode history records at all.
         self._set_status("Fetching SIMKL completed anime list")
         completed_anime = self._fetch_simkl_completed_anime()
-        completed_ids = self._build_completed_anime_id_set(completed_anime)
-        logger.info("  SIMKL completed anime: %d entries (will use season-level marks)", len(completed_anime))
+        logger.info("  SIMKL completed anime: %d entries", len(completed_anime))
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -320,29 +316,29 @@ class SyncService:
             if key:
                 existing_counts[key] = existing_counts.get(key, 0) + 1
 
-        skipped_completed = 0
+        # Track which completed anime already have per-episode records so the
+        # season-level fallback pass can skip them (avoids double-counting).
+        shows_with_episode_records: set[str] = set()
+
         for item in items:
             self._check_cancelled()
             item = self._resolve_activity_item(item)
             item = self._remap_simkl_anime_history_item(item)
-
-            # For completed TV anime, skip individual episode records entirely.
-            # _sync_completed_anime_seasons will mark the whole season instead,
-            # which is cleaner and avoids cluttering PMDB with episode-by-episode
-            # entries for a show the user has fully watched.
-            if (
-                str(item.get("simkl_type", "")).strip().lower() == "anime"
-                and str(item.get("media_type", "")).strip().lower() == "tv"
-                and self._is_completed_anime(item, completed_ids)
-            ):
-                skipped_completed += 1
-                continue
 
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
                 continue
             stats.items_resolved += 1
+
+            # Record that this show has per-episode data so the season-level
+            # fallback pass won't also mark it (which would double-count).
+            if str(item.get("simkl_type", "")).strip().lower() == "anime":
+                for id_key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"):
+                    val = item.get(id_key)
+                    if val:
+                        shows_with_episode_records.add(f"{id_key}:{val}")
+
             if existing_counts.get(key, 0) > 0:
                 stats.items_skipped_duplicate += 1
                 continue
@@ -367,14 +363,11 @@ class SyncService:
             except Exception as exc:
                 stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
 
-        if skipped_completed:
-            logger.info(
-                "  Skipped %d episode record(s) for completed anime — using season-level marks",
-                skipped_completed,
-            )
-
-        # Second pass: mark whole TMDB seasons for completed anime.
-        self._sync_completed_anime_seasons(stats, existing_counts, completed_anime)
+        # Season-level fallback: only for completed anime that produced zero
+        # per-episode records (e.g. user marked complete without tracking each
+        # episode in SIMKL).  Shows that already have episode records are
+        # skipped to prevent PMDB double-counting.
+        self._sync_completed_anime_seasons(stats, existing_counts, completed_anime, shows_with_episode_records)
         return stats
 
     def _fetch_simkl_completed_anime(self) -> list[dict]:
@@ -389,61 +382,34 @@ class SyncService:
             logger.warning("Could not fetch SIMKL completed anime: %s", exc)
             return []
 
-    @staticmethod
-    def _build_completed_anime_id_set(items: list[dict]) -> tuple[set[int], set[int]]:
-        """Return (anilist_ids, mal_ids) sets for completed anime items."""
-        anilist_ids: set[int] = set()
-        mal_ids: set[int] = set()
-        for item in items:
-            ids = item.get("ids") or {}
-            for key in ("anilist_id", "root_anilist_id"):
-                raw = item.get(key) or ids.get("anilist") or ids.get("root_anilist")
-                if raw:
-                    try:
-                        anilist_ids.add(int(raw))
-                    except (TypeError, ValueError):
-                        pass
-            for key in ("mal_id", "root_mal_id"):
-                raw = item.get(key) or ids.get("mal") or ids.get("root_mal")
-                if raw:
-                    try:
-                        mal_ids.add(int(raw))
-                    except (TypeError, ValueError):
-                        pass
-        return anilist_ids, mal_ids
-
-    @staticmethod
-    def _is_completed_anime(item: dict, completed_ids: tuple[set[int], set[int]]) -> bool:
-        """Return True if this history item belongs to a show the user completed on SIMKL."""
-        anilist_ids, mal_ids = completed_ids
-        ids = item.get("ids") or {}
-        for key in ("anilist_id", "root_anilist_id"):
-            raw = item.get(key) or ids.get("anilist") or ids.get("root_anilist")
-            if raw:
-                try:
-                    if int(raw) in anilist_ids:
-                        return True
-                except (TypeError, ValueError):
-                    pass
-        for key in ("mal_id", "root_mal_id"):
-            raw = item.get(key) or ids.get("mal") or ids.get("root_mal")
-            if raw:
-                try:
-                    if int(raw) in mal_ids:
-                        return True
-                except (TypeError, ValueError):
-                    pass
-        return False
-
     def _sync_completed_anime_seasons(
         self,
         stats: SyncStats,
         existing_counts: dict[str, int],
         completed_anime: list[dict],
+        shows_with_episode_records: set[str],
     ) -> None:
-        """Mark entire TMDB seasons watched for each completed TV anime entry."""
+        """Season-level fallback for completed anime with no per-episode history.
+
+        Only fires for shows where SIMKL returned zero individual episode records.
+        Shows that already have episode-level entries are skipped entirely to
+        prevent PMDB from double-counting plays.
+        """
+        fallback_count = 0
+        skipped_has_episodes = 0
         for item in completed_anime:
             self._check_cancelled()
+
+            # Skip shows that already have per-episode records from the history
+            # pass — adding a season mark on top would double-count in PMDB.
+            item_has_records = any(
+                f"{id_key}:{item.get(id_key)}" in shows_with_episode_records
+                for id_key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id")
+                if item.get(id_key)
+            )
+            if item_has_records:
+                skipped_has_episodes += 1
+                continue
 
             resolved = self._resolve_activity_item(item)
 
@@ -495,8 +461,9 @@ class SyncService:
                 )
                 existing_counts[season_key] = 1
                 stats.items_added += 1
+                fallback_count += 1
                 logger.debug(
-                    "  Marked completed: '%s' → tmdb=%d season=%d",
+                    "  Season fallback: '%s' → tmdb=%d season=%d",
                     item.get("title", "?"), tmdb_id, tmdb_season,
                 )
             except SyncCancelled:
@@ -505,6 +472,17 @@ class SyncService:
                 stats.errors.append(
                     f"Failed to mark completed season for '{item.get('title', 'Unknown')}': {exc}"
                 )
+
+        if skipped_has_episodes:
+            logger.info(
+                "  Season fallback skipped %d show(s) that already had episode records",
+                skipped_has_episodes,
+            )
+        if fallback_count:
+            logger.info(
+                "  Season fallback marked %d show(s) with no episode history",
+                fallback_count,
+            )
 
     def _expand_simkl_aggregate_history(self, items: list[dict]) -> list[dict]:
         expanded: list[dict] = []
