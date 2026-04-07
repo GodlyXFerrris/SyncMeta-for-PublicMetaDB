@@ -384,88 +384,49 @@ class SyncService:
             return item
         if str(item.get("media_type", "")).strip().lower() != "tv":
             return item
-
-        def _to_int(value, default=0):
-            try:
-                if value is None or value == "":
-                    return default
-                return int(value)
-            except (TypeError, ValueError):
-                return default
-
-        tmdb_id = _to_int(item.get("tmdb_id"))
-        offset = _to_int(item.get("root_episode_offset"))
-        simkl_season = _to_int(item.get("simkl_season") or item.get("season"))
-        simkl_episode = _to_int(item.get("simkl_episode") or item.get("episode"))
-        simkl_absolute_episode = _to_int(item.get("simkl_absolute_episode"))
-
-        if tmdb_id <= 0 or simkl_episode <= 0:
+        try:
+            offset = int(item.get("root_episode_offset") or 0)
+            tmdb_id = int(item.get("tmdb_id") or 0)
+            episode = int(item.get("episode") or 0)
+        except (TypeError, ValueError):
+            return item
+        if offset <= 0 or tmdb_id <= 0 or episode <= 0:
             return item
 
-        logger.info(
-            "SIMKL anime remap: title=%s tmdb=%s simkl_s=%s simkl_e=%s abs=%s root_mal=%s root_anilist=%s offset=%s",
-            item.get("title", "Unknown"),
-            tmdb_id,
-            simkl_season,
-            simkl_episode,
-            simkl_absolute_episode,
-            item.get("root_mal_id"),
-            item.get("root_anilist_id"),
-            offset,
-        )
-
+        # Preferred path: use PMDB anime-season mappings for accurate multi-season remapping.
+        # Each entry contains: season_number (logical), episode_count, tmdb_season,
+        # tmdb_episode_start, tmdb_episode_end — giving us a full franchise episode map.
         try:
             anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+            if anime_seasons:
+                remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
+                if remapped:
+                    return {**item, **remapped}
         except Exception:
-            anime_seasons = []
+            pass
 
-        if anime_seasons:
-            # Path A: use absolute numbering when we have a root offset.
-            if simkl_absolute_episode > 0 or offset > 0:
-                absolute = simkl_absolute_episode if simkl_absolute_episode > 0 else (offset + simkl_episode)
-                remapped = self._map_episode_via_anime_seasons_absolute(anime_seasons, absolute)
-                if remapped:
-                    return {**item, **remapped}
-
-            # Path B: use logical anime season/episode.
-            if simkl_season > 0 and simkl_episode > 0:
-                remapped = self._map_episode_via_anime_seasons_by_logical_season(
-                    anime_seasons,
-                    simkl_season,
-                    simkl_episode,
-                )
-                if remapped:
-                    return {**item, **remapped}
-
-        # Path C: if PMDB/TMDB effectively has only one real season, flatten into S1.
+        # Fallback: use the TMDB season plan (only works reliably for single-season shows).
         try:
             season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
         except Exception:
-            season_plan = []
-
+            return item
         positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
         if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-            if simkl_absolute_episode > 0:
-                return {**item, "season": 1, "episode": simkl_absolute_episode}
-            if offset > 0:
-                return {**item, "season": 1, "episode": offset + simkl_episode}
-
+            return {**item, "season": 1, "episode": offset + episode}
         return item
 
     @staticmethod
     def _map_episode_via_anime_seasons(seasons: list[dict], offset: int, episode: int) -> dict | None:
-        absolute = 0
-        try:
-            absolute = int(offset) + int(episode)
-        except (TypeError, ValueError):
-            return None
+        """Map an anime episode (offset + episode) to a TMDB season/episode using PMDB data.
 
-        return SyncService._map_episode_via_anime_seasons_absolute(seasons, absolute)
-    @staticmethod
-    def _map_episode_via_anime_seasons_absolute(seasons: list[dict], absolute: int) -> dict | None:
-        if absolute <= 0:
-            return None
+        PMDB anime-seasons entries are sorted by logical season_number and each carries
+        episode_count (total eps in that arc), tmdb_season, tmdb_episode_start, and
+        tmdb_episode_end. We accumulate episode counts to find which logical season
+        the absolute episode falls in, then translate to TMDB season + episode.
+        """
+        absolute = offset + episode
 
+        # Only use entries that have all required fields.
         valid = [
             s for s in seasons
             if s.get("season_number") is not None
@@ -476,6 +437,7 @@ class SyncService:
         if not valid:
             return None
 
+        # Sort by logical season order.
         valid.sort(key=lambda s: int(s.get("season_number") or 0))
 
         cumulative = 0
@@ -485,8 +447,7 @@ class SyncService:
                 tmdb_season = int(s["tmdb_season"])
                 tmdb_start = int(s["tmdb_episode_start"])
             except (TypeError, ValueError):
-                return None
-
+                return None  # Can't continue if any required field is malformed
             if ep_count <= 0:
                 return None
 
@@ -494,57 +455,13 @@ class SyncService:
             season_abs_end = cumulative + ep_count
 
             if season_abs_start <= absolute <= season_abs_end:
-                within_season_index = absolute - season_abs_start
-                return {
-                    "season": tmdb_season,
-                    "episode": tmdb_start + within_season_index,
-                }
+                episode_within_season = tmdb_start + (absolute - season_abs_start)
+                return {"season": tmdb_season, "episode": episode_within_season}
 
             cumulative += ep_count
 
         return None
 
-
-    @staticmethod
-    def _map_episode_via_anime_seasons_by_logical_season(
-        seasons: list[dict],
-        logical_season: int,
-        logical_episode: int,
-    ) -> dict | None:
-        if logical_season <= 0 or logical_episode <= 0:
-            return None
-
-        valid = [
-            s for s in seasons
-            if s.get("season_number") is not None
-            and s.get("episode_count")
-            and s.get("tmdb_season") is not None
-            and s.get("tmdb_episode_start") is not None
-        ]
-        if not valid:
-            return None
-
-        for s in valid:
-            try:
-                season_number = int(s["season_number"])
-                episode_count = int(s["episode_count"])
-                tmdb_season = int(s["tmdb_season"])
-                tmdb_start = int(s["tmdb_episode_start"])
-            except (TypeError, ValueError):
-                return None
-
-            if season_number != logical_season:
-                continue
-
-            if logical_episode < 1 or logical_episode > episode_count:
-                return None
-
-            return {
-                "season": tmdb_season,
-                "episode": tmdb_start + (logical_episode - 1),
-            }
-
-        return None
     def _sync_trakt_watched_history(self) -> SyncStats:
         stats = SyncStats(
             list_name="",

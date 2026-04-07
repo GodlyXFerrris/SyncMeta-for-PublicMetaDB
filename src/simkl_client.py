@@ -656,33 +656,20 @@ class SimklClient:
     def _extract_episode_history(self, entry: dict, show: dict, media_key: str) -> list[dict]:
         history: list[dict] = []
         seen: set[tuple[int, int]] = set()
-
         ids = show.get("ids", {}) or {}
         title = show.get("title", "Unknown")
         tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
-
         root_ids = self._resolve_anime_root_ids(ids) if media_key == "anime" else {}
         if root_ids.get("root_anilist"):
             ids["root_anilist"] = root_ids["root_anilist"]
         if root_ids.get("root_mal"):
             ids["root_mal"] = root_ids["root_mal"]
-
         fallback_watched_at = (
             entry.get("last_watched_at")
             or entry.get("last_watched")
             or show.get("last_watched_at")
             or show.get("last_watched")
         )
-
-        def _as_int(value):
-            try:
-                if value is None or value == "":
-                    return None
-                return int(value)
-            except (TypeError, ValueError):
-                return None
-
-        anime_type = str(entry.get("anime_type") or show.get("anime_type") or "").strip().lower()
 
         if media_key == "anime" and self._is_movie_like_anime_history(entry, show):
             return [{
@@ -701,43 +688,21 @@ class SimklClient:
                 "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
                 "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
                 "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
-                "anime_type": anime_type,
                 "ids": ids,
             }]
 
-        def add_episode(
-            season: int | None,
-            episode: int | None,
-            watched_at: str | None,
-            *,
-            simkl_season: int | None = None,
-            simkl_episode: int | None = None,
-        ) -> None:
+        def add_episode(season: int | None, episode: int | None, watched_at: str | None) -> None:
             if season is None or episode is None:
                 return
-
-            season_i = int(season)
-            episode_i = int(episode)
-            key = (season_i, episode_i)
-
+            key = (int(season), int(episode))
             if key in seen:
                 return
             seen.add(key)
-
-            simkl_season_i = _as_int(simkl_season if simkl_season is not None else season_i)
-            simkl_episode_i = _as_int(simkl_episode if simkl_episode is not None else episode_i)
-
-            root_offset = _as_int(root_ids.get("root_episode_offset")) or 0
-            absolute_episode = None
-            if media_key == "anime" and simkl_episode_i and simkl_episode_i > 0:
-                if root_offset > 0:
-                    absolute_episode = root_offset + simkl_episode_i
-
             history.append({
                 "tmdb_id": tmdb_id,
                 "media_type": "tv",
-                "season": season_i,
-                "episode": episode_i,
+                "season": int(season),
+                "episode": int(episode),
                 "watched_at": watched_at,
                 "title": title,
                 "year": show.get("year"),
@@ -748,84 +713,55 @@ class SimklClient:
                 "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
                 "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
                 "root_title": root_ids.get("root_title"),
-                "root_episode_offset": root_offset,
+                "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
                 "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
                 "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
-                "anime_type": anime_type,
-                "simkl_season": simkl_season_i,
-                "simkl_episode": simkl_episode_i,
-                "simkl_absolute_episode": absolute_episode,
                 "ids": ids,
             })
 
-        seasons = entry.get("seasons") or []
-        if isinstance(seasons, list) and seasons:
-            for season_block in seasons:
-                season_num = _as_int(season_block.get("number") or season_block.get("season"))
-                episodes = season_block.get("episodes") or []
-                if not isinstance(episodes, list):
-                    continue
-                for episode_block in episodes:
-                    episode_num = _as_int(episode_block.get("number") or episode_block.get("episode"))
-                    watched_at = (
-                        episode_block.get("watched_at")
-                        or episode_block.get("last_watched_at")
-                        or episode_block.get("date")
-                        or fallback_watched_at
-                    )
-                    add_episode(
-                        season_num,
-                        episode_num,
-                        watched_at,
-                        simkl_season=season_num,
-                        simkl_episode=episode_num,
-                    )
-
-        episodes = entry.get("episodes") or []
-        if isinstance(episodes, list) and episodes:
-            inferred_season = _as_int(
-                entry.get("season")
-                or entry.get("season_number")
-                or show.get("season")
-                or 1
-            ) or 1
-
-            for episode_block in episodes:
-                if not isinstance(episode_block, dict):
-                    continue
-                episode_num = _as_int(episode_block.get("number") or episode_block.get("episode"))
-                season_num = _as_int(
-                    episode_block.get("season")
-                    or episode_block.get("season_number")
-                    or inferred_season
-                ) or inferred_season
-                watched_at = (
-                    episode_block.get("watched_at")
-                    or episode_block.get("last_watched_at")
-                    or episode_block.get("date")
-                    or fallback_watched_at
-                )
+        for season_entry in self._history_seasons(entry, show):
+            season_number = season_entry.get("number") or season_entry.get("season")
+            for episode_entry in season_entry.get("episodes", []) or []:
                 add_episode(
-                    season_num,
-                    episode_num,
-                    watched_at,
-                    simkl_season=season_num,
-                    simkl_episode=episode_num,
+                    season_number,
+                    episode_entry.get("number") or episode_entry.get("episode"),
+                    episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
                 )
 
-        if history:
-            return history
-
-        season_num = _as_int(entry.get("season") or entry.get("season_number") or 1)
-        episode_num = _as_int(entry.get("episode") or entry.get("episode_number"))
-        if season_num is not None and episode_num is not None:
+        for episode_entry in self._history_episodes(entry, show):
             add_episode(
-                season_num,
-                episode_num,
-                fallback_watched_at,
-                simkl_season=season_num,
-                simkl_episode=episode_num,
+                episode_entry.get("season"),
+                episode_entry.get("number") or episode_entry.get("episode"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
             )
+
+        for episode_entry in self._history_last_watched_episodes(entry, show):
+            add_episode(
+                episode_entry.get("season"),
+                episode_entry.get("number") or episode_entry.get("episode"),
+                episode_entry.get("watched_at") or episode_entry.get("last_watched_at") or fallback_watched_at,
+            )
+
+        synthesized = self._synthesize_episode_history_from_counts(entry, show, media_key)
+        if not history:
+            for episode in synthesized:
+                if episode.get("aggregate_watched_count"):
+                    history.append(episode)
+                    continue
+                add_episode(
+                    episode.get("season"),
+                    episode.get("number") or episode.get("episode"),
+                    episode.get("watched_at") or episode.get("last_watched_at"),
+                )
+        elif media_key == "anime":
+            for episode in synthesized:
+                if episode.get("aggregate_watched_count"):
+                    continue
+                add_episode(
+                    episode.get("season"),
+                    episode.get("number") or episode.get("episode"),
+                    episode.get("watched_at") or episode.get("last_watched_at") or fallback_watched_at,
+                )
 
         return history
 
