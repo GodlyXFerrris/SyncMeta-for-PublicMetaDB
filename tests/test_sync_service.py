@@ -863,6 +863,63 @@ class SyncServiceTests(unittest.TestCase):
             {(811, 1, 2), (812, 1, 3)},
         )
 
+    def test_simkl_anime_history_backfills_pmdb_external_ids(self) -> None:
+        class DirectAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 209867,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "season": 1,
+                    "episode": 1,
+                    "title": "Frieren: Beyond Journey's End",
+                    "anilist_id": "154587",
+                    "mal_id": "59978",
+                    "imdb_id": "tt22248376",
+                    "root_anilist_id": "154587",
+                    "root_mal_id": "59978",
+                    "ids": {
+                        "anilist": "154587",
+                        "mal": "59978",
+                        "imdb": "tt22248376",
+                        "root_anilist": "154587",
+                        "root_mal": "59978",
+                    },
+                }]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = DirectAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        contributed = {(item["id_type"], item["id_value"]) for item in pmdb.created_mappings}
+
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertIn(("anilist", "154587"), contributed)
+        self.assertIn(("mal", "59978"), contributed)
+        self.assertIn(("imdb", "tt22248376"), contributed)
+
     def test_history_only_mode_does_not_run_list_syncs(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(

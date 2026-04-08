@@ -141,6 +141,8 @@ class SyncService:
         self._sync_modes = self._normalize_sync_modes(sync_modes, config)
         self._last_progress_publish = 0.0
         self._live_progress_rows: dict[str, dict] = {}
+        self._mapping_contribution_lock = threading.Lock()
+        self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
 
     def _make_anime_root_resolver(self):
         """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
@@ -1445,6 +1447,11 @@ class SyncService:
             if key in seen:
                 continue
             seen.add(key)
+            contribution_key = (int(tmdb_id), str(media_type), id_type, str(id_value))
+            with self._mapping_contribution_lock:
+                if contribution_key in self._contributed_mapping_keys:
+                    continue
+                self._contributed_mapping_keys.add(contribution_key)
             try:
                 self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
                 logger.debug(
@@ -1453,6 +1460,12 @@ class SyncService:
                 )
             except Exception as exc:
                 logger.debug("Failed to contribute ID mapping: %s", exc)
+
+    def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
+        return (
+            not self._config.sync.dry_run
+            and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+        )
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
         logger.info(
@@ -1626,10 +1639,17 @@ class SyncService:
 
     def _resolve_activity_item(self, item: dict) -> dict:
         if item.get("tmdb_id"):
+            if self._should_backfill_pmdb_mapping(item):
+                try:
+                    self._contribute_id_mapping(item, int(item["tmdb_id"]))
+                except (TypeError, ValueError):
+                    pass
             return item
         tmdb_id = self._matcher.resolve_tmdb_id(item)
         if tmdb_id is None:
             return item
+        if self._should_backfill_pmdb_mapping(item):
+            self._contribute_id_mapping(item, tmdb_id)
         return {
             **item,
             "tmdb_id": tmdb_id,
