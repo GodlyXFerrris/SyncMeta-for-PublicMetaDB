@@ -671,8 +671,8 @@ class ProfileStore:
             break
 
     @staticmethod
-    def _merge_unresolved_items(profile: dict, results: list[dict]) -> None:
-        """Merge newly unresolved items into the profile, keyed by cache_key to avoid dupes.
+    def _replace_unresolved_items(profile: dict, results: list[dict]) -> None:
+        """Replace the stored unresolved snapshot from the latest list sync.
 
         Items whose cache_key the user has already manually resolved are never
         re-added, even if the sync couldn't resolve them for some reason.
@@ -680,13 +680,7 @@ class ProfileStore:
         manually_resolved: set[str] = set(
             (profile.get("manual_resolution_cache") or {}).keys()
         )
-        existing: list[dict] = profile.get("unresolved_items", [])
-        by_key: dict[str, dict] = {
-            item["cache_key"]: item
-            for item in existing
-            if isinstance(item, dict) and item.get("cache_key")
-            and item["cache_key"] not in manually_resolved
-        }
+        by_key: dict[str, dict] = {}
         for row in results:
             for item in row.get("unresolved_items", []):
                 if not isinstance(item, dict):
@@ -695,6 +689,32 @@ class ProfileStore:
                 if key and key not in manually_resolved:
                     by_key[key] = item
         profile["unresolved_items"] = list(by_key.values())
+
+    @staticmethod
+    def _active_unresolved_counts(unresolved_items: list[dict]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for item in unresolved_items:
+            if not isinstance(item, dict):
+                continue
+            list_name = str(item.get("list_name") or "").strip()
+            if not list_name:
+                continue
+            counts[list_name] = counts.get(list_name, 0) + 1
+        return counts
+
+    @classmethod
+    def _with_active_unresolved_counts(cls, rows: list[dict], unresolved_items: list[dict]) -> list[dict]:
+        counts = cls._active_unresolved_counts(unresolved_items)
+        normalized_rows: list[dict] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            next_row = copy.deepcopy(row)
+            list_name = str(next_row.get("list_name") or "").strip()
+            if list_name:
+                next_row["items_skipped_unresolved"] = counts.get(list_name, 0)
+            normalized_rows.append(next_row)
+        return normalized_rows
 
     @staticmethod
     def _merge_activity_results(profile: dict, results: list[dict], timestamp: str) -> None:
@@ -720,12 +740,16 @@ class ProfileStore:
         profile["activity_state"] = state
 
     def _public_profile(self, profile: dict, include_credentials: bool = False) -> dict:
+        unresolved_items = copy.deepcopy(profile.get("unresolved_items", []))
         result = {
             "profile_id": profile["profile_id"],
             "created_at": profile.get("created_at"),
             "updated_at": profile.get("updated_at"),
             "last_sync": profile.get("last_sync"),
-            "last_results": copy.deepcopy(profile.get("last_results", [])),
+            "last_results": self._with_active_unresolved_counts(
+                profile.get("last_results", []),
+                unresolved_items,
+            ),
             "sync_live_results": copy.deepcopy(profile.get("sync_live_results", [])),
             "sync_running": bool(profile.get("sync_running")),
             "sync_cancel_requested": bool(profile.get("sync_cancel_requested")),
@@ -991,8 +1015,8 @@ class ProfileStore:
                 for key in manual_keys:
                     merged_frc.pop(key, None)
                 profile["failed_resolution_cache"] = merged_frc
-            if not dry_run:
-                self._merge_unresolved_items(profile, results)
+            if normalized_modes["lists"] and not dry_run:
+                self._replace_unresolved_items(profile, results)
             self._merge_activity_results(profile, results, now)
             profile["sync_error"] = None
             profile["sync_running"] = False

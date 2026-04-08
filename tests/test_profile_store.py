@@ -413,6 +413,80 @@ class ProfileStoreTests(unittest.TestCase):
             "Trakt Resume Progress",
         )
 
+    def test_list_sync_replaces_stale_unresolved_snapshot(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Watching - Anime",
+            "display_name": "Watching - Anime",
+            "source_name": "SIMKL",
+            "items_skipped_unresolved": 1,
+            "unresolved_items": [{
+                "cache_key": "stale-item",
+                "title": "Old Missing Show",
+                "list_name": "Watching - Anime",
+            }],
+        }], dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
+
+        updated = self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Watching - Anime",
+            "display_name": "Watching - Anime",
+            "source_name": "SIMKL",
+            "items_skipped_unresolved": 0,
+            "unresolved_items": [],
+        }], dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
+
+        self.assertEqual(self.store.get_unresolved_items(created["profile_id"]), [])
+        self.assertEqual(updated["last_results"][0]["items_skipped_unresolved"], 0)
+
+    def test_activity_only_sync_keeps_existing_unresolved_snapshot(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "trakt_sync_resume_progress": True,
+        })
+
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Watching - Anime",
+            "display_name": "Watching - Anime",
+            "source_name": "SIMKL",
+            "items_skipped_unresolved": 1,
+            "unresolved_items": [{
+                "cache_key": "still-open",
+                "title": "Current Missing Show",
+                "list_name": "Watching - Anime",
+            }],
+        }], dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
+
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "",
+            "display_name": "Trakt Resume Progress",
+            "source_name": "Trakt",
+            "items_fetched": 3,
+        }], dry_run=False, sync_modes={"lists": False, "history": False, "resume": True})
+
+        self.assertEqual(len(self.store.get_unresolved_items(created["profile_id"])), 1)
+        self.assertEqual(self.store.get_unresolved_items(created["profile_id"])[0]["cache_key"], "still-open")
+
+    def test_public_profile_uses_active_unresolved_snapshot_for_last_results(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+
+        self.store.record_sync_success(created["profile_id"], [{
+            "list_name": "Watching - Anime",
+            "display_name": "Watching - Anime",
+            "source_name": "SIMKL",
+            "items_skipped_unresolved": 1,
+            "unresolved_items": [{
+                "cache_key": "dismiss-me",
+                "title": "Dismissed Missing Show",
+                "list_name": "Watching - Anime",
+            }],
+        }], dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
+
+        self.store.dismiss_unresolved_item(created["profile_id"], "dismiss-me")
+        updated = self.store.get_profile_by_id(created["profile_id"], include_credentials=False)
+
+        self.assertEqual(updated["last_results"][0]["items_skipped_unresolved"], 0)
+
     def test_history_sync_persists_latest_source_cursor(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
