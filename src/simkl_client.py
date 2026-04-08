@@ -936,13 +936,13 @@ class SimklClient:
 
     @staticmethod
     def _history_last_watched_episodes(entry: dict, show: dict) -> list[dict]:
+        # Only use actual last-watched fields — next_to_watch is the NEXT
+        # unwatched episode, not a watched one, so it must NOT be included here.
         candidates = [
             entry.get("last_watched_episode"),
             show.get("last_watched_episode"),
             entry.get("last_episode"),
             show.get("last_episode"),
-            entry.get("next_to_watch"),
-            show.get("next_to_watch"),
         ]
         episodes: list[dict] = []
         for candidate in candidates:
@@ -997,7 +997,14 @@ class SimklClient:
             if episodes:
                 return episodes
 
-        return [{
+        # TMDB plan scraping failed or TMDB ID is missing.  Fall back to
+        # synthesising individual Season 1 episode rows directly so that these
+        # entries are added even when history already has a last_watched_episode
+        # record (the elif-anime branch in _extract_episode_history skips
+        # aggregate items, which caused the "only 1 episode imported" bug).
+        # _remap_simkl_anime_history_item will later fix season mapping for
+        # multi-season shows via Fribb/anime-seasons data.
+        common = {
             "tmdb_id": tmdb_id,
             "media_type": "tv",
             "simkl_type": media_key,
@@ -1014,10 +1021,12 @@ class SimklClient:
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
-            "aggregate_watched_count": watched_total,
-            "aggregate_total_episodes": total_episodes,
             "cursor_exempt": True,
-        }]
+        }
+        return [
+            {**common, "season": 1, "number": i}
+            for i in range(1, watched_total + 1)
+        ]
 
     def expand_aggregate_history_item(self, item: dict) -> list[dict]:
         watched_total = item.get("aggregate_watched_count")
@@ -1116,7 +1125,7 @@ class SimklClient:
         plan: list[tuple[int, int]] = []
         for block in blocks[1:]:
             season_match = re.search(rf'/tv/{tmdb_id}/season/(\d+)(?:\?language=en-US)?', block)
-            episodes_match = re.search(r'(\d+)\s+Episodes', block)
+            episodes_match = re.search(r'(\d+)\s+Episodes?', block, re.IGNORECASE)
             if not season_match or not episodes_match:
                 continue
             try:

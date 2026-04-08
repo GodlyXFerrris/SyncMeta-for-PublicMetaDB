@@ -653,6 +653,25 @@ class ProfileStore:
         profile["history"] = profile["history"][:MAX_HISTORY_ITEMS]
 
     @staticmethod
+    def _merge_unresolved_items(profile: dict, results: list[dict]) -> None:
+        """Merge newly unresolved items into the profile, keyed by cache_key to avoid dupes."""
+        existing: list[dict] = profile.get("unresolved_items", [])
+        # Build a map of existing items by cache_key so we can overwrite stale entries.
+        by_key: dict[str, dict] = {
+            item["cache_key"]: item
+            for item in existing
+            if isinstance(item, dict) and item.get("cache_key")
+        }
+        for row in results:
+            for item in row.get("unresolved_items", []):
+                if not isinstance(item, dict):
+                    continue
+                key = item.get("cache_key")
+                if key:
+                    by_key[key] = item
+        profile["unresolved_items"] = list(by_key.values())
+
+    @staticmethod
     def _merge_activity_results(profile: dict, results: list[dict], timestamp: str) -> None:
         merged = copy.deepcopy(profile.get("activity_results", {}))
         state = _normalize_activity_state(profile.get("activity_state"))
@@ -933,6 +952,8 @@ class ProfileStore:
                 profile["resolution_cache"] = resolution_cache
             if failed_resolution_cache is not None and not dry_run:
                 profile["failed_resolution_cache"] = failed_resolution_cache
+            if not dry_run:
+                self._merge_unresolved_items(profile, results)
             self._merge_activity_results(profile, results, now)
             profile["sync_error"] = None
             profile["sync_running"] = False
@@ -977,6 +998,45 @@ class ProfileStore:
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
+
+    def get_unresolved_items(self, profile_id: str) -> list[dict]:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            return copy.deepcopy(profile.get("unresolved_items", []))
+
+    def resolve_item_manually(self, profile_id: str, cache_key: str, tmdb_id: int) -> list[dict]:
+        """Add a manual TMDB mapping to the resolution cache and remove from unresolved."""
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            # Add to resolution cache so the next sync uses it instantly.
+            rc = dict(profile.get("resolution_cache") or {})
+            rc[cache_key] = tmdb_id
+            profile["resolution_cache"] = rc
+            # Remove from failed resolution cache so it gets retried.
+            frc = dict(profile.get("failed_resolution_cache") or {})
+            frc.pop(cache_key, None)
+            profile["failed_resolution_cache"] = frc
+            # Remove from unresolved list.
+            profile["unresolved_items"] = [
+                item for item in profile.get("unresolved_items", [])
+                if item.get("cache_key") != cache_key
+            ]
+            self._save_locked()
+            return copy.deepcopy(profile["unresolved_items"])
+
+    def dismiss_unresolved_item(self, profile_id: str, cache_key: str) -> list[dict]:
+        """Remove an unresolved item without resolving it (user dismisses it)."""
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            profile["unresolved_items"] = [
+                item for item in profile.get("unresolved_items", [])
+                if item.get("cache_key") != cache_key
+            ]
+            self._save_locked()
+            return copy.deepcopy(profile["unresolved_items"])
 
     def request_sync_cancel(self, profile_id: str) -> dict:
         with self._lock:

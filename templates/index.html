@@ -189,6 +189,10 @@
           <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
           <div id="results-body"><div class="empty">No sync results yet. Save a profile in Settings and the server will keep it synced automatically.</div></div>
         </div>
+        <div class="panel" id="unresolved-panel" style="display:none">
+          <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
+          <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
+        </div>
         <div class="panel">
           <div class="panel-header">Sync History</div>
           <div id="history-body"><div class="empty">No history yet.</div></div>
@@ -1948,10 +1952,18 @@
         <div class="card"><div class="card-label">Last Sync</div><div class="card-value">${profile.last_sync ? timeAgo(profile.last_sync) : 'Never'}</div><div class="card-sub">${lastSyncSub}</div></div>
         <div class="card"><div class="card-label">Items Fetched</div><div class="card-value">${totals.fetched}</div><div class="card-sub">${totals.resolved} resolved</div></div>
         <div class="card"><div class="card-label">Added</div><div class="card-value" style="color:${totals.added > 0 ? 'var(--green)' : 'var(--z100)'}">${totals.added}</div><div class="card-sub" style="color:${totals.removed > 0 ? 'var(--red)' : 'var(--z500)'}">${totals.removed} removed</div></div>
-        <div class="card"><div class="card-label">Issues</div><div class="card-value" style="color:${totals.unresolved + totals.errors > 0 ? 'var(--orange)' : 'var(--z600)'}">${totals.unresolved + totals.errors}</div><div class="card-sub">${totals.unresolved} unresolved, ${totals.errors} errors</div></div>
+        <div class="card" style="${totals.unresolved > 0 ? 'cursor:pointer' : ''}" id="card-issues" title="${totals.unresolved > 0 ? 'Click to view unresolved items' : ''}"><div class="card-label">Issues</div><div class="card-value" style="color:${totals.unresolved + totals.errors > 0 ? 'var(--orange)' : 'var(--z600)'}">${totals.unresolved + totals.errors}</div><div class="card-sub">${totals.unresolved} unresolved${totals.unresolved > 0 ? ' — click to view' : ''}, ${totals.errors} errors</div></div>
       `;
 
       renderActivityPanel(profile);
+
+      // Wire Issues card to open the unresolved panel
+      const issuesCard = el('card-issues');
+      if (issuesCard && totals.unresolved > 0) {
+        issuesCard.onclick = () => { fetchUnresolved(); el('unresolved-panel').scrollIntoView({ behavior: 'smooth' }); };
+      } else if (issuesCard) {
+        issuesCard.onclick = null;
+      }
 
       const nextSyncText = options.auto_sync === false
         ? 'Auto sync is off'
@@ -2029,8 +2041,85 @@
       el('btn-stop').textContent = stopping ? 'Stopping...' : 'Stop';
       el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Lists';
       if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
-      else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; }
+      else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; fetchUnresolved(); }
     }
+
+    // ── Unresolved items panel ─────────────────────────────────────────────────
+
+    function renderUnresolvedPanel(items) {
+      const panel = el('unresolved-panel');
+      const body = el('unresolved-body');
+      if (!items || items.length === 0) {
+        panel.style.display = 'none';
+        return;
+      }
+      panel.style.display = '';
+      const rows = items.map(item => {
+        const ids = [
+          item.imdb_id ? `IMDb: ${esc(item.imdb_id)}` : '',
+          item.mal_id ? `MAL: ${esc(item.mal_id)}` : '',
+          item.anilist_id ? `AniList: ${esc(item.anilist_id)}` : '',
+          item.tvdb_id ? `TVDB: ${esc(item.tvdb_id)}` : '',
+          item.simkl_id ? `SIMKL: ${esc(item.simkl_id)}` : '',
+        ].filter(Boolean).join(', ') || '—';
+        const cacheKey = esc(item.cache_key || '');
+        return `<tr data-cache-key="${cacheKey}">
+          <td>${esc(item.title || 'Unknown')}${item.year ? ` <span class="catalog-note">(${item.year})</span>` : ''}</td>
+          <td>${esc(item.media_type || '—')}</td>
+          <td class="catalog-note" style="font-size:11px">${ids}</td>
+          <td>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input type="number" min="1" placeholder="TMDB ID" class="unresolved-tmdb-input" style="width:100px;padding:4px 6px;border:1px solid var(--z700);border-radius:4px;background:var(--z900);color:var(--z100);font-size:12px" />
+              <button class="btn btn-sm unresolved-resolve-btn" type="button" data-cache-key="${cacheKey}">Map</button>
+              <button class="btn btn-sm unresolved-dismiss-btn" type="button" data-cache-key="${cacheKey}" style="color:var(--z500)">Dismiss</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('');
+      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th>Known IDs</th><th style="min-width:220px">Manual TMDB Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      body.querySelectorAll('.unresolved-resolve-btn').forEach(btn => {
+        btn.addEventListener('click', () => resolveUnresolvedItem(btn.closest('tr')));
+      });
+      body.querySelectorAll('.unresolved-dismiss-btn').forEach(btn => {
+        btn.addEventListener('click', () => dismissUnresolvedItem(btn.closest('tr')));
+      });
+    }
+
+    async function fetchUnresolved() {
+      try {
+        const result = await apiPost('/api/profile/unresolved', {});
+        if (result.ok) renderUnresolvedPanel(result.data.items || []);
+      } catch (e) {
+        console.error('Failed to load unresolved items', e);
+      }
+    }
+
+    async function resolveUnresolvedItem(row) {
+      if (!row) return;
+      const cacheKey = row.dataset.cacheKey;
+      const input = row.querySelector('.unresolved-tmdb-input');
+      const tmdbId = parseInt(input ? input.value : '', 10);
+      if (!cacheKey || !tmdbId || tmdbId <= 0) {
+        if (input) input.style.borderColor = 'var(--red)';
+        return;
+      }
+      input.style.borderColor = '';
+      const result = await apiPost('/api/profile/unresolved/resolve', {cache_key: cacheKey, tmdb_id: tmdbId});
+      if (result.ok) renderUnresolvedPanel(result.data.items || []);
+    }
+
+    async function dismissUnresolvedItem(row) {
+      if (!row) return;
+      const cacheKey = row.dataset.cacheKey;
+      if (!cacheKey) return;
+      const result = await apiPost('/api/profile/unresolved/dismiss', {cache_key: cacheKey});
+      if (result.ok) renderUnresolvedPanel(result.data.items || []);
+    }
+
+    const refreshBtn = el('btn-unresolved-refresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', fetchUnresolved);
+
+    // ──────────────────────────────────────────────────────────────────────────
 
     function renderActivityPanel(profile) {
       const options = profile.options || {};
@@ -2507,6 +2596,7 @@
     fetchStatus(true).then(profile => {
       if (profile) {
         if (localStorage.getItem(ENTERED_KEY)) switchView('dashboard');
+        fetchUnresolved();
         if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }

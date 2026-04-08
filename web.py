@@ -160,6 +160,7 @@ _access_limiter = LoginAttemptLimiter(max_attempts=ACCESS_MAX_ATTEMPTS, window_s
 def _stats_to_dict(stats: SyncStats) -> dict:
     data = asdict(stats)
     data["error_count"] = len(data.pop("errors", []))
+    # Keep unresolved_items for persistence but don't bloat live progress payloads.
     return data
 
 
@@ -1178,6 +1179,57 @@ def api_profile_sync_stop():
         return _json_error(str(exc), 409)
 
     return jsonify({"status": "stopping", "profile": profile})
+
+
+@app.route("/api/profile/unresolved", methods=["POST"])
+def api_profile_unresolved():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    try:
+        items = _profile_store.get_unresolved_items(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    return jsonify({"items": items})
+
+
+@app.route("/api/profile/unresolved/resolve", methods=["POST"])
+def api_profile_unresolved_resolve():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    cache_key = str(body.get("cache_key", "")).strip()
+    tmdb_id_raw = body.get("tmdb_id")
+    if not cache_key:
+        return _json_error("cache_key is required", 400)
+    try:
+        tmdb_id = int(tmdb_id_raw)
+        if tmdb_id <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _json_error("tmdb_id must be a positive integer", 400)
+    try:
+        remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    return jsonify({"status": "resolved", "items": remaining})
+
+
+@app.route("/api/profile/unresolved/dismiss", methods=["POST"])
+def api_profile_unresolved_dismiss():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    cache_key = str(body.get("cache_key", "")).strip()
+    if not cache_key:
+        return _json_error("cache_key is required", 400)
+    try:
+        remaining = _profile_store.dismiss_unresolved_item(profile_id, cache_key)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    return jsonify({"status": "dismissed", "items": remaining})
 
 
 if __name__ == "__main__":

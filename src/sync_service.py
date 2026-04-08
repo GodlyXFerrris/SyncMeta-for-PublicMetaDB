@@ -74,6 +74,35 @@ class SyncStats:
     items_skipped_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
     history_cursor: str = ""
+    unresolved_items: list[dict] = field(default_factory=list)
+
+
+def _unresolved_item_summary(item: dict) -> dict:
+    """Extract a compact, serialisable record for an item that could not be resolved."""
+    ids = item.get("ids") or {}
+    return {
+        "title": item.get("title") or "Unknown",
+        "year": item.get("year"),
+        "media_type": item.get("media_type"),
+        "simkl_type": item.get("simkl_type"),
+        "tmdb_id": item.get("tmdb_id"),
+        "imdb_id": item.get("imdb_id") or ids.get("imdb"),
+        "mal_id": item.get("mal_id") or ids.get("mal"),
+        "anilist_id": item.get("anilist_id") or ids.get("anilist"),
+        "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
+        "simkl_id": ids.get("simkl"),
+        # Stable key used to de-duplicate across syncs and as the resolution cache key
+        "cache_key": (
+            f"{item.get('media_type', '')}:"
+            f"{ids.get('simkl', '')}:"
+            f"{item.get('imdb_id', '') or ids.get('imdb', '')}:"
+            f"{item.get('tmdb_id', '')}:"
+            f"{ids.get('mal', '')}:"
+            f"{ids.get('root_mal', '')}:"
+            f"{ids.get('root_anilist', '')}:"
+            f"{item.get('title', '')}:{item.get('year', '')}"
+        ),
+    }
 
 
 class SyncService:
@@ -1244,6 +1273,7 @@ class SyncService:
                     self._contribute_id_mapping(item, tmdb_id)
             else:
                 stats.items_skipped_unresolved += 1
+                stats.unresolved_items.append(_unresolved_item_summary(item))
             self._publish_progress([stats])
 
         if self._config.sync.dry_run:
