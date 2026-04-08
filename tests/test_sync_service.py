@@ -51,6 +51,7 @@ class StubPMDBClient:
         self.created_lists: list[dict] = []
         self.added_items: list[dict] = []
         self.created_mappings: list[dict] = []
+        self.anime_seasons_by_tmdb: dict[int, list[dict]] = {}
         self.watched: list[dict] = []
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
@@ -81,6 +82,9 @@ class StubPMDBClient:
             "id_value": id_value,
         })
         return True
+
+    def get_anime_seasons(self, tmdb_id: int) -> list[dict]:
+        return list(self.anime_seasons_by_tmdb.get(int(tmdb_id), []))
 
     def delete_list(self, list_id: str) -> bool:
         self.deleted_lists.append(list_id)
@@ -861,6 +865,111 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(
             {(item["tmdb_id"], item["season"], item["episode"]) for item in pmdb.watched},
             {(811, 1, 2), (812, 1, 3)},
+        )
+
+    def test_simkl_anime_history_re_resolves_wrong_direct_tmdb_id(self) -> None:
+        class WrongAnimeTmdbSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 111111,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "season": 1,
+                    "episode": 1,
+                    "title": "Oshi no Ko",
+                    "anilist_id": "150672",
+                    "mal_id": "52034",
+                    "ids": {"anilist": "150672", "mal": "52034"},
+                }]
+
+        class CorrectingMatcher:
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                if item.get("title") == "Oshi no Ko":
+                    return 203737
+                return item.get("tmdb_id")
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._simkl = WrongAnimeTmdbSimklClient()
+        service._matcher = CorrectingMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertEqual(pmdb.watched[0]["tmdb_id"], 203737)
+
+    def test_simkl_aggregate_anime_uses_root_offset_mapping_for_later_seasons(self) -> None:
+        class OffsetAggregateAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 9501,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "title": "Seasonal Anime Part 2",
+                    "aggregate_watched_count": 3,
+                    "root_episode_offset": 12,
+                    "anilist_id": "9999",
+                    "ids": {"anilist": "9999"},
+                    "watched_at": "2026-04-01T13:00:00Z",
+                }]
+
+            def expand_aggregate_history_item(self, item: dict) -> list[dict]:
+                return []
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.anime_seasons_by_tmdb[9501] = [
+            {"season_number": 1, "episode_count": 12, "tmdb_season": 1, "tmdb_episode_start": 1},
+            {"season_number": 2, "episode_count": 12, "tmdb_season": 2, "tmdb_episode_start": 1},
+        ]
+        service._simkl = OffsetAggregateAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 3)
+        self.assertEqual(
+            [(item["season"], item["episode"]) for item in pmdb.watched],
+            [(2, 1), (2, 2), (2, 3)],
         )
 
     def test_simkl_anime_history_backfills_pmdb_external_ids(self) -> None:

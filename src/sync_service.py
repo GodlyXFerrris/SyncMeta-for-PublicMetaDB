@@ -522,7 +522,9 @@ class SyncService:
             aggregate_count = item.get("aggregate_watched_count")
             if aggregate_count:
                 resolved = self._resolve_activity_item(item)
-                aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
+                aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
+                if not aggregate_rows:
+                    aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
                 if aggregate_rows:
                     expanded.extend(self._remap_simkl_anime_history_item(row) for row in aggregate_rows)
                 else:
@@ -533,6 +535,44 @@ class SyncService:
                 continue
             expanded.append(item)
         return self._dedupe_activity_history_items(expanded)
+
+    def _expand_simkl_aggregate_anime_item(self, item: dict) -> list[dict]:
+        """Expand aggregate anime history through the anime remap pipeline.
+
+        Seasonal anime is often represented as a franchise root plus an episode
+        offset. Expanding those items through raw TMDB season plans tends to
+        collapse into Season 1. For smaller anime runs, synthesize Season 1
+        episode rows first, then let the normal anime remapper place them into
+        the correct root TMDB season/episode.
+        """
+        if str(item.get("simkl_type", "")).strip().lower() != "anime":
+            return []
+        if str(item.get("media_type", "")).strip().lower() != "tv":
+            return []
+        try:
+            watched_total = int(item.get("aggregate_watched_count") or 0)
+        except (TypeError, ValueError):
+            return []
+        if watched_total <= 0:
+            return []
+
+        has_root_offset = int(item.get("root_episode_offset") or 0) > 0
+        has_anime_ids = any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
+        if not has_root_offset and not has_anime_ids:
+            return []
+        if watched_total > 200:
+            return []
+
+        watched_at = item.get("watched_at")
+        return [
+            {
+                **item,
+                "season": 1,
+                "episode": episode_number,
+                "watched_at": watched_at,
+            }
+            for episode_number in range(1, watched_total + 1)
+        ]
 
     def _remap_simkl_anime_history_item(self, item: dict) -> dict:
         """Remap a SIMKL anime TV history item to the correct PMDB season+episode.
@@ -1638,6 +1678,15 @@ class SyncService:
         )
 
     def _resolve_activity_item(self, item: dict) -> dict:
+        if self._should_force_anime_re_resolve(item):
+            tmdb_id = self._matcher.resolve_tmdb_id(item)
+            if tmdb_id is not None:
+                if self._should_backfill_pmdb_mapping(item):
+                    self._contribute_id_mapping(item, tmdb_id)
+                return {
+                    **item,
+                    "tmdb_id": tmdb_id,
+                }
         if item.get("tmdb_id"):
             if self._should_backfill_pmdb_mapping(item):
                 try:
@@ -1654,6 +1703,14 @@ class SyncService:
             **item,
             "tmdb_id": tmdb_id,
         }
+
+    @staticmethod
+    def _should_force_anime_re_resolve(item: dict) -> bool:
+        return (
+            str(item.get("simkl_type", "")).strip().lower() == "anime"
+            and str(item.get("media_type", "")).strip().lower() == "tv"
+            and any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
+        )
 
     def _dedupe_activity_history_items(self, items: list[dict]) -> list[dict]:
         deduped: list[dict] = []
