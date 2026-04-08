@@ -2061,7 +2061,7 @@
         const listBadge = item.list_name ? `<div class="catalog-note" style="margin-top:2px;font-size:11px">📋 ${esc(item.list_name)}</div>` : '';
 
         // Build external lookup links so the user can find the TMDB ID easily.
-        const searchQuery = encodeURIComponent((title || '') + (item.year ? ` ${item.year}` : ''));
+        const searchQuery = encodeURIComponent(title || displayTitle);
         const tmdbSearchUrl = `https://www.themoviedb.org/search?query=${searchQuery}`;
         const idLinks = [
           item.imdb_id ? `<a href="https://www.imdb.com/title/${esc(item.imdb_id)}" target="_blank" rel="noopener" style="color:var(--z400)">IMDb</a>` : '',

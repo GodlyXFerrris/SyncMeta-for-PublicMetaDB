@@ -94,17 +94,12 @@ def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
         # Which PMDB list this item belongs to — used by the manual-resolve
         # endpoint to add the item instantly without waiting for the next sync.
         "list_name": list_name,
-        # Stable key used to de-duplicate across syncs and as the resolution cache key
-        "cache_key": (
-            f"{item.get('media_type', '')}:"
-            f"{ids.get('simkl', '')}:"
-            f"{item.get('imdb_id', '') or ids.get('imdb', '')}:"
-            f"{item.get('tmdb_id', '')}:"
-            f"{ids.get('mal', '')}:"
-            f"{ids.get('root_mal', '')}:"
-            f"{ids.get('root_anilist', '')}:"
-            f"{item.get('title', '')}:{item.get('year', '')}"
-        ),
+        # Use ItemMatcher._cache_key so this key is byte-for-byte identical to
+        # the key the matcher will generate when it looks this item up on the
+        # next sync.  Previously a hand-rolled copy caused None→"" vs None→"None"
+        # mismatches (Python's f"{None}" == "None", not ""), which meant the
+        # manual_resolution_cache was never hit and items reappeared as unresolved.
+        "cache_key": ItemMatcher._cache_key(item),
     }
 
 
