@@ -143,6 +143,9 @@ class SyncService:
         self._live_progress_rows: dict[str, dict] = {}
         self._mapping_contribution_lock = threading.Lock()
         self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
+        self._fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
+        self._anime_seasons_cache: dict[int, list[dict]] = {}
+        self._anime_history_remap_cache: dict[tuple, dict | None] = {}
 
     def _make_anime_root_resolver(self):
         """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
@@ -461,7 +464,7 @@ class SyncService:
                 offset = int(resolved.get("root_episode_offset") or 0)
                 if offset > 0:
                     try:
-                        anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+                        anime_seasons = self._get_cached_anime_seasons(tmdb_id)
                         if anime_seasons:
                             remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, 1)
                             if remapped:
@@ -597,11 +600,25 @@ class SyncService:
         if episode <= 0:
             return item
 
+        cache_key = (
+            str(item.get("tmdb_id") or ""),
+            str(item.get("anilist_id") or ""),
+            str(item.get("root_anilist_id") or ""),
+            str(item.get("mal_id") or ""),
+            str(item.get("root_mal_id") or ""),
+            offset,
+            episode,
+        )
+        cached = self._anime_history_remap_cache.get(cache_key)
+        if cached is not None:
+            return {**item, **cached}
+
         # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
         fribb = self._lookup_fribb_entry(item)
         if fribb is not None:
             remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
             if remapped:
+                self._anime_history_remap_cache[cache_key] = dict(remapped)
                 return {**item, **remapped}
 
         # Remaining paths only make sense when there is a non-zero offset
@@ -611,10 +628,11 @@ class SyncService:
 
         # ── Path 3: PMDB anime-seasons with absolute episode offset ─────────────
         try:
-            anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+            anime_seasons = self._get_cached_anime_seasons(tmdb_id)
             if anime_seasons:
                 remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
                 if remapped:
+                    self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
         except Exception:
             pass
@@ -624,10 +642,13 @@ class SyncService:
             season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
             positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
             if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-                return {**item, "season": 1, "episode": offset + episode}
+                remapped = {"season": 1, "episode": offset + episode}
+                self._anime_history_remap_cache[cache_key] = dict(remapped)
+                return {**item, **remapped}
         except Exception:
             pass
 
+        self._anime_history_remap_cache[cache_key] = {}
         return item
 
     def _lookup_fribb_entry(self, item: dict) -> dict | None:
@@ -639,9 +660,14 @@ class SyncService:
             raw = item.get(id_key) or ids.get("anilist") or ids.get("root_anilist")
             if raw:
                 try:
+                    cache_key = ("anilist", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
                     entry = fribb_client.lookup_by_anilist(int(raw))
                     if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
                         return entry
+                    self._fribb_lookup_cache[cache_key] = None
                 except (TypeError, ValueError):
                     pass
 
@@ -649,9 +675,14 @@ class SyncService:
             raw = item.get(id_key) or ids.get("mal") or ids.get("root_mal")
             if raw:
                 try:
+                    cache_key = ("mal", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
                     entry = fribb_client.lookup_by_mal(int(raw))
                     if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
                         return entry
+                    self._fribb_lookup_cache[cache_key] = None
                 except (TypeError, ValueError):
                     pass
 
@@ -694,7 +725,7 @@ class SyncService:
         # Try PMDB anime-seasons: season_number in PMDB == TVDB season number.
         if tmdb_id > 0:
             try:
-                anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+                anime_seasons = self._get_cached_anime_seasons(tmdb_id)
                 if anime_seasons:
                     remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode)
                     if remapped:
@@ -711,6 +742,14 @@ class SyncService:
         if tmdb_id > 0 and tmdb_id != item_tmdb_id:
             out["tmdb_id"] = tmdb_id
         return out
+
+    def _get_cached_anime_seasons(self, tmdb_id: int) -> list[dict]:
+        tmdb_id = int(tmdb_id)
+        if tmdb_id <= 0:
+            return []
+        if tmdb_id not in self._anime_seasons_cache:
+            self._anime_seasons_cache[tmdb_id] = list(self._pmdb.get_anime_seasons(tmdb_id))
+        return list(self._anime_seasons_cache[tmdb_id])
 
     @staticmethod
     def _map_episode_via_tvdb_season(

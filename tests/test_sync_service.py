@@ -52,6 +52,7 @@ class StubPMDBClient:
         self.added_items: list[dict] = []
         self.created_mappings: list[dict] = []
         self.anime_seasons_by_tmdb: dict[int, list[dict]] = {}
+        self.anime_seasons_calls: list[int] = []
         self.watched: list[dict] = []
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
@@ -84,6 +85,7 @@ class StubPMDBClient:
         return True
 
     def get_anime_seasons(self, tmdb_id: int) -> list[dict]:
+        self.anime_seasons_calls.append(int(tmdb_id))
         return list(self.anime_seasons_by_tmdb.get(int(tmdb_id), []))
 
     def delete_list(self, list_id: str) -> bool:
@@ -971,6 +973,7 @@ class SyncServiceTests(unittest.TestCase):
             [(item["season"], item["episode"]) for item in pmdb.watched],
             [(2, 1), (2, 2), (2, 3)],
         )
+        self.assertEqual(pmdb.anime_seasons_calls, [9501])
 
     def test_simkl_anime_history_backfills_pmdb_external_ids(self) -> None:
         class DirectAnimeSimklClient(StubSimklClient):
