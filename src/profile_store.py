@@ -653,6 +653,24 @@ class ProfileStore:
         profile["history"] = profile["history"][:MAX_HISTORY_ITEMS]
 
     @staticmethod
+    def _patch_resolved_stats(profile: dict, resolved_item: dict) -> None:
+        """Decrement items_skipped_unresolved and increment items_resolved/items_added
+        in the matching last_results row so the dashboard stats update immediately."""
+        list_name = str(resolved_item.get("list_name") or "").strip()
+        for row in profile.get("last_results", []):
+            if not isinstance(row, dict):
+                continue
+            if list_name and str(row.get("list_name", "")).strip() != list_name:
+                continue
+            # Only patch the first matching row (or the only row if no list_name).
+            unresolved = int(row.get("items_skipped_unresolved") or 0)
+            if unresolved > 0:
+                row["items_skipped_unresolved"] = unresolved - 1
+            row["items_resolved"] = int(row.get("items_resolved") or 0) + 1
+            row["items_added"] = int(row.get("items_added") or 0) + 1
+            break
+
+    @staticmethod
     def _merge_unresolved_items(profile: dict, results: list[dict]) -> None:
         """Merge newly unresolved items into the profile, keyed by cache_key to avoid dupes.
 
@@ -1051,11 +1069,19 @@ class ProfileStore:
             frc = dict(profile.get("failed_resolution_cache") or {})
             frc.pop(cache_key, None)
             profile["failed_resolution_cache"] = frc
-            # Remove from unresolved list.
+            # Find the item being resolved so we can update the stats row.
+            resolved_item = next(
+                (i for i in profile.get("unresolved_items", []) if i.get("cache_key") == cache_key),
+                None,
+            )
             profile["unresolved_items"] = [
                 item for item in profile.get("unresolved_items", [])
                 if item.get("cache_key") != cache_key
             ]
+            # Patch last_results so the dashboard table reflects the fix immediately
+            # without waiting for the next full sync.
+            if resolved_item:
+                self._patch_resolved_stats(profile, resolved_item)
             self._save_locked()
             return copy.deepcopy(profile["unresolved_items"])
 

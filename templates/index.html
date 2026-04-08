@@ -2055,20 +2055,32 @@
       }
       panel.style.display = '';
       const rows = items.map(item => {
-        const ids = [
-          item.imdb_id ? `IMDb: ${esc(item.imdb_id)}` : '',
-          item.mal_id ? `MAL: ${esc(item.mal_id)}` : '',
-          item.anilist_id ? `AniList: ${esc(item.anilist_id)}` : '',
-          item.tvdb_id ? `TVDB: ${esc(item.tvdb_id)}` : '',
-          item.simkl_id ? `SIMKL: ${esc(item.simkl_id)}` : '',
-        ].filter(Boolean).join(', ') || '—';
+        const title = item.title && item.title !== 'Unknown' ? item.title : null;
+        const displayTitle = title || (item.simkl_id ? `SIMKL #${item.simkl_id}` : item.mal_id ? `MAL #${item.mal_id}` : item.anilist_id ? `AniList #${item.anilist_id}` : 'Unknown');
+        const year = item.year ? ` (${item.year})` : '';
+        const listBadge = item.list_name ? `<div class="catalog-note" style="margin-top:2px;font-size:11px">📋 ${esc(item.list_name)}</div>` : '';
+
+        // Build external lookup links so the user can find the TMDB ID easily.
+        const searchQuery = encodeURIComponent((title || '') + (item.year ? ` ${item.year}` : ''));
+        const tmdbSearchUrl = `https://www.themoviedb.org/search?query=${searchQuery}`;
+        const idLinks = [
+          item.imdb_id ? `<a href="https://www.imdb.com/title/${esc(item.imdb_id)}" target="_blank" rel="noopener" style="color:var(--z400)">IMDb</a>` : '',
+          item.mal_id ? `<a href="https://myanimelist.net/anime/${esc(item.mal_id)}" target="_blank" rel="noopener" style="color:var(--z400)">MAL</a>` : '',
+          item.anilist_id ? `<a href="https://anilist.co/anime/${esc(item.anilist_id)}" target="_blank" rel="noopener" style="color:var(--z400)">AniList</a>` : '',
+          `<a href="${tmdbSearchUrl}" target="_blank" rel="noopener" style="color:var(--orange)">Search TMDB ↗</a>`,
+        ].filter(Boolean).join(' · ');
+
         const cacheKey = esc(item.cache_key || '');
+        const typeLabel = item.media_type === 'tv' ? (item.simkl_type === 'anime' ? 'Anime' : 'TV') : item.media_type === 'movie' ? 'Movie' : esc(item.media_type || '—');
         return `<tr data-cache-key="${cacheKey}">
-          <td>${esc(item.title || 'Unknown')}${item.year ? ` <span class="catalog-note">(${item.year})</span>` : ''}</td>
-          <td>${esc(item.media_type || '—')}</td>
-          <td class="catalog-note" style="font-size:11px">${ids}</td>
           <td>
-            <div style="display:flex;gap:6px;align-items:center">
+            <div style="font-weight:500">${esc(displayTitle)}<span class="catalog-note">${esc(year)}</span></div>
+            ${listBadge}
+            <div style="margin-top:3px;font-size:11px">${idLinks}</div>
+          </td>
+          <td style="white-space:nowrap">${typeLabel}</td>
+          <td>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <input type="number" min="1" placeholder="TMDB ID" class="unresolved-tmdb-input" style="width:100px;padding:4px 6px;border:1px solid var(--z700);border-radius:4px;background:var(--z900);color:var(--z100);font-size:12px" />
               <button class="btn btn-sm unresolved-resolve-btn" type="button" data-cache-key="${cacheKey}">Map</button>
               <button class="btn btn-sm unresolved-dismiss-btn" type="button" data-cache-key="${cacheKey}" style="color:var(--z500)">Dismiss</button>
@@ -2076,7 +2088,7 @@
           </td>
         </tr>`;
       }).join('');
-      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th>Known IDs</th><th style="min-width:220px">Manual TMDB Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th style="min-width:220px">Manual TMDB Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       body.querySelectorAll('.unresolved-resolve-btn').forEach(btn => {
         btn.addEventListener('click', () => resolveUnresolvedItem(btn.closest('tr')));
       });
@@ -2109,8 +2121,9 @@
       const result = await apiPost('/api/profile/unresolved/resolve', {cache_key: cacheKey, tmdb_id: tmdbId});
       if (result.ok) {
         const added = result.data.pmdb_added;
-        // Flash a brief success indicator before removing the row.
         if (mapBtn) { mapBtn.textContent = added ? '✓ Added to list' : '✓ Mapped'; mapBtn.style.color = 'var(--green)'; }
+        // Re-render dashboard stats so unresolved/added counts update instantly.
+        if (result.data.profile) { lastDashboardProfile = result.data.profile; renderDashboard(result.data.profile); }
         setTimeout(() => renderUnresolvedPanel(result.data.items || []), 800);
       } else {
         if (mapBtn) { mapBtn.disabled = false; mapBtn.textContent = 'Map'; }

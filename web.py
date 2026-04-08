@@ -1255,7 +1255,19 @@ def api_profile_unresolved_resolve():
         except Exception as exc:
             logger.warning("Failed to instantly add resolved item to PMDB list: %s", exc)
 
-    return jsonify({"status": "resolved", "pmdb_added": pmdb_result is not None, "items": remaining})
+    # Return the updated public profile so the dashboard can re-render the
+    # stats cards (unresolved count, added count) without a separate fetch.
+    try:
+        updated_profile = _profile_store.get_profile_by_id(profile_id, include_credentials=False)
+    except Exception:
+        updated_profile = None
+
+    return jsonify({
+        "status": "resolved",
+        "pmdb_added": pmdb_result is not None,
+        "items": remaining,
+        "profile": updated_profile,
+    })
 
 
 @app.route("/api/profile/unresolved/dismiss", methods=["POST"])
