@@ -289,6 +289,13 @@ class WebTests(unittest.TestCase):
         self.assertEqual(len(data["items"]), 1)
         self.assertEqual(data["items"][0]["id"], 11)
 
+    def test_index_contains_auto_map_action_for_unresolved_items(self) -> None:
+        response = self.client.get("/")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Auto Map", html)
+
     def test_login_uses_session_and_masks_saved_secrets(self) -> None:
         profile = web._profile_store.create_profile("secret", {
             "simkl": {
@@ -570,6 +577,92 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["mode"], "history")
         thread_args = mock_thread.call_args.kwargs["args"]
         self.assertEqual(thread_args[2], {"lists": False, "history": True, "resume": False})
+
+    @patch("web.PublicMetaDBClient.add_item_to_list")
+    @patch("web._resolve_unresolved_item_automatically")
+    def test_unresolved_auto_resolve_endpoint_maps_and_adds_item(self, mock_auto_resolve, mock_add_item_to_list) -> None:
+        mock_auto_resolve.return_value = 4567
+        mock_add_item_to_list.return_value = {"success": True}
+
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-key",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["anime"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        private_profile = web._profile_store.get_private_profile_by_id(profile["profile_id"])
+        private_profile["managed_lists"] = [{
+            "list_name": "Watching - Anime",
+            "list_id": "pmdb-list-1",
+            "display_name": "Watching - Anime",
+            "source_name": "AniList",
+            "selection": {"source": "anilist", "status": "CURRENT"},
+        }]
+        private_profile["last_results"] = [{
+            "list_name": "Watching - Anime",
+            "display_name": "Watching - Anime",
+            "source_name": "AniList",
+            "items_resolved": 0,
+            "items_added": 0,
+            "items_skipped_unresolved": 1,
+        }]
+        private_profile["unresolved_items"] = [{
+            "cache_key": "anime-1",
+            "title": "Example Anime",
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "12345",
+            "list_name": "Watching - Anime",
+        }]
+        web._profile_store._profiles[profile["profile_id"]] = private_profile
+
+        response = self.client.post("/api/profile/unresolved/auto-resolve", json={"cache_key": "anime-1"})
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["status"], "resolved")
+        self.assertEqual(data["tmdb_id"], 4567)
+        self.assertTrue(data["pmdb_added"])
+        self.assertEqual(data["items"], [])
+        self.assertEqual(data["profile"]["last_results"][0]["items_skipped_unresolved"], 0)
+        self.assertEqual(data["profile"]["last_results"][0]["items_added"], 1)
+        mock_add_item_to_list.assert_called_once_with("pmdb-list-1", 4567, "tv")
 
     @patch("web.PublicMetaDBClient.delete_list")
     def test_delete_managed_list_endpoint_removes_mdblist_selection(self, mock_delete_list) -> None:

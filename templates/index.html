@@ -2081,6 +2081,7 @@
           <td style="white-space:nowrap">${typeLabel}</td>
           <td>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-sm unresolved-auto-btn" type="button" data-cache-key="${cacheKey}">Auto Map</button>
               <input type="number" min="1" placeholder="TMDB ID" class="unresolved-tmdb-input" style="width:100px;padding:4px 6px;border:1px solid var(--z700);border-radius:4px;background:var(--z900);color:var(--z100);font-size:12px" />
               <button class="btn btn-sm unresolved-resolve-btn" type="button" data-cache-key="${cacheKey}">Map</button>
               <button class="btn btn-sm unresolved-dismiss-btn" type="button" data-cache-key="${cacheKey}" style="color:var(--z500)">Dismiss</button>
@@ -2088,7 +2089,10 @@
           </td>
         </tr>`;
       }).join('');
-      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th style="min-width:220px">Manual TMDB Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th style="min-width:220px">Auto / Manual Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      body.querySelectorAll('.unresolved-auto-btn').forEach(btn => {
+        btn.addEventListener('click', () => autoResolveUnresolvedItem(btn.closest('tr')));
+      });
       body.querySelectorAll('.unresolved-resolve-btn').forEach(btn => {
         btn.addEventListener('click', () => resolveUnresolvedItem(btn.closest('tr')));
       });
@@ -2110,6 +2114,7 @@
       if (!row) return;
       const cacheKey = row.dataset.cacheKey;
       const input = row.querySelector('.unresolved-tmdb-input');
+      const autoBtn = row.querySelector('.unresolved-auto-btn');
       const mapBtn = row.querySelector('.unresolved-resolve-btn');
       const tmdbId = parseInt(input ? input.value : '', 10);
       if (!cacheKey || !tmdbId || tmdbId <= 0) {
@@ -2117,6 +2122,7 @@
         return;
       }
       input.style.borderColor = '';
+      if (autoBtn) autoBtn.disabled = true;
       if (mapBtn) { mapBtn.disabled = true; mapBtn.textContent = 'Saving…'; }
       const result = await apiPost('/api/profile/unresolved/resolve', {cache_key: cacheKey, tmdb_id: tmdbId});
       if (result.ok) {
@@ -2126,8 +2132,31 @@
         if (result.data.profile) { lastDashboardProfile = result.data.profile; renderDashboard(result.data.profile); }
         setTimeout(() => renderUnresolvedPanel(result.data.items || []), 800);
       } else {
+        if (autoBtn) autoBtn.disabled = false;
         if (mapBtn) { mapBtn.disabled = false; mapBtn.textContent = 'Map'; }
       }
+    }
+
+    async function autoResolveUnresolvedItem(row) {
+      if (!row) return;
+      const cacheKey = row.dataset.cacheKey;
+      if (!cacheKey) return;
+      const autoBtn = row.querySelector('.unresolved-auto-btn');
+      const mapBtn = row.querySelector('.unresolved-resolve-btn');
+      const input = row.querySelector('.unresolved-tmdb-input');
+      if (autoBtn) { autoBtn.disabled = true; autoBtn.textContent = 'Trying…'; }
+      if (mapBtn) mapBtn.disabled = true;
+      if (input) input.disabled = true;
+      const result = await apiPost('/api/profile/unresolved/auto-resolve', {cache_key: cacheKey});
+      if (result.ok) {
+        if (autoBtn) { autoBtn.textContent = result.data.pmdb_added ? '✓ Added to list' : '✓ Auto mapped'; autoBtn.style.color = 'var(--green)'; }
+        if (result.data.profile) { lastDashboardProfile = result.data.profile; renderDashboard(result.data.profile); }
+        setTimeout(() => renderUnresolvedPanel(result.data.items || []), 800);
+        return;
+      }
+      if (autoBtn) { autoBtn.disabled = false; autoBtn.textContent = 'Auto Map'; }
+      if (mapBtn) mapBtn.disabled = false;
+      if (input) input.disabled = false;
     }
 
     async function dismissUnresolvedItem(row) {

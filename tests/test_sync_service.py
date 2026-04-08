@@ -50,6 +50,7 @@ class StubPMDBClient:
         self.deleted_watched: list[str] = []
         self.created_lists: list[dict] = []
         self.added_items: list[dict] = []
+        self.created_mappings: list[dict] = []
         self.watched: list[dict] = []
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
@@ -71,6 +72,15 @@ class StubPMDBClient:
             "media_type": media_type,
         })
         return None
+
+    def create_id_mapping(self, tmdb_id: int, media_type: str, id_type: str, id_value: str) -> bool:
+        self.created_mappings.append({
+            "tmdb_id": tmdb_id,
+            "media_type": media_type,
+            "id_type": id_type,
+            "id_value": id_value,
+        })
+        return True
 
     def delete_list(self, list_id: str) -> bool:
         self.deleted_lists.append(list_id)
@@ -283,6 +293,64 @@ class SyncServiceTests(unittest.TestCase):
             [item["list_name"] for item in service.managed_lists],
             ["SIMKL - Series - Watching", "Trakt List - demo - old-list", "Watching - Series"],
         )
+
+    def test_anime_sync_contributes_all_available_external_ids_to_pmdb(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={
+                    "shows": [],
+                    "movies": [],
+                    "anime": ["watching"],
+                },
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+            ),
+        )
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class AnimeMatcher:
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 209867
+
+        service._matcher = AnimeMatcher()
+
+        service._sync_list([{
+            "title": "Frieren: Beyond Journey's End",
+            "year": 2023,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "tmdb_id": "999999",
+            "imdb_id": "tt22248376",
+            "mal_id": "59978",
+            "anilist_id": "154587",
+            "root_mal_id": "59978",
+            "root_anilist_id": "154587",
+            "trakt_id": 12345,
+            "ids": {
+                "imdb": "tt22248376",
+                "mal": "59978",
+                "anilist": "154587",
+                "root_mal": "59978",
+                "root_anilist": "154587",
+                "trakt": 12345,
+            },
+        }], "Watching - Anime", "Auto-synced anime")
+
+        contributed = {(item["id_type"], item["id_value"]) for item in pmdb.created_mappings}
+        self.assertIn(("anilist", "154587"), contributed)
+        self.assertIn(("mal", "59978"), contributed)
+        self.assertIn(("imdb", "tt22248376"), contributed)
+        self.assertIn(("trakt", "12345"), contributed)
+        self.assertEqual(len(contributed), len(pmdb.created_mappings))
 
     def test_can_cancel_before_sync_work_starts(self) -> None:
         service, _ = self.build_service(delete_disabled_lists=False)

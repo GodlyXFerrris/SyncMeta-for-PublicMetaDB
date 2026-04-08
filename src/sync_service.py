@@ -89,6 +89,9 @@ def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
         "imdb_id": item.get("imdb_id") or ids.get("imdb"),
         "mal_id": item.get("mal_id") or ids.get("mal"),
         "anilist_id": item.get("anilist_id") or ids.get("anilist"),
+        "root_mal_id": item.get("root_mal_id") or ids.get("root_mal"),
+        "root_anilist_id": item.get("root_anilist_id") or ids.get("root_anilist"),
+        "anidb_id": item.get("anidb_id") or ids.get("anidb"),
         "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
         "simkl_id": ids.get("simkl"),
         # Which PMDB list this item belongs to — used by the manual-resolve
@@ -1264,10 +1267,13 @@ class SyncService:
             if tmdb_id is not None:
                 resolved.append({**item, "resolved_tmdb_id": tmdb_id})
                 stats.items_resolved += 1
-                # If SIMKL/AniList gave us a non-TMDB ID that we resolved via
-                # the external-ID lookup chain, contribute that mapping back to
-                # PMDB so the community benefits from the resolution.
-                if not item.get("tmdb_id") and not self._config.sync.dry_run:
+                # Feed PMDB's community mappings so future anime resolutions can
+                # short-circuit on AniList/MAL/root-series IDs. For non-anime,
+                # only contribute when we had to resolve without a direct TMDB ID.
+                if (
+                    not self._config.sync.dry_run
+                    and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+                ):
                     self._contribute_id_mapping(item, tmdb_id)
             else:
                 stats.items_skipped_unresolved += 1
@@ -1409,31 +1415,44 @@ class SyncService:
     def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
         """Silently contribute a resolved external ID mapping back to PMDB.
 
-        When we resolve a TMDB ID via MAL/AniList/IMDB/TVDB (because the item
-        had no TMDB ID), we submit that mapping to PMDB so the community can
-        benefit from it on future lookups.  Failures are logged at DEBUG level
-        and never propagate to the caller.
+        When we resolve a TMDB ID, we submit every trustworthy external ID we
+        have so future PMDB lookups can short-circuit much earlier, especially
+        for anime where AniList/MAL/root-series IDs are often better keys than
+        the sequel-specific TMDB IDs returned by source APIs.
         """
         media_type = item.get("media_type", "")
-        # Pick the best available external ID to contribute (prefer the most specific).
+        ids = item.get("ids") or {}
+        seen: set[tuple[str, str]] = set()
         for id_type, item_key in [
             ("mal", "mal_id"),
             ("anilist", "anilist_id"),
+            ("mal", "root_mal_id"),
+            ("anilist", "root_anilist_id"),
             ("imdb", "imdb_id"),
             ("tvdb", "tvdb_id"),
             ("anidb", "anidb_id"),
+            ("trakt", "trakt_id"),
         ]:
-            id_value = item.get(item_key) or (item.get("ids") or {}).get(id_type)
-            if id_value:
-                try:
-                    self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
-                    logger.debug(
-                        "Contributed %s mapping: %s=%s → tmdb_id=%d",
-                        media_type, id_type, id_value, tmdb_id,
-                    )
-                except Exception as exc:
-                    logger.debug("Failed to contribute ID mapping: %s", exc)
-                return  # Only contribute one mapping per item
+            id_value = (
+                item.get(item_key)
+                or ids.get(id_type)
+                or ids.get(item_key)
+                or ids.get(f"root_{id_type}")
+            )
+            if not id_value:
+                continue
+            key = (id_type, str(id_value))
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
+                logger.debug(
+                    "Contributed %s mapping: %s=%s → tmdb_id=%d",
+                    media_type, id_type, id_value, tmdb_id,
+                )
+            except Exception as exc:
+                logger.debug("Failed to contribute ID mapping: %s", exc)
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
         logger.info(
