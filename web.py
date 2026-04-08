@@ -160,6 +160,7 @@ _access_limiter = LoginAttemptLimiter(max_attempts=ACCESS_MAX_ATTEMPTS, window_s
 def _stats_to_dict(stats: SyncStats) -> dict:
     data = asdict(stats)
     data["error_count"] = len(data.pop("errors", []))
+    # Keep unresolved_items for persistence but don't bloat live progress payloads.
     return data
 
 
@@ -392,7 +393,13 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             managed_lists=profile.get("managed_lists", []),
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
             sync_modes=modes,
-            resolution_cache=profile.get("resolution_cache", {}),
+            # Merge manual_resolution_cache on top so user-mapped items are
+            # resolved from the very first API call of this sync run, regardless
+            # of whether record_sync_success has been called yet.
+            resolution_cache={
+                **profile.get("resolution_cache", {}),
+                **profile.get("manual_resolution_cache", {}),
+            },
             failed_resolution_cache=profile.get("failed_resolution_cache", {}),
         )
         results = service.run()
@@ -1044,8 +1051,6 @@ def api_profile_list_delete():
         return _json_error("Managed list not found", 404)
 
     try:
-        updated_credentials = _remove_managed_selection(profile, managed_entry)
-        updated_credentials = _remove_matching_list_name(updated_credentials, list_name)
         pmdb_client = PublicMetaDBClient(_config_from_profile(profile).pmdb)
         list_id = str(managed_entry.get("list_id", "")).strip()
         if list_id:
@@ -1054,7 +1059,13 @@ def api_profile_list_delete():
             existing = pmdb_client.find_list_by_name(list_name)
             if existing:
                 pmdb_client.delete_list(str(existing.get("id", "")).strip())
-        updated_profile = _profile_store.delete_managed_list_by_id(profile_id, list_name, updated_credentials)
+        # Remove only the managed-list tracking entry so the next sync
+        # recreates the PMDB list from scratch.  Do NOT touch credentials /
+        # selected_statuses — the list source stays active in Settings and
+        # will be re-synced on the next run.
+        updated_profile = _profile_store.delete_managed_list_by_id(
+            profile_id, list_name, profile.get("credentials")
+        )
     except Exception as exc:
         logger.exception("Failed to delete managed list %s for profile %s", list_name, profile_id[:8])
         return _json_error(str(exc), 500)
@@ -1178,6 +1189,105 @@ def api_profile_sync_stop():
         return _json_error(str(exc), 409)
 
     return jsonify({"status": "stopping", "profile": profile})
+
+
+@app.route("/api/profile/unresolved", methods=["POST"])
+def api_profile_unresolved():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    try:
+        items = _profile_store.get_unresolved_items(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    return jsonify({"items": items})
+
+
+@app.route("/api/profile/unresolved/resolve", methods=["POST"])
+def api_profile_unresolved_resolve():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    cache_key = str(body.get("cache_key", "")).strip()
+    tmdb_id_raw = body.get("tmdb_id")
+    if not cache_key:
+        return _json_error("cache_key is required", 400)
+    try:
+        tmdb_id = int(tmdb_id_raw)
+        if tmdb_id <= 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return _json_error("tmdb_id must be a positive integer", 400)
+
+    try:
+        private_profile = _profile_store.get_private_profile_by_id(profile_id)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+
+    # Find the unresolved item so we know its media_type and target list.
+    unresolved = _profile_store.get_unresolved_items(profile_id)
+    target_item = next((i for i in unresolved if i.get("cache_key") == cache_key), None)
+
+    # Save mapping and remove from unresolved list.
+    remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
+
+    # Immediately add the item to its PMDB list so the user sees the effect
+    # without having to wait for the next scheduled sync.
+    pmdb_result = None
+    if target_item:
+        try:
+            credentials = normalize_credentials(private_profile.get("credentials", {}))
+            pmdb_api_key = credentials.get("pmdb", {}).get("api_key", "")
+            if pmdb_api_key:
+                pmdb = PublicMetaDBClient(PublicMetaDBConfig(api_key=pmdb_api_key))
+                media_type = str(target_item.get("media_type") or "").strip()
+                list_name = str(target_item.get("list_name") or "").strip()
+                managed_lists = private_profile.get("managed_lists") or []
+                # Find the PMDB list_id for this list.
+                pmdb_list_id = None
+                for ml in managed_lists:
+                    if str(ml.get("list_name", "")).strip() == list_name:
+                        pmdb_list_id = ml.get("list_id")
+                        break
+                if pmdb_list_id and media_type:
+                    pmdb_result = pmdb.add_item_to_list(str(pmdb_list_id), tmdb_id, media_type)
+                    logger.info(
+                        "Instantly added tmdb_id=%s (%s) to list '%s' for profile %s",
+                        tmdb_id, media_type, list_name, profile_id[:8],
+                    )
+        except Exception as exc:
+            logger.warning("Failed to instantly add resolved item to PMDB list: %s", exc)
+
+    # Return the updated public profile so the dashboard can re-render the
+    # stats cards (unresolved count, added count) without a separate fetch.
+    try:
+        updated_profile = _profile_store.get_profile_by_id(profile_id, include_credentials=False)
+    except Exception:
+        updated_profile = None
+
+    return jsonify({
+        "status": "resolved",
+        "pmdb_added": pmdb_result is not None,
+        "items": remaining,
+        "profile": updated_profile,
+    })
+
+
+@app.route("/api/profile/unresolved/dismiss", methods=["POST"])
+def api_profile_unresolved_dismiss():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    cache_key = str(body.get("cache_key", "")).strip()
+    if not cache_key:
+        return _json_error("cache_key is required", 400)
+    try:
+        remaining = _profile_store.dismiss_unresolved_item(profile_id, cache_key)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    return jsonify({"status": "dismissed", "items": remaining})
 
 
 if __name__ == "__main__":

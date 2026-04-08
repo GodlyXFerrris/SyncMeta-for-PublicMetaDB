@@ -74,6 +74,33 @@ class SyncStats:
     items_skipped_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
     history_cursor: str = ""
+    unresolved_items: list[dict] = field(default_factory=list)
+
+
+def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
+    """Extract a compact, serialisable record for an item that could not be resolved."""
+    ids = item.get("ids") or {}
+    return {
+        "title": item.get("title") or "Unknown",
+        "year": item.get("year"),
+        "media_type": item.get("media_type"),
+        "simkl_type": item.get("simkl_type"),
+        "tmdb_id": item.get("tmdb_id"),
+        "imdb_id": item.get("imdb_id") or ids.get("imdb"),
+        "mal_id": item.get("mal_id") or ids.get("mal"),
+        "anilist_id": item.get("anilist_id") or ids.get("anilist"),
+        "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
+        "simkl_id": ids.get("simkl"),
+        # Which PMDB list this item belongs to — used by the manual-resolve
+        # endpoint to add the item instantly without waiting for the next sync.
+        "list_name": list_name,
+        # Use ItemMatcher._cache_key so this key is byte-for-byte identical to
+        # the key the matcher will generate when it looks this item up on the
+        # next sync.  Previously a hand-rolled copy caused None→"" vs None→"None"
+        # mismatches (Python's f"{None}" == "None", not ""), which meant the
+        # manual_resolution_cache was never hit and items reappeared as unresolved.
+        "cache_key": ItemMatcher._cache_key(item),
+    }
 
 
 class SyncService:
@@ -1244,6 +1271,7 @@ class SyncService:
                     self._contribute_id_mapping(item, tmdb_id)
             else:
                 stats.items_skipped_unresolved += 1
+                stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
             self._publish_progress([stats])
 
         if self._config.sync.dry_run:
