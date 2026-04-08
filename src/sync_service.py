@@ -89,6 +89,9 @@ def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
         "imdb_id": item.get("imdb_id") or ids.get("imdb"),
         "mal_id": item.get("mal_id") or ids.get("mal"),
         "anilist_id": item.get("anilist_id") or ids.get("anilist"),
+        "root_mal_id": item.get("root_mal_id") or ids.get("root_mal"),
+        "root_anilist_id": item.get("root_anilist_id") or ids.get("root_anilist"),
+        "anidb_id": item.get("anidb_id") or ids.get("anidb"),
         "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
         "simkl_id": ids.get("simkl"),
         # Which PMDB list this item belongs to — used by the manual-resolve
@@ -138,6 +141,11 @@ class SyncService:
         self._sync_modes = self._normalize_sync_modes(sync_modes, config)
         self._last_progress_publish = 0.0
         self._live_progress_rows: dict[str, dict] = {}
+        self._mapping_contribution_lock = threading.Lock()
+        self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
+        self._fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
+        self._anime_seasons_cache: dict[int, list[dict]] = {}
+        self._anime_history_remap_cache: dict[tuple, dict | None] = {}
 
     def _make_anime_root_resolver(self):
         """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
@@ -456,7 +464,7 @@ class SyncService:
                 offset = int(resolved.get("root_episode_offset") or 0)
                 if offset > 0:
                     try:
-                        anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+                        anime_seasons = self._get_cached_anime_seasons(tmdb_id)
                         if anime_seasons:
                             remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, 1)
                             if remapped:
@@ -517,7 +525,9 @@ class SyncService:
             aggregate_count = item.get("aggregate_watched_count")
             if aggregate_count:
                 resolved = self._resolve_activity_item(item)
-                aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
+                aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
+                if not aggregate_rows:
+                    aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
                 if aggregate_rows:
                     expanded.extend(self._remap_simkl_anime_history_item(row) for row in aggregate_rows)
                 else:
@@ -528,6 +538,44 @@ class SyncService:
                 continue
             expanded.append(item)
         return self._dedupe_activity_history_items(expanded)
+
+    def _expand_simkl_aggregate_anime_item(self, item: dict) -> list[dict]:
+        """Expand aggregate anime history through the anime remap pipeline.
+
+        Seasonal anime is often represented as a franchise root plus an episode
+        offset. Expanding those items through raw TMDB season plans tends to
+        collapse into Season 1. For smaller anime runs, synthesize Season 1
+        episode rows first, then let the normal anime remapper place them into
+        the correct root TMDB season/episode.
+        """
+        if str(item.get("simkl_type", "")).strip().lower() != "anime":
+            return []
+        if str(item.get("media_type", "")).strip().lower() != "tv":
+            return []
+        try:
+            watched_total = int(item.get("aggregate_watched_count") or 0)
+        except (TypeError, ValueError):
+            return []
+        if watched_total <= 0:
+            return []
+
+        has_root_offset = int(item.get("root_episode_offset") or 0) > 0
+        has_anime_ids = any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
+        if not has_root_offset and not has_anime_ids:
+            return []
+        if watched_total > 200:
+            return []
+
+        watched_at = item.get("watched_at")
+        return [
+            {
+                **item,
+                "season": 1,
+                "episode": episode_number,
+                "watched_at": watched_at,
+            }
+            for episode_number in range(1, watched_total + 1)
+        ]
 
     def _remap_simkl_anime_history_item(self, item: dict) -> dict:
         """Remap a SIMKL anime TV history item to the correct PMDB season+episode.
@@ -552,11 +600,25 @@ class SyncService:
         if episode <= 0:
             return item
 
+        cache_key = (
+            str(item.get("tmdb_id") or ""),
+            str(item.get("anilist_id") or ""),
+            str(item.get("root_anilist_id") or ""),
+            str(item.get("mal_id") or ""),
+            str(item.get("root_mal_id") or ""),
+            offset,
+            episode,
+        )
+        cached = self._anime_history_remap_cache.get(cache_key)
+        if cached is not None:
+            return {**item, **cached}
+
         # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
         fribb = self._lookup_fribb_entry(item)
         if fribb is not None:
             remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
             if remapped:
+                self._anime_history_remap_cache[cache_key] = dict(remapped)
                 return {**item, **remapped}
 
         # Remaining paths only make sense when there is a non-zero offset
@@ -566,10 +628,11 @@ class SyncService:
 
         # ── Path 3: PMDB anime-seasons with absolute episode offset ─────────────
         try:
-            anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+            anime_seasons = self._get_cached_anime_seasons(tmdb_id)
             if anime_seasons:
                 remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
                 if remapped:
+                    self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
         except Exception:
             pass
@@ -579,10 +642,13 @@ class SyncService:
             season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
             positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
             if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-                return {**item, "season": 1, "episode": offset + episode}
+                remapped = {"season": 1, "episode": offset + episode}
+                self._anime_history_remap_cache[cache_key] = dict(remapped)
+                return {**item, **remapped}
         except Exception:
             pass
 
+        self._anime_history_remap_cache[cache_key] = {}
         return item
 
     def _lookup_fribb_entry(self, item: dict) -> dict | None:
@@ -594,9 +660,14 @@ class SyncService:
             raw = item.get(id_key) or ids.get("anilist") or ids.get("root_anilist")
             if raw:
                 try:
+                    cache_key = ("anilist", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
                     entry = fribb_client.lookup_by_anilist(int(raw))
                     if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
                         return entry
+                    self._fribb_lookup_cache[cache_key] = None
                 except (TypeError, ValueError):
                     pass
 
@@ -604,9 +675,14 @@ class SyncService:
             raw = item.get(id_key) or ids.get("mal") or ids.get("root_mal")
             if raw:
                 try:
+                    cache_key = ("mal", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
                     entry = fribb_client.lookup_by_mal(int(raw))
                     if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
                         return entry
+                    self._fribb_lookup_cache[cache_key] = None
                 except (TypeError, ValueError):
                     pass
 
@@ -649,7 +725,7 @@ class SyncService:
         # Try PMDB anime-seasons: season_number in PMDB == TVDB season number.
         if tmdb_id > 0:
             try:
-                anime_seasons = self._pmdb.get_anime_seasons(tmdb_id)
+                anime_seasons = self._get_cached_anime_seasons(tmdb_id)
                 if anime_seasons:
                     remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode)
                     if remapped:
@@ -666,6 +742,14 @@ class SyncService:
         if tmdb_id > 0 and tmdb_id != item_tmdb_id:
             out["tmdb_id"] = tmdb_id
         return out
+
+    def _get_cached_anime_seasons(self, tmdb_id: int) -> list[dict]:
+        tmdb_id = int(tmdb_id)
+        if tmdb_id <= 0:
+            return []
+        if tmdb_id not in self._anime_seasons_cache:
+            self._anime_seasons_cache[tmdb_id] = list(self._pmdb.get_anime_seasons(tmdb_id))
+        return list(self._anime_seasons_cache[tmdb_id])
 
     @staticmethod
     def _map_episode_via_tvdb_season(
@@ -1264,10 +1348,13 @@ class SyncService:
             if tmdb_id is not None:
                 resolved.append({**item, "resolved_tmdb_id": tmdb_id})
                 stats.items_resolved += 1
-                # If SIMKL/AniList gave us a non-TMDB ID that we resolved via
-                # the external-ID lookup chain, contribute that mapping back to
-                # PMDB so the community benefits from the resolution.
-                if not item.get("tmdb_id") and not self._config.sync.dry_run:
+                # Feed PMDB's community mappings so future anime resolutions can
+                # short-circuit on AniList/MAL/root-series IDs. For non-anime,
+                # only contribute when we had to resolve without a direct TMDB ID.
+                if (
+                    not self._config.sync.dry_run
+                    and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+                ):
                     self._contribute_id_mapping(item, tmdb_id)
             else:
                 stats.items_skipped_unresolved += 1
@@ -1409,31 +1496,55 @@ class SyncService:
     def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
         """Silently contribute a resolved external ID mapping back to PMDB.
 
-        When we resolve a TMDB ID via MAL/AniList/IMDB/TVDB (because the item
-        had no TMDB ID), we submit that mapping to PMDB so the community can
-        benefit from it on future lookups.  Failures are logged at DEBUG level
-        and never propagate to the caller.
+        When we resolve a TMDB ID, we submit every trustworthy external ID we
+        have so future PMDB lookups can short-circuit much earlier, especially
+        for anime where AniList/MAL/root-series IDs are often better keys than
+        the sequel-specific TMDB IDs returned by source APIs.
         """
         media_type = item.get("media_type", "")
-        # Pick the best available external ID to contribute (prefer the most specific).
+        ids = item.get("ids") or {}
+        seen: set[tuple[str, str]] = set()
         for id_type, item_key in [
             ("mal", "mal_id"),
             ("anilist", "anilist_id"),
+            ("mal", "root_mal_id"),
+            ("anilist", "root_anilist_id"),
             ("imdb", "imdb_id"),
             ("tvdb", "tvdb_id"),
             ("anidb", "anidb_id"),
+            ("trakt", "trakt_id"),
         ]:
-            id_value = item.get(item_key) or (item.get("ids") or {}).get(id_type)
-            if id_value:
-                try:
-                    self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
-                    logger.debug(
-                        "Contributed %s mapping: %s=%s → tmdb_id=%d",
-                        media_type, id_type, id_value, tmdb_id,
-                    )
-                except Exception as exc:
-                    logger.debug("Failed to contribute ID mapping: %s", exc)
-                return  # Only contribute one mapping per item
+            id_value = (
+                item.get(item_key)
+                or ids.get(id_type)
+                or ids.get(item_key)
+                or ids.get(f"root_{id_type}")
+            )
+            if not id_value:
+                continue
+            key = (id_type, str(id_value))
+            if key in seen:
+                continue
+            seen.add(key)
+            contribution_key = (int(tmdb_id), str(media_type), id_type, str(id_value))
+            with self._mapping_contribution_lock:
+                if contribution_key in self._contributed_mapping_keys:
+                    continue
+                self._contributed_mapping_keys.add(contribution_key)
+            try:
+                self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
+                logger.debug(
+                    "Contributed %s mapping: %s=%s → tmdb_id=%d",
+                    media_type, id_type, id_value, tmdb_id,
+                )
+            except Exception as exc:
+                logger.debug("Failed to contribute ID mapping: %s", exc)
+
+    def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
+        return (
+            not self._config.sync.dry_run
+            and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+        )
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
         logger.info(
@@ -1606,15 +1717,39 @@ class SyncService:
         )
 
     def _resolve_activity_item(self, item: dict) -> dict:
+        if self._should_force_anime_re_resolve(item):
+            tmdb_id = self._matcher.resolve_tmdb_id(item)
+            if tmdb_id is not None:
+                if self._should_backfill_pmdb_mapping(item):
+                    self._contribute_id_mapping(item, tmdb_id)
+                return {
+                    **item,
+                    "tmdb_id": tmdb_id,
+                }
         if item.get("tmdb_id"):
+            if self._should_backfill_pmdb_mapping(item):
+                try:
+                    self._contribute_id_mapping(item, int(item["tmdb_id"]))
+                except (TypeError, ValueError):
+                    pass
             return item
         tmdb_id = self._matcher.resolve_tmdb_id(item)
         if tmdb_id is None:
             return item
+        if self._should_backfill_pmdb_mapping(item):
+            self._contribute_id_mapping(item, tmdb_id)
         return {
             **item,
             "tmdb_id": tmdb_id,
         }
+
+    @staticmethod
+    def _should_force_anime_re_resolve(item: dict) -> bool:
+        return (
+            str(item.get("simkl_type", "")).strip().lower() == "anime"
+            and str(item.get("media_type", "")).strip().lower() == "tv"
+            and any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
+        )
 
     def _dedupe_activity_history_items(self, items: list[dict]) -> list[dict]:
         deduped: list[dict] = []

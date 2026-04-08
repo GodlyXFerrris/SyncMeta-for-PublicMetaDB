@@ -8,12 +8,21 @@ from .publicmetadb_client import PublicMetaDBClient
 
 logger = logging.getLogger(__name__)
 
-# External ID types to try, in order, when TMDB is missing
-_LOOKUP_CHAIN = [
+# External ID types to try, in order, when TMDB is missing.
+_DEFAULT_LOOKUP_CHAIN = [
     ("imdb", "imdb_id"),
     ("mal", "mal_id"),
     ("anilist", "anilist_id"),
     ("anidb", "anidb_id"),
+    ("tvdb", "tvdb_id"),
+]
+
+# Anime usually has stronger AniList/MAL signals than IMDb. Prefer those first.
+_ANIME_LOOKUP_CHAIN = [
+    ("anilist", "anilist_id"),
+    ("mal", "mal_id"),
+    ("anidb", "anidb_id"),
+    ("imdb", "imdb_id"),
     ("tvdb", "tvdb_id"),
 ]
 
@@ -144,7 +153,7 @@ class ItemMatcher:
 
         ids = item.get("ids", {})
 
-        for id_type, item_key in _LOOKUP_CHAIN:
+        for id_type, item_key in self._lookup_chain_for_item(item):
             ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
             if not ext_id:
                 continue
@@ -181,6 +190,12 @@ class ItemMatcher:
             {k: v for k, v in ids.items() if v},
         )
         return None
+
+    @staticmethod
+    def _lookup_chain_for_item(item: dict) -> list[tuple[str, str]]:
+        if item.get("simkl_type") == "anime":
+            return _ANIME_LOOKUP_CHAIN
+        return _DEFAULT_LOOKUP_CHAIN
 
     def _try_anime_root_lookup(self, item: dict, media_type: str) -> int | None:
         """Walk the AniList prequel chain and look up the root-series TMDB ID."""
