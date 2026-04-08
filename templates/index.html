@@ -2098,14 +2098,23 @@
       if (!row) return;
       const cacheKey = row.dataset.cacheKey;
       const input = row.querySelector('.unresolved-tmdb-input');
+      const mapBtn = row.querySelector('.unresolved-resolve-btn');
       const tmdbId = parseInt(input ? input.value : '', 10);
       if (!cacheKey || !tmdbId || tmdbId <= 0) {
         if (input) input.style.borderColor = 'var(--red)';
         return;
       }
       input.style.borderColor = '';
+      if (mapBtn) { mapBtn.disabled = true; mapBtn.textContent = 'Saving…'; }
       const result = await apiPost('/api/profile/unresolved/resolve', {cache_key: cacheKey, tmdb_id: tmdbId});
-      if (result.ok) renderUnresolvedPanel(result.data.items || []);
+      if (result.ok) {
+        const added = result.data.pmdb_added;
+        // Flash a brief success indicator before removing the row.
+        if (mapBtn) { mapBtn.textContent = added ? '✓ Added to list' : '✓ Mapped'; mapBtn.style.color = 'var(--green)'; }
+        setTimeout(() => renderUnresolvedPanel(result.data.items || []), 800);
+      } else {
+        if (mapBtn) { mapBtn.disabled = false; mapBtn.textContent = 'Map'; }
+      }
     }
 
     async function dismissUnresolvedItem(row) {

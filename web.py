@@ -393,7 +393,13 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             managed_lists=profile.get("managed_lists", []),
             cancel_requested_callback=lambda: _profile_store.is_sync_cancel_requested(profile_id),
             sync_modes=modes,
-            resolution_cache=profile.get("resolution_cache", {}),
+            # Merge manual_resolution_cache on top so user-mapped items are
+            # resolved from the very first API call of this sync run, regardless
+            # of whether record_sync_success has been called yet.
+            resolution_cache={
+                **profile.get("resolution_cache", {}),
+                **profile.get("manual_resolution_cache", {}),
+            },
             failed_resolution_cache=profile.get("failed_resolution_cache", {}),
         )
         results = service.run()
@@ -1209,11 +1215,47 @@ def api_profile_unresolved_resolve():
             raise ValueError
     except (TypeError, ValueError):
         return _json_error("tmdb_id must be a positive integer", 400)
+
     try:
-        remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
+        private_profile = _profile_store.get_private_profile_by_id(profile_id)
     except KeyError:
         return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
-    return jsonify({"status": "resolved", "items": remaining})
+
+    # Find the unresolved item so we know its media_type and target list.
+    unresolved = _profile_store.get_unresolved_items(profile_id)
+    target_item = next((i for i in unresolved if i.get("cache_key") == cache_key), None)
+
+    # Save mapping and remove from unresolved list.
+    remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
+
+    # Immediately add the item to its PMDB list so the user sees the effect
+    # without having to wait for the next scheduled sync.
+    pmdb_result = None
+    if target_item:
+        try:
+            credentials = normalize_credentials(private_profile.get("credentials", {}))
+            pmdb_api_key = credentials.get("pmdb", {}).get("api_key", "")
+            if pmdb_api_key:
+                pmdb = PublicMetaDBClient(PublicMetaDBConfig(api_key=pmdb_api_key))
+                media_type = str(target_item.get("media_type") or "").strip()
+                list_name = str(target_item.get("list_name") or "").strip()
+                managed_lists = private_profile.get("managed_lists") or []
+                # Find the PMDB list_id for this list.
+                pmdb_list_id = None
+                for ml in managed_lists:
+                    if str(ml.get("list_name", "")).strip() == list_name:
+                        pmdb_list_id = ml.get("list_id")
+                        break
+                if pmdb_list_id and media_type:
+                    pmdb_result = pmdb.add_item_to_list(str(pmdb_list_id), tmdb_id, media_type)
+                    logger.info(
+                        "Instantly added tmdb_id=%s (%s) to list '%s' for profile %s",
+                        tmdb_id, media_type, list_name, profile_id[:8],
+                    )
+        except Exception as exc:
+            logger.warning("Failed to instantly add resolved item to PMDB list: %s", exc)
+
+    return jsonify({"status": "resolved", "pmdb_added": pmdb_result is not None, "items": remaining})
 
 
 @app.route("/api/profile/unresolved/dismiss", methods=["POST"])

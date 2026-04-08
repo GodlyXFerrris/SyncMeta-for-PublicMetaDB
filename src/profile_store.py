@@ -654,20 +654,27 @@ class ProfileStore:
 
     @staticmethod
     def _merge_unresolved_items(profile: dict, results: list[dict]) -> None:
-        """Merge newly unresolved items into the profile, keyed by cache_key to avoid dupes."""
+        """Merge newly unresolved items into the profile, keyed by cache_key to avoid dupes.
+
+        Items whose cache_key the user has already manually resolved are never
+        re-added, even if the sync couldn't resolve them for some reason.
+        """
+        manually_resolved: set[str] = set(
+            (profile.get("manual_resolution_cache") or {}).keys()
+        )
         existing: list[dict] = profile.get("unresolved_items", [])
-        # Build a map of existing items by cache_key so we can overwrite stale entries.
         by_key: dict[str, dict] = {
             item["cache_key"]: item
             for item in existing
             if isinstance(item, dict) and item.get("cache_key")
+            and item["cache_key"] not in manually_resolved
         }
         for row in results:
             for item in row.get("unresolved_items", []):
                 if not isinstance(item, dict):
                     continue
                 key = item.get("cache_key")
-                if key:
+                if key and key not in manually_resolved:
                     by_key[key] = item
         profile["unresolved_items"] = list(by_key.values())
 
@@ -949,9 +956,23 @@ class ProfileStore:
             if managed_lists is not None:
                 profile["managed_lists"] = _normalize_managed_lists(managed_lists)
             if resolution_cache is not None and not dry_run:
-                profile["resolution_cache"] = resolution_cache
+                # Merge: sync-discovered entries go in, but manual entries
+                # (written by resolve_item_manually) always win because they
+                # are re-applied on top from manual_resolution_cache.
+                merged_rc = dict(profile.get("resolution_cache") or {})
+                merged_rc.update(resolution_cache)
+                manual_rc = profile.get("manual_resolution_cache") or {}
+                merged_rc.update(manual_rc)  # Manual always wins
+                profile["resolution_cache"] = merged_rc
             if failed_resolution_cache is not None and not dry_run:
-                profile["failed_resolution_cache"] = failed_resolution_cache
+                # Don't let the sync re-add a failed entry for a key the user
+                # has already manually resolved.
+                manual_keys = set((profile.get("manual_resolution_cache") or {}).keys())
+                merged_frc = dict(profile.get("failed_resolution_cache") or {})
+                merged_frc.update(failed_resolution_cache)
+                for key in manual_keys:
+                    merged_frc.pop(key, None)
+                profile["failed_resolution_cache"] = merged_frc
             if not dry_run:
                 self._merge_unresolved_items(profile, results)
             self._merge_activity_results(profile, results, now)
@@ -1006,11 +1027,23 @@ class ProfileStore:
             return copy.deepcopy(profile.get("unresolved_items", []))
 
     def resolve_item_manually(self, profile_id: str, cache_key: str, tmdb_id: int) -> list[dict]:
-        """Add a manual TMDB mapping to the resolution cache and remove from unresolved."""
+        """Add a manual TMDB mapping and remove from unresolved.
+
+        Manual mappings are stored in ``manual_resolution_cache`` — a separate
+        key that ``record_sync_success`` never overwrites.  This prevents the
+        common race where a sync finishes *after* the user clicks Map and dumps
+        its own (pre-manual) resolution_cache on top, erasing the mapping and
+        causing the item to reappear as unresolved on the next sync.
+        """
         with self._lock:
             normalized_id = self._normalize_profile_id(profile_id)
             profile = self._profiles[normalized_id]
-            # Add to resolution cache so the next sync uses it instantly.
+            # Manual cache: never touched by sync workers.
+            mrc = dict(profile.get("manual_resolution_cache") or {})
+            mrc[cache_key] = tmdb_id
+            profile["manual_resolution_cache"] = mrc
+            # Also write through to the live resolution_cache so the *next*
+            # sync picks it up immediately without needing a full cache rebuild.
             rc = dict(profile.get("resolution_cache") or {})
             rc[cache_key] = tmdb_id
             profile["resolution_cache"] = rc
