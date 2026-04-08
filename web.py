@@ -1051,8 +1051,6 @@ def api_profile_list_delete():
         return _json_error("Managed list not found", 404)
 
     try:
-        updated_credentials = _remove_managed_selection(profile, managed_entry)
-        updated_credentials = _remove_matching_list_name(updated_credentials, list_name)
         pmdb_client = PublicMetaDBClient(_config_from_profile(profile).pmdb)
         list_id = str(managed_entry.get("list_id", "")).strip()
         if list_id:
@@ -1061,7 +1059,13 @@ def api_profile_list_delete():
             existing = pmdb_client.find_list_by_name(list_name)
             if existing:
                 pmdb_client.delete_list(str(existing.get("id", "")).strip())
-        updated_profile = _profile_store.delete_managed_list_by_id(profile_id, list_name, updated_credentials)
+        # Remove only the managed-list tracking entry so the next sync
+        # recreates the PMDB list from scratch.  Do NOT touch credentials /
+        # selected_statuses — the list source stays active in Settings and
+        # will be re-synced on the next run.
+        updated_profile = _profile_store.delete_managed_list_by_id(
+            profile_id, list_name, profile.get("credentials")
+        )
     except Exception as exc:
         logger.exception("Failed to delete managed list %s for profile %s", list_name, profile_id[:8])
         return _json_error(str(exc), 500)
