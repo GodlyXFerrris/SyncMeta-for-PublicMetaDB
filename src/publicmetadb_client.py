@@ -12,6 +12,8 @@ from urllib3.util.retry import Retry
 from .config import PublicMetaDBConfig
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = (5, 12)
+_CANCEL_POLL_INTERVAL = 0.25
 
 # Rate limit: 300 requests per 10 seconds
 RATE_LIMIT_MAX = 280  # Leave some headroom
@@ -27,7 +29,7 @@ class RateLimiter:
         self._timestamps: list[float] = []
         self._lock = threading.Lock()
 
-    def wait(self) -> None:
+    def wait(self, cancel_requested_callback=None) -> None:
         while True:
             with self._lock:
                 now = time.time()
@@ -38,18 +40,45 @@ class RateLimiter:
                 sleep_for = self._timestamps[0] + self._window - now + 0.1
             if sleep_for > 0:
                 logger.debug("Rate limit: sleeping %.2fs", sleep_for)
-                time.sleep(sleep_for)
+                deadline = time.monotonic() + sleep_for
+                while True:
+                    if cancel_requested_callback:
+                        try:
+                            if cancel_requested_callback():
+                                from .sync_service import SyncCancelled
+                                raise SyncCancelled("Sync stopped by user")
+                        except SyncCancelled:
+                            raise
+                        except Exception:
+                            logger.debug("Cancel callback failed", exc_info=True)
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    time.sleep(min(_CANCEL_POLL_INTERVAL, remaining))
 
 
 class PublicMetaDBClient:
     """Client for the PublicMetaDB external API."""
 
-    def __init__(self, config: PublicMetaDBConfig):
+    def __init__(self, config: PublicMetaDBConfig, cancel_requested_callback=None):
         self._config = config
         self._session_local = threading.local()
         self._limiter = RateLimiter()
         self._lists_lock = threading.Lock()
         self._lists_by_name: dict[str, dict] | None = None
+        self._cancel_requested_callback = cancel_requested_callback
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            logger.debug("Cancel callback failed", exc_info=True)
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -77,10 +106,12 @@ class PublicMetaDBClient:
         return session
 
     def _request(self, method: str, path: str, **kwargs) -> dict | list | None:
-        self._limiter.wait()
+        self._check_cancelled()
+        self._limiter.wait(self._cancel_requested_callback)
         url = f"{self._config.base_url}{path}"
         logger.debug("%s %s", method, url)
-        resp = self._session().request(method, url, timeout=30, **kwargs)
+        resp = self._session().request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+        self._check_cancelled()
         resp.raise_for_status()
         if resp.status_code == 204 or not resp.text:
             return None

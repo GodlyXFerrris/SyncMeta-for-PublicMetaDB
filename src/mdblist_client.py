@@ -13,6 +13,7 @@ from urllib3.util.retry import Retry
 from .config import MdbListConfig
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = (5, 12)
 
 
 class MdbListClient:
@@ -27,9 +28,22 @@ class MdbListClient:
     _LIKES_RE = re.compile(r'<span class="related-list-meta__likes">\s*<span class="ui medium text">(?P<likes>\d+)</span>', re.S)
     _LIST_ID_RE = re.compile(r'href="/(?:movies|shows)/\?list=(?P<id>\d+)"')
 
-    def __init__(self, config: MdbListConfig):
+    def __init__(self, config: MdbListConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
+        self._cancel_requested_callback = cancel_requested_callback
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            logger.debug("Cancel callback failed", exc_info=True)
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -51,7 +65,9 @@ class MdbListClient:
         request_params["apikey"] = self._config.api_key
         url = f"{self._config.base_url}{path}"
         logger.debug("GET %s params=%s", url, request_params)
-        response = self._session.get(url, params=request_params, timeout=30)
+        self._check_cancelled()
+        response = self._session.get(url, params=request_params, timeout=REQUEST_TIMEOUT)
+        self._check_cancelled()
         response.raise_for_status()
         return response
 
@@ -98,7 +114,9 @@ class MdbListClient:
 
     def _search_public_lists_fallback(self, query: str) -> list[dict]:
         url = "https://mdblist.com/toplists/"
-        response = self._session.get(url, params={"public_list_name": query}, timeout=30)
+        self._check_cancelled()
+        response = self._session.get(url, params={"public_list_name": query}, timeout=REQUEST_TIMEOUT)
+        self._check_cancelled()
         response.raise_for_status()
         return self._parse_public_list_cards(response.text)
 

@@ -12,6 +12,7 @@ from urllib3.util.retry import Retry
 from .config import TraktConfig
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = (5, 12)
 
 DEFAULT_CATALOGS = {
     "trending-movies": {
@@ -91,7 +92,9 @@ class TraktClient:
 
     def _request_response(self, method: str, path: str, **kwargs) -> requests.Response:
         url = f"{self._config.base_url}{path}"
-        response = self._session.request(method, url, timeout=30, **kwargs)
+        self._check_cancelled()
+        response = self._session.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
+        self._check_cancelled()
         response.raise_for_status()
         return response
 

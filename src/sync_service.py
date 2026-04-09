@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 
 from .anilist_client import AniListClient
@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 _LIST_WRITE_WORKERS = 4
 _ACTIVITY_WRITE_WORKERS = 4
 _ANILIST_PREWARM_LIMIT = 200
+_FUTURE_POLL_INTERVAL = 0.25
 
 
 class SyncCancelled(Exception):
@@ -127,10 +128,11 @@ class SyncService:
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
         self._trakt = TraktClient(config.trakt, cancel_requested_callback=cancel_requested_callback)
-        self._mdblist = MdbListClient(config.mdblist)
-        self._pmdb = PublicMetaDBClient(config.pmdb)
+        self._mdblist = MdbListClient(config.mdblist, cancel_requested_callback=cancel_requested_callback)
+        self._pmdb = PublicMetaDBClient(config.pmdb, cancel_requested_callback=cancel_requested_callback)
         self._anilist_root_client = AniListClient(
-            config.anilist if config.anilist.enabled else AniListConfig()
+            config.anilist if config.anilist.enabled else AniListConfig(),
+            cancel_requested_callback=cancel_requested_callback,
         )
         self._matcher = ItemMatcher(
             self._pmdb,
@@ -216,16 +218,23 @@ class SyncService:
                 # NOTE: SyncCancelled must be detected via the future's exception
                 # and re-raised here, not swallowed by the generic except clause.
                 cancelled = False
-                with ThreadPoolExecutor(max_workers=2) as pool:
+                pool = ThreadPoolExecutor(max_workers=2)
+                shutdown_wait = True
+                try:
                     future_simkl = pool.submit(self._sync_simkl)
                     future_anilist = pool.submit(self._sync_anilist)
-                    for future in as_completed([future_simkl, future_anilist]):
+                    for future in self._iter_completed_futures([future_simkl, future_anilist]):
                         try:
                             all_stats.extend(future.result())
                         except SyncCancelled:
                             cancelled = True
                         except Exception as exc:
                             logger.error("Provider sync failed: %s", exc)
+                except SyncCancelled:
+                    shutdown_wait = False
+                    raise
+                finally:
+                    pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
                 if cancelled:
                     raise SyncCancelled("Sync stopped by user")
             else:
@@ -968,7 +977,10 @@ class SyncService:
 
         from .anilist_client import AniListClient
 
-        client = AniListClient(self._config.anilist)
+        client = AniListClient(
+            self._config.anilist,
+            cancel_requested_callback=self._cancel_requested_callback,
+        )
         stats: list[SyncStats] = []
 
         # Collect all items from every status first, then pre-warm the shared
@@ -1012,13 +1024,20 @@ class SyncService:
             self._set_status("Pre-warming anime metadata cache")
             get_ctx = getattr(client, "_get_root_context", None)
             if callable(get_ctx):
-                with ThreadPoolExecutor(max_workers=4) as pool:
+                pool = ThreadPoolExecutor(max_workers=4)
+                shutdown_wait = True
+                try:
                     futures = {pool.submit(get_ctx, aid): aid for aid in prewarm_ids}
-                    for future in as_completed(futures):
+                    for future in self._iter_completed_futures(futures):
                         try:
                             future.result()
                         except Exception as exc:
                             logger.debug("Cache warm failed for anilist_id=%s: %s", futures[future], exc)
+                except SyncCancelled:
+                    shutdown_wait = False
+                    raise
+                finally:
+                    pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
             logger.info(
                 "Pre-warmed anime chain cache for %d/%d AniList IDs",
                 len(prewarm_ids),
@@ -1457,13 +1476,14 @@ class SyncService:
         pmdb_write_started = time.perf_counter()
         if pending_adds:
             self._set_status(f"Adding items to {actual_list_name}")
-            with ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(pending_adds))) as pool:
+            pool = ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(pending_adds)))
+            shutdown_wait = True
+            try:
                 futures = {
                     pool.submit(self._pmdb.add_item_to_list, list_id, tmdb_id, media_type): (item, tmdb_id, media_type, key)
                     for item, tmdb_id, media_type, key in pending_adds
                 }
-                for future in as_completed(futures):
-                    self._check_cancelled()
+                for future in self._iter_completed_futures(futures):
                     item, tmdb_id, media_type, key = futures[future]
                     try:
                         result = future.result()
@@ -1482,6 +1502,11 @@ class SyncService:
                     except Exception as exc:
                         stats.errors.append(f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}")
                     self._publish_progress([stats], force=True)
+            except SyncCancelled:
+                shutdown_wait = False
+                raise
+            finally:
+                pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
         if self._config.sync.remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
@@ -1550,13 +1575,20 @@ class SyncService:
         if not callable(get_ctx):
             return
 
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        pool = ThreadPoolExecutor(max_workers=4)
+        shutdown_wait = True
+        try:
             futures = {pool.submit(get_ctx, aid): aid for aid in uncached}
-            for future in as_completed(futures):
+            for future in self._iter_completed_futures(futures):
                 try:
                     future.result()
                 except Exception as exc:
                     logger.debug("Chain pre-warm failed for anilist_id=%s: %s", futures[future], exc)
+        except SyncCancelled:
+            shutdown_wait = False
+            raise
+        finally:
+            pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
     def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
         """Silently contribute a resolved external ID mapping back to PMDB.
@@ -1639,7 +1671,9 @@ class SyncService:
             return
 
         self._set_status(status_message)
-        with ThreadPoolExecutor(max_workers=min(_ACTIVITY_WRITE_WORKERS, len(items))) as pool:
+        pool = ThreadPoolExecutor(max_workers=min(_ACTIVITY_WRITE_WORKERS, len(items)))
+        shutdown_wait = True
+        try:
             futures = {
                 pool.submit(
                     self._pmdb.mark_watched,
@@ -1652,8 +1686,7 @@ class SyncService:
                 ): item
                 for item in items
             }
-            for future in as_completed(futures):
-                self._check_cancelled()
+            for future in self._iter_completed_futures(futures):
                 item = futures[future]
                 key = self._watched_identity_key(item)
                 try:
@@ -1667,6 +1700,11 @@ class SyncService:
                     stats.errors.append(
                         f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}"
                     )
+        except SyncCancelled:
+            shutdown_wait = False
+            raise
+        finally:
+            pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
     def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
         stale_items: list[dict] = []
@@ -1678,13 +1716,14 @@ class SyncService:
 
         removed = 0
         if stale_items:
-            with ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(stale_items))) as pool:
+            pool = ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(stale_items)))
+            shutdown_wait = True
+            try:
                 futures = {
                     pool.submit(self._pmdb.remove_item_from_list, list_id, item["id"]): item
                     for item in stale_items
                 }
-                for future in as_completed(futures):
-                    self._check_cancelled()
+                for future in self._iter_completed_futures(futures):
                     item = futures[future]
                     try:
                         future.result()
@@ -1694,6 +1733,11 @@ class SyncService:
                         raise
                     except Exception as exc:
                         logger.error("Failed to remove item %s: %s", item.get("id"), exc)
+            except SyncCancelled:
+                shutdown_wait = False
+                raise
+            finally:
+                pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
         if removed:
             logger.info("  │ Removed %d stale item(s) from list %s", removed, list_id)
         return removed
@@ -1783,6 +1827,19 @@ class SyncService:
                 items_fetched=0,
             )
         ], force=True)
+
+    def _iter_completed_futures(self, futures) -> object:
+        pending = set(futures.keys() if isinstance(futures, dict) else futures)
+        while pending:
+            self._check_cancelled()
+            done, pending = wait(
+                pending,
+                timeout=_FUTURE_POLL_INTERVAL,
+                return_when=FIRST_COMPLETED,
+            )
+            for future in done:
+                yield future
+        self._check_cancelled()
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:

@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 from .config import AniListConfig, SimklConfig
 
 logger = logging.getLogger(__name__)
+REQUEST_TIMEOUT = (5, 12)
 
 # Status codes from SIMKL that map to our list names
 SIMKL_STATUS_WATCHING = "watching"
@@ -102,7 +103,9 @@ class SimklClient:
     def _get(self, path: str, params: dict | None = None) -> dict | list | None:
         url = f"{self._config.base_url}{path}"
         logger.debug("GET %s params=%s", url, params)
-        resp = self._session.get(url, params=params, timeout=30)
+        self._check_cancelled()
+        resp = self._session.get(url, params=params, timeout=REQUEST_TIMEOUT)
+        self._check_cancelled()
         resp.raise_for_status()
         if resp.status_code == 204 or not resp.text:
             return None

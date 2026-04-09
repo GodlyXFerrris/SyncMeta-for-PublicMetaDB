@@ -22,6 +22,8 @@ _SHARED_ROOT_INFLIGHT: dict[int, threading.Event] = {}
 _SHARED_CACHE_LOCK = threading.Lock()
 
 GRAPHQL_URL = "https://graphql.anilist.co"
+REQUEST_TIMEOUT = (5, 12)
+_CANCEL_POLL_INTERVAL = 0.25
 
 # AniList statuses we care about
 ANILIST_STATUS_WATCHING = "CURRENT"
@@ -115,14 +117,36 @@ _ROOT_FORMAT_PRIORITY = {
 class AniListClient:
     """Client for the AniList GraphQL API (public, no auth required for public lists)."""
 
-    def __init__(self, config: AniListConfig):
+    def __init__(self, config: AniListConfig, cancel_requested_callback=None):
         self._config = config
         self._session = self._build_session()
         self._status_cache: dict[str, list[dict]] = {}
+        self._cancel_requested_callback = cancel_requested_callback
         # Point to the module-level shared caches so all instances benefit
         # from chain data already fetched by another user's sync.
         self._root_cache = _SHARED_ROOT_CACHE
         self._root_context_cache = _SHARED_ROOT_CONTEXT_CACHE
+
+    def _check_cancelled(self) -> None:
+        if not self._cancel_requested_callback:
+            return
+        try:
+            if self._cancel_requested_callback():
+                from .sync_service import SyncCancelled
+                raise SyncCancelled("Sync stopped by user")
+        except SyncCancelled:
+            raise
+        except Exception:
+            logger.debug("Cancel callback failed", exc_info=True)
+
+    def _sleep_with_cancel(self, seconds: float) -> None:
+        deadline = time.monotonic() + max(0.0, seconds)
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(_CANCEL_POLL_INTERVAL, remaining))
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -147,7 +171,13 @@ class AniListClient:
     def _query(self, query: str, variables: dict, _retries: int = 3) -> dict | None:
         logger.debug("AniList query variables=%s", variables)
         try:
-            resp = self._session.post(GRAPHQL_URL, json={"query": query, "variables": variables}, timeout=30)
+            self._check_cancelled()
+            resp = self._session.post(
+                GRAPHQL_URL,
+                json={"query": query, "variables": variables},
+                timeout=REQUEST_TIMEOUT,
+            )
+            self._check_cancelled()
             if resp.status_code == 429 and _retries > 0:
                 # Honour the server-supplied Retry-After (seconds) rather than
                 # using blind exponential backoff.
@@ -157,7 +187,7 @@ class AniListClient:
                 except (TypeError, ValueError):
                     wait = 60.0
                 logger.warning("AniList rate limited; retrying in %.1fs (variables=%s)", wait, variables)
-                time.sleep(wait)
+                self._sleep_with_cancel(wait)
                 return self._query(query, variables, _retries=_retries - 1)
             resp.raise_for_status()
             data = resp.json()
