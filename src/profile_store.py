@@ -864,8 +864,6 @@ class ProfileStore:
                 "unresolved": 0,
                 "errors": 0,
             }
-            recent_runs: list[dict] = []
-
             for profile in self._profiles.values():
                 if profile.get("last_sync"):
                     totals["profiles_with_sync"] += 1
@@ -887,17 +885,6 @@ class ProfileStore:
                     timestamp = parse_iso_datetime(entry.get("timestamp"))
                     entry_totals = _result_totals(entry.get("results", []))
                     status = str(entry.get("status", "completed") or "completed").strip().lower()
-                    recent_runs.append({
-                        "timestamp": entry.get("timestamp"),
-                        "profile_id_short": str(profile.get("profile_id", ""))[:8],
-                        "status": status,
-                        "dry_run": bool(entry.get("dry_run", False)),
-                        "lists": entry_totals["lists"],
-                        "added": entry_totals["added"],
-                        "removed": entry_totals["removed"],
-                        "errors": entry_totals["errors"] + (1 if entry.get("error_message") else 0),
-                        "unresolved": entry_totals["unresolved"],
-                    })
                     if timestamp is None or timestamp < cutoff_24h:
                         continue
                     last_24h["sync_runs"] += 1
@@ -913,8 +900,6 @@ class ProfileStore:
                     if entry.get("error_message"):
                         last_24h["errors"] += 1
 
-            recent_runs.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
-
             return {
                 "generated_at": now.isoformat(),
                 "totals": {
@@ -928,7 +913,6 @@ class ProfileStore:
                 },
                 "last_24h": last_24h,
                 "source_usage": source_usage,
-                "recent_runs": recent_runs[:20],
             }
 
     def create_profile(self, password: str, credentials: dict, options: dict) -> dict:

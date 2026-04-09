@@ -210,10 +210,6 @@
           <div class="panel-header">Last 24 Hours</div>
           <div id="site-stats-window"><div class="empty">Loading site stats…</div></div>
         </div>
-        <div class="panel">
-          <div class="panel-header">Recent Combined Runs</div>
-          <div id="site-stats-runs"><div class="empty">Loading site stats…</div></div>
-        </div>
       </div>
 
       <div id="view-settings" style="display:none">
@@ -1134,14 +1130,12 @@
         el('site-stats-time').textContent = '';
         el('site-stats-sources').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
         el('site-stats-window').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
-        el('site-stats-runs').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
         return;
       }
 
       const totals = stats.totals || {};
       const sourceUsage = stats.source_usage || {};
       const last24h = stats.last_24h || {};
-      const recentRuns = Array.isArray(stats.recent_runs) ? stats.recent_runs : [];
 
       el('site-stats-cards').innerHTML = `
         <div class="card"><div class="card-label">Profiles</div><div class="card-value">${totals.profiles || 0}</div><div class="card-sub">${totals.profiles_with_sync || 0} with at least one completed sync</div></div>
@@ -1166,11 +1160,6 @@
         <tr><td>Unresolved</td><td class="num ${(last24h.unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${last24h.unresolved || 0}</td></tr>
         <tr><td>Errors</td><td class="num ${(last24h.errors || 0) > 0 ? 'c-red' : 'c-dim'}">${last24h.errors || 0}</td></tr>
       </tbody></table></div>`;
-      if (!recentRuns.length) {
-        el('site-stats-runs').innerHTML = '<div class="empty">No completed or attempted sync runs recorded yet.</div>';
-      } else {
-        el('site-stats-runs').innerHTML = `<div class="table-scroll"><table><thead><tr><th>When</th><th>Profile</th><th>Status</th><th class="num">Lists</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Unresolved</th><th class="num">Errors</th></tr></thead><tbody>${recentRuns.map(run => `<tr><td>${run.timestamp ? esc(new Date(run.timestamp).toLocaleString()) : ''}</td><td class="mono">${esc(run.profile_id_short || '')}</td><td>${esc(run.status || 'completed')}${run.dry_run ? ' <span class="c-dim">dry run</span>' : ''}</td><td class="num">${run.lists || 0}</td><td class="num ${(run.added || 0) > 0 ? 'c-green' : 'c-dim'}">${run.added || 0}</td><td class="num ${(run.removed || 0) > 0 ? 'c-red' : 'c-dim'}">${run.removed || 0}</td><td class="num ${(run.unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${run.unresolved || 0}</td><td class="num ${(run.errors || 0) > 0 ? 'c-red' : 'c-dim'}">${run.errors || 0}</td></tr>`).join('')}</tbody></table></div>`;
-      }
     }
 
     async function fetchSiteStats() {
