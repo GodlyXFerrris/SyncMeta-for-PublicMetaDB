@@ -52,6 +52,12 @@ class ItemMatcher:
         # Lock protecting _cache and _failed_cache so concurrent provider syncs
         # (e.g. SIMKL shows + AniList anime) don't race on cache writes.
         self._lock = threading.Lock()
+        self._inflight: dict[str, threading.Event] = {}
+        self._stats = {
+            "lookups": 0,
+            "cache_hits": 0,
+            "failed_cache_hits": 0,
+        }
         # Optional callable(anilist_id: int | None, mal_id: int | None) -> dict | None
         # Returns {"root": media_dict, ...} from the AniList prequel chain.
         # Used as a last resort for anime sequels that fail all direct lookups.
@@ -96,35 +102,63 @@ class ItemMatcher:
             if ts > cutoff
         }
 
+    def stats_snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return dict(self._stats)
+
     def resolve_tmdb_id(self, item: dict) -> int | None:
         """Return a TMDB ID for a normalized item, or None if unresolvable."""
         cache_key = self._cache_key(item)
 
         # Fast path: check caches without the lock (reads are safe in CPython).
+        with self._lock:
+            self._stats["lookups"] += 1
         if cache_key in self._cache:
+            with self._lock:
+                self._stats["cache_hits"] += 1
             return self._cache[cache_key]
         failed_at = self._failed_cache.get(cache_key)
         if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
+            with self._lock:
+                self._stats["failed_cache_hits"] += 1
             return None
 
-        # Slow path: resolve and write to cache under the lock so concurrent
-        # provider syncs (e.g. SIMKL shows + AniList anime) don't race.
+        # Coordinate cache misses per key so only duplicate lookups block each
+        # other; distinct items can still resolve concurrently.
         with self._lock:
-            # Re-check after acquiring — another thread may have resolved this.
             if cache_key in self._cache:
                 return self._cache[cache_key]
             failed_at = self._failed_cache.get(cache_key)
             if failed_at is not None and (time.time() - failed_at) < _FAILED_CACHE_TTL_SECONDS:
                 return None
+            in_flight = self._inflight.get(cache_key)
+            if in_flight is None:
+                in_flight = threading.Event()
+                self._inflight[cache_key] = in_flight
+                is_owner = True
+            else:
+                is_owner = False
 
+        if not is_owner:
+            in_flight.wait()
+            return self._cache.get(cache_key)
+
+        try:
             tmdb_id = self._try_resolve(item)
-            self._cache[cache_key] = tmdb_id
+        except Exception:
+            with self._lock:
+                self._inflight.pop(cache_key, None)
+                in_flight.set()
+            raise
 
+        with self._lock:
+            self._cache[cache_key] = tmdb_id
             if tmdb_id is None:
                 self._failed_cache[cache_key] = time.time()
             else:
                 self._failed_cache.pop(cache_key, None)
-
+            self._inflight.pop(cache_key, None)
+            in_flight.set()
             return tmdb_id
 
     def _try_resolve(self, item: dict) -> int | None:

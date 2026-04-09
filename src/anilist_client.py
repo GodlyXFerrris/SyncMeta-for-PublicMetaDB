@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 # This avoids re-fetching the same chain data per user.
 _SHARED_ROOT_CACHE: dict[int, dict | None] = {}
 _SHARED_ROOT_CONTEXT_CACHE: dict[int, dict | None] = {}
+_SHARED_ROOT_INFLIGHT: dict[int, threading.Event] = {}
 _SHARED_CACHE_LOCK = threading.Lock()
 
 GRAPHQL_URL = "https://graphql.anilist.co"
@@ -287,37 +288,28 @@ class AniListClient:
         if media_id in self._root_context_cache:
             return self._root_context_cache[media_id]
 
-        # Acquire the shared lock before any cache write so concurrent syncs
-        # for different users don't race on the same chain-walk.
         with _SHARED_CACHE_LOCK:
-            # Re-check after acquiring the lock — another thread may have
-            # already resolved this chain while we were waiting.
             if media_id in self._root_context_cache:
                 return self._root_context_cache[media_id]
-
             if media_id in self._root_cache:
                 root = self._root_cache[media_id]
                 context = {"root": root, "episode_offset": 0}
                 self._root_context_cache[media_id] = context
                 return context
+            in_flight = _SHARED_ROOT_INFLIGHT.get(media_id)
+            if in_flight is None:
+                in_flight = threading.Event()
+                _SHARED_ROOT_INFLIGHT[media_id] = in_flight
+                is_owner = True
+            else:
+                is_owner = False
 
-            seen: set[int] = set()
-            chain: list[dict] = []
-            current_id = media_id
+        if not is_owner:
+            in_flight.wait()
+            return self._root_context_cache.get(media_id)
 
-            while current_id and current_id not in seen:
-                seen.add(current_id)
-                data = self._query(_MEDIA_RELATIONS_QUERY, {"id": current_id})
-                media = (data or {}).get("Media")
-                if not media:
-                    break
-
-                chain.append(media)
-                prequel = self._pick_prequel(media.get("relations", {}).get("edges", []))
-                if not prequel:
-                    break
-                current_id = prequel.get("id")
-
+        try:
+            chain = self._fetch_root_chain(media_id)
             root = self._pick_root_candidate(chain)
             chronological_chain = list(reversed(chain))
             running_offset = 0
@@ -333,14 +325,49 @@ class AniListClient:
                     running_offset += int(media.get("episodes") or 0)
                 except (TypeError, ValueError):
                     pass
+        except Exception:
+            with _SHARED_CACHE_LOCK:
+                _SHARED_ROOT_INFLIGHT.pop(media_id, None)
+                in_flight.set()
+            raise
+
+        with _SHARED_CACHE_LOCK:
             for candidate in chain:
                 candidate_id = candidate.get("id")
                 if candidate_id:
                     self._root_cache[int(candidate_id)] = root
-                    self._root_context_cache[int(candidate_id)] = context_by_id.get(int(candidate_id), {"root": root, "episode_offset": 0})
+                    self._root_context_cache[int(candidate_id)] = context_by_id.get(
+                        int(candidate_id),
+                        {"root": root, "episode_offset": 0},
+                    )
             self._root_cache[media_id] = root
-            self._root_context_cache[media_id] = context_by_id.get(media_id, {"root": root, "episode_offset": 0})
+            self._root_context_cache[media_id] = context_by_id.get(
+                media_id,
+                {"root": root, "episode_offset": 0},
+            )
+            _SHARED_ROOT_INFLIGHT.pop(media_id, None)
+            in_flight.set()
             return self._root_context_cache[media_id]
+
+    def _fetch_root_chain(self, media_id: int) -> list[dict]:
+        seen: set[int] = set()
+        chain: list[dict] = []
+        current_id = media_id
+
+        while current_id and current_id not in seen:
+            seen.add(current_id)
+            data = self._query(_MEDIA_RELATIONS_QUERY, {"id": current_id})
+            media = (data or {}).get("Media")
+            if not media:
+                break
+
+            chain.append(media)
+            prequel = self._pick_prequel(media.get("relations", {}).get("edges", []))
+            if not prequel:
+                break
+            current_id = prequel.get("id")
+
+        return chain
 
     @classmethod
     def _pick_prequel(cls, edges: list[dict]) -> dict | None:

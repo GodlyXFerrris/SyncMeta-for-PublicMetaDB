@@ -1,6 +1,7 @@
 """PublicMetaDB API client for managing lists and items."""
 
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -24,17 +25,20 @@ class RateLimiter:
         self._max = max_requests
         self._window = window_seconds
         self._timestamps: list[float] = []
+        self._lock = threading.Lock()
 
     def wait(self) -> None:
-        now = time.time()
-        # Purge timestamps outside the window
-        self._timestamps = [t for t in self._timestamps if now - t < self._window]
-        if len(self._timestamps) >= self._max:
-            sleep_for = self._timestamps[0] + self._window - now + 0.1
+        while True:
+            with self._lock:
+                now = time.time()
+                self._timestamps = [t for t in self._timestamps if now - t < self._window]
+                if len(self._timestamps) < self._max:
+                    self._timestamps.append(now)
+                    return
+                sleep_for = self._timestamps[0] + self._window - now + 0.1
             if sleep_for > 0:
                 logger.debug("Rate limit: sleeping %.2fs", sleep_for)
                 time.sleep(sleep_for)
-        self._timestamps.append(time.time())
 
 
 class PublicMetaDBClient:
@@ -42,8 +46,10 @@ class PublicMetaDBClient:
 
     def __init__(self, config: PublicMetaDBConfig):
         self._config = config
-        self._session = self._build_session()
+        self._session_local = threading.local()
         self._limiter = RateLimiter()
+        self._lists_lock = threading.Lock()
+        self._lists_by_name: dict[str, dict] | None = None
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -63,11 +69,18 @@ class PublicMetaDBClient:
         session.mount("http://", adapter)
         return session
 
+    def _session(self) -> requests.Session:
+        session = getattr(self._session_local, "session", None)
+        if session is None:
+            session = self._build_session()
+            self._session_local.session = session
+        return session
+
     def _request(self, method: str, path: str, **kwargs) -> dict | list | None:
         self._limiter.wait()
         url = f"{self._config.base_url}{path}"
         logger.debug("%s %s", method, url)
-        resp = self._session.request(method, url, timeout=30, **kwargs)
+        resp = self._session().request(method, url, timeout=30, **kwargs)
         resp.raise_for_status()
         if resp.status_code == 204 or not resp.text:
             return None
@@ -368,14 +381,31 @@ class PublicMetaDBClient:
             if page >= resp.get("totalPages", 1):
                 break
             page += 1
+        with self._lists_lock:
+            self._lists_by_name = {
+                str(item.get("name", "")).strip(): item
+                for item in all_lists
+                if str(item.get("name", "")).strip()
+            }
         return all_lists
+
+    def refresh_lists_index(self) -> dict[str, dict]:
+        self.get_lists()
+        with self._lists_lock:
+            return dict(self._lists_by_name or {})
 
     def find_list_by_name(self, name: str) -> dict | None:
         """Find a list by exact name match."""
-        for lst in self.get_lists():
-            if lst.get("name") == name:
-                return lst
-        return None
+        lookup_name = str(name or "").strip()
+        if not lookup_name:
+            return None
+        with self._lists_lock:
+            cached = None if self._lists_by_name is None else self._lists_by_name.get(lookup_name)
+        if cached:
+            return cached
+        self.get_lists()
+        with self._lists_lock:
+            return None if self._lists_by_name is None else self._lists_by_name.get(lookup_name)
 
     def create_list(self, name: str, description: str = "", is_public: bool = False) -> dict:
         """Create a new list and return its metadata."""
@@ -387,6 +417,9 @@ class PublicMetaDBClient:
         })
         if resp and resp.get("success"):
             logger.info("Created list '%s' (id=%s)", name, resp["item"]["id"])
+            with self._lists_lock:
+                if self._lists_by_name is not None:
+                    self._lists_by_name[str(name).strip()] = resp["item"]
             return resp["item"]
         raise RuntimeError(f"Failed to create list '{name}': {resp}")
 
@@ -403,6 +436,11 @@ class PublicMetaDBClient:
         try:
             self._delete(f"/api/external/lists/{list_id}")
             logger.info("Deleted list %s", list_id)
+            with self._lists_lock:
+                if self._lists_by_name is not None:
+                    for name, item in list(self._lists_by_name.items()):
+                        if str(item.get("id", "")).strip() == str(list_id).strip():
+                            self._lists_by_name.pop(name, None)
             return True
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:

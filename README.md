@@ -11,6 +11,11 @@ into [PublicMetaDB](https://publicmetadb.com).
 
 Each user gets a persistent profile with encrypted credentials. The server keeps lists updated automatically in the background.
 
+## Runtime
+
+- Python 3.12+ is required for local development and test runs.
+- The included Docker image already uses Python 3.12.
+
 ---
 
 ## Features

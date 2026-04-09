@@ -18,6 +18,9 @@ from .trakt_client import TraktClient
 
 logger = logging.getLogger(__name__)
 
+_LIST_WRITE_WORKERS = 4
+_ACTIVITY_WRITE_WORKERS = 4
+
 
 class SyncCancelled(Exception):
     """Raised when a running sync has been asked to stop."""
@@ -197,6 +200,10 @@ class SyncService:
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
             logger.info("── List Sync ──────────────────────────────────────────")
+            try:
+                self._pmdb.refresh_lists_index()
+            except Exception as exc:
+                logger.debug("Could not prefetch PMDB list index: %s", exc)
             anilist_enabled = (
                 self._config.anilist.enabled
                 and bool(self._config.anilist.selected_statuses)
@@ -258,6 +265,10 @@ class SyncService:
         if not media_types:
             return stats
 
+        if "anime" in media_types and self._config.simkl.selected_statuses.get("anime"):
+            self._set_status("Pre-warming SIMKL anime metadata cache")
+            self._prewarm_simkl_anime_cache()
+
         for simkl_type in media_types:
             self._check_cancelled()
             statuses = self._config.simkl.selected_statuses.get(simkl_type, [])
@@ -268,8 +279,17 @@ class SyncService:
                 self._check_cancelled()
 
                 self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
+                fetch_started = time.perf_counter()
                 grouped = self._simkl.get_status(status_key, [simkl_type])
+                fetch_elapsed = time.perf_counter() - fetch_started
                 items = grouped.get(simkl_type, [])
+                logger.info(
+                    "Fetched SIMKL %s %s in %.2fs (%d items)",
+                    _STATUS_LABELS.get(status_key, status_key),
+                    simkl_type,
+                    fetch_elapsed,
+                    len(items),
+                )
 
                 name = _status_list_name(simkl_type, status_key)
                 display_name = _display_status_name(simkl_type, status_key)
@@ -355,6 +375,7 @@ class SyncService:
         # season-level fallback pass can skip them (avoids double-counting).
         shows_with_episode_records: set[str] = set()
 
+        pending_items: list[dict] = []
         for item in items:
             self._check_cancelled()
             item = self._resolve_activity_item(item)
@@ -381,22 +402,14 @@ class SyncService:
                 existing_counts[key] = 1
                 stats.items_added += 1
                 continue
-            try:
-                self._set_status("Writing SIMKL watched history to PublicMetaDB")
-                self._pmdb.mark_watched(
-                    tmdb_id=int(item["tmdb_id"]),
-                    media_type=item["media_type"],
-                    season=item.get("season"),
-                    episode=item.get("episode"),
-                    watched_at=item.get("watched_at"),
-                    dedupe=True,
-                )
-                existing_counts[key] = 1
-                stats.items_added += 1
-            except SyncCancelled:
-                raise
-            except Exception as exc:
-                stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+            pending_items.append(item)
+
+        self._write_watched_history_items(
+            pending_items,
+            existing_counts,
+            stats,
+            status_message="Writing SIMKL watched history to PublicMetaDB",
+        )
 
         # Season-level fallback: only for completed anime that produced zero
         # per-episode records (e.g. user marked complete without tracking each
@@ -432,6 +445,7 @@ class SyncService:
         """
         fallback_count = 0
         skipped_has_episodes = 0
+        pending_items: list[dict] = []
         for item in completed_anime:
             self._check_cancelled()
 
@@ -484,29 +498,23 @@ class SyncService:
                 existing_counts[season_key] = 1
                 stats.items_added += 1
                 continue
+            pending_items.append({
+                **item,
+                "tmdb_id": tmdb_id,
+                "media_type": "tv",
+                "season": tmdb_season,
+                "episode": None,
+                "watched_at": item.get("last_watched_at") or item.get("watched_at"),
+            })
 
-            try:
-                self._set_status("Marking completed anime seasons in PublicMetaDB")
-                self._pmdb.mark_watched(
-                    tmdb_id=tmdb_id,
-                    media_type="tv",
-                    season=tmdb_season,
-                    watched_at=item.get("last_watched_at") or item.get("watched_at"),
-                    dedupe=True,
-                )
-                existing_counts[season_key] = 1
-                stats.items_added += 1
-                fallback_count += 1
-                logger.debug(
-                    "  Season fallback: '%s' → tmdb=%d season=%d",
-                    item.get("title", "?"), tmdb_id, tmdb_season,
-                )
-            except SyncCancelled:
-                raise
-            except Exception as exc:
-                stats.errors.append(
-                    f"Failed to mark completed season for '{item.get('title', 'Unknown')}': {exc}"
-                )
+        before_added = stats.items_added
+        self._write_watched_history_items(
+            pending_items,
+            existing_counts,
+            stats,
+            status_message="Marking completed anime seasons in PublicMetaDB",
+        )
+        fallback_count += max(0, stats.items_added - before_added)
 
         if skipped_has_episodes:
             logger.info(
@@ -842,6 +850,7 @@ class SyncService:
             if key:
                 existing_counts[key] = existing_counts.get(key, 0) + 1
 
+        pending_items: list[dict] = []
         for item in items:
             self._check_cancelled()
             item = self._resolve_activity_item(item)
@@ -857,22 +866,13 @@ class SyncService:
                 existing_counts[key] = 1
                 stats.items_added += 1
                 continue
-            try:
-                self._set_status("Writing Trakt watched history to PublicMetaDB")
-                self._pmdb.mark_watched(
-                    tmdb_id=int(item["tmdb_id"]),
-                    media_type=item["media_type"],
-                    season=item.get("season"),
-                    episode=item.get("episode"),
-                    watched_at=item.get("watched_at"),
-                    dedupe=True,
-                )
-                existing_counts[key] = 1
-                stats.items_added += 1
-            except SyncCancelled:
-                raise
-            except Exception as exc:
-                stats.errors.append(f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}")
+            pending_items.append(item)
+        self._write_watched_history_items(
+            pending_items,
+            existing_counts,
+            stats,
+            status_message="Writing Trakt watched history to PublicMetaDB",
+        )
         return stats
 
     def _sync_trakt_resume_progress(self) -> SyncStats:
@@ -978,7 +978,14 @@ class SyncService:
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
+            fetch_started = time.perf_counter()
             items = client.get_status(status_key)
+            logger.info(
+                "Fetched AniList %s in %.2fs (%d items)",
+                _STATUS_LABELS.get(status_key, status_key),
+                time.perf_counter() - fetch_started,
+                len(items),
+            )
             all_items_by_status.append((status_key, items))
 
         # Pre-warm the shared prequel-chain cache for all unique AniList IDs.
@@ -1341,6 +1348,11 @@ class SyncService:
             return stats
 
         self._set_status(f"Resolving IDs for {actual_list_name}")
+        resolve_started = time.perf_counter()
+        stats_snapshot = getattr(self._matcher, "stats_snapshot", None)
+        matcher_stats_before = (
+            stats_snapshot() if callable(stats_snapshot) else {"lookups": 0, "cache_hits": 0, "failed_cache_hits": 0}
+        )
         resolved: list[dict] = []
         for item in source_items:
             self._check_cancelled()
@@ -1360,6 +1372,20 @@ class SyncService:
                 stats.items_skipped_unresolved += 1
                 stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
             self._publish_progress([stats])
+        resolve_elapsed = time.perf_counter() - resolve_started
+        matcher_stats_after = (
+            stats_snapshot() if callable(stats_snapshot) else {"lookups": 0, "cache_hits": 0, "failed_cache_hits": 0}
+        )
+        cache_hits = max(0, matcher_stats_after["cache_hits"] - matcher_stats_before["cache_hits"])
+        failed_cache_hits = max(
+            0,
+            matcher_stats_after["failed_cache_hits"] - matcher_stats_before["failed_cache_hits"],
+        )
+        lookup_count = max(0, matcher_stats_after["lookups"] - matcher_stats_before["lookups"])
+        unresolved_rate = (
+            (stats.items_skipped_unresolved / stats.items_fetched) if stats.items_fetched else 0.0
+        )
+        cache_hit_rate = ((cache_hits + failed_cache_hits) / lookup_count) if lookup_count else 0.0
 
         if self._config.sync.dry_run:
             return self._dry_run_report(resolved, actual_list_name, stats)
@@ -1385,10 +1411,12 @@ class SyncService:
         list_id = pmdb_list["id"]
 
         self._set_status(f"Loading existing items from {actual_list_name}")
+        pmdb_read_started = time.perf_counter()
         existing_items = self._pmdb.get_list_items(list_id)
         existing_map = self._build_existing_map(existing_items)
+        pmdb_read_elapsed = time.perf_counter() - pmdb_read_started
         desired_keys: set[str] = set()
-
+        pending_adds: list[tuple[dict, int, str, str]] = []
         for item in resolved:
             self._check_cancelled()
             tmdb_id = item["resolved_tmdb_id"]
@@ -1404,33 +1432,45 @@ class SyncService:
                 stats.items_skipped_duplicate += 1
                 self._publish_progress([stats])
                 continue
+            pending_adds.append((item, tmdb_id, media_type, key))
 
-            try:
-                self._set_status(f"Adding items to {actual_list_name}")
-                result = self._pmdb.add_item_to_list(list_id, tmdb_id, media_type)
-                if result is not None:
-                    existing_map[key] = {
-                        "tmdb_id": tmdb_id,
-                        "media_type": media_type,
-                    }
-                    stats.items_added += 1
-                else:
-                    message = f"Failed to add '{item['title']}' (tmdb={tmdb_id}): API returned no result"
-                    stats.errors.append(message)
-                self._publish_progress([stats])
-            except SyncCancelled:
-                raise
-            except Exception as exc:
-                stats.errors.append(f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}")
-                self._publish_progress([stats], force=True)
+        pmdb_write_started = time.perf_counter()
+        if pending_adds:
+            self._set_status(f"Adding items to {actual_list_name}")
+            with ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(pending_adds))) as pool:
+                futures = {
+                    pool.submit(self._pmdb.add_item_to_list, list_id, tmdb_id, media_type): (item, tmdb_id, media_type, key)
+                    for item, tmdb_id, media_type, key in pending_adds
+                }
+                for future in as_completed(futures):
+                    self._check_cancelled()
+                    item, tmdb_id, media_type, key = futures[future]
+                    try:
+                        result = future.result()
+                        if result is not None:
+                            existing_map[key] = {
+                                "tmdb_id": tmdb_id,
+                                "media_type": media_type,
+                            }
+                            stats.items_added += 1
+                        else:
+                            stats.errors.append(
+                                f"Failed to add '{item['title']}' (tmdb={tmdb_id}): API returned no result"
+                            )
+                    except SyncCancelled:
+                        raise
+                    except Exception as exc:
+                        stats.errors.append(f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}")
+                    self._publish_progress([stats], force=True)
 
         if self._config.sync.remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
             self._publish_progress([stats], force=True)
+        pmdb_write_elapsed = time.perf_counter() - pmdb_write_started
 
         logger.info(
-            "  └ '%s'  resolved=%d  added=%d  dup=%d  unresolved=%d  removed=%d%s",
+            "  └ '%s'  resolved=%d  added=%d  dup=%d  unresolved=%d  removed=%d%s  [resolve=%.2fs pmdb_read=%.2fs pmdb_write=%.2fs cache_hit=%.0f%% unresolved=%.0f%%]",
             actual_list_name,
             stats.items_resolved,
             stats.items_added,
@@ -1438,6 +1478,11 @@ class SyncService:
             stats.items_skipped_unresolved,
             stats.items_removed,
             f"  ⚠ {len(stats.errors)} error(s)" if stats.errors else "",
+            resolve_elapsed,
+            pmdb_read_elapsed,
+            pmdb_write_elapsed,
+            cache_hit_rate * 100.0,
+            unresolved_rate * 100.0,
         )
         return stats
 
@@ -1563,20 +1608,72 @@ class SyncService:
             )
         return stats
 
+    def _write_watched_history_items(
+        self,
+        items: list[dict],
+        existing_counts: dict[str, int],
+        stats: SyncStats,
+        status_message: str,
+    ) -> None:
+        if not items:
+            return
+
+        self._set_status(status_message)
+        with ThreadPoolExecutor(max_workers=min(_ACTIVITY_WRITE_WORKERS, len(items))) as pool:
+            futures = {
+                pool.submit(
+                    self._pmdb.mark_watched,
+                    tmdb_id=int(item["tmdb_id"]),
+                    media_type=item["media_type"],
+                    season=item.get("season"),
+                    episode=item.get("episode"),
+                    watched_at=item.get("watched_at"),
+                    dedupe=True,
+                ): item
+                for item in items
+            }
+            for future in as_completed(futures):
+                self._check_cancelled()
+                item = futures[future]
+                key = self._watched_identity_key(item)
+                try:
+                    future.result()
+                    if key:
+                        existing_counts[key] = 1
+                    stats.items_added += 1
+                except SyncCancelled:
+                    raise
+                except Exception as exc:
+                    stats.errors.append(
+                        f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}"
+                    )
+
     def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
-        removed = 0
+        stale_items: list[dict] = []
         for item in existing_items:
             self._check_cancelled()
             key = f"{item.get('tmdb_id')}:{item.get('media_type')}"
             if key not in desired_keys:
-                try:
-                    self._pmdb.remove_item_from_list(list_id, item["id"])
-                    removed += 1
-                    logger.debug("Removed stale item tmdb=%s from list %s", item.get("tmdb_id"), list_id)
-                except SyncCancelled:
-                    raise
-                except Exception as exc:
-                    logger.error("Failed to remove item %s: %s", item.get("id"), exc)
+                stale_items.append(item)
+
+        removed = 0
+        if stale_items:
+            with ThreadPoolExecutor(max_workers=min(_LIST_WRITE_WORKERS, len(stale_items))) as pool:
+                futures = {
+                    pool.submit(self._pmdb.remove_item_from_list, list_id, item["id"]): item
+                    for item in stale_items
+                }
+                for future in as_completed(futures):
+                    self._check_cancelled()
+                    item = futures[future]
+                    try:
+                        future.result()
+                        removed += 1
+                        logger.debug("Removed stale item tmdb=%s from list %s", item.get("tmdb_id"), list_id)
+                    except SyncCancelled:
+                        raise
+                    except Exception as exc:
+                        logger.error("Failed to remove item %s: %s", item.get("id"), exc)
         if removed:
             logger.info("  │ Removed %d stale item(s) from list %s", removed, list_id)
         return removed
