@@ -82,6 +82,39 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("Sync Movies", html)
         self.assertNotIn("Sync Anime", html)
 
+    def test_parse_tmdb_id_accepts_slug_or_url(self) -> None:
+        self.assertEqual(web._parse_tmdb_id("1600672"), 1600672)
+        self.assertEqual(web._parse_tmdb_id("1600672-30"), 1600672)
+        self.assertEqual(
+            web._parse_tmdb_id("https://www.themoviedb.org/movie/1600672-30"),
+            1600672,
+        )
+
+    def test_contribute_manual_resolution_mapping_uses_available_external_ids(self) -> None:
+        calls = []
+
+        class _PMDB:
+            def create_id_mapping(self, tmdb_id, media_type, id_type, id_value):
+                calls.append((tmdb_id, media_type, id_type, id_value))
+                return True
+
+        web._contribute_manual_resolution_mapping(
+            _PMDB(),
+            {
+                "media_type": "movie",
+                "imdb_id": "tt123",
+                "mal_id": "55",
+                "anilist_id": "66",
+                "root_mal_id": "77",
+            },
+            1600672,
+        )
+
+        self.assertIn((1600672, "movie", "imdb", "tt123"), calls)
+        self.assertIn((1600672, "movie", "mal", "55"), calls)
+        self.assertIn((1600672, "movie", "anilist", "66"), calls)
+        self.assertIn((1600672, "movie", "mal", "77"), calls)
+
     def test_legal_pages_render(self) -> None:
         impressum = self.client.get("/impressum")
         privacy = self.client.get("/datenschutz")

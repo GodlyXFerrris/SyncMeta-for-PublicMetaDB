@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import secrets
 import threading
 import time
@@ -476,6 +477,53 @@ def _resolve_unresolved_item_automatically(private_profile: dict, item: dict) ->
     })
 
 
+def _parse_tmdb_id(raw_value: object) -> int:
+    candidate = str(raw_value or "").strip()
+    if not candidate:
+        raise ValueError("tmdb_id must be a positive integer")
+    try:
+        tmdb_id = int(candidate)
+    except (TypeError, ValueError):
+        match = re.search(r"(?<!\d)(\d+)", candidate)
+        if not match:
+            raise ValueError("tmdb_id must be a positive integer")
+        tmdb_id = int(match.group(1))
+    if tmdb_id <= 0:
+        raise ValueError("tmdb_id must be a positive integer")
+    return tmdb_id
+
+
+def _contribute_manual_resolution_mapping(pmdb: PublicMetaDBClient, item: dict | None, tmdb_id: int) -> None:
+    if not item:
+        return
+    media_type = str(item.get("media_type") or "").strip()
+    if not media_type:
+        return
+    ids = item if isinstance(item, dict) else {}
+    seen: set[tuple[str, str]] = set()
+    for id_type, item_key in [
+        ("mal", "mal_id"),
+        ("anilist", "anilist_id"),
+        ("mal", "root_mal_id"),
+        ("anilist", "root_anilist_id"),
+        ("imdb", "imdb_id"),
+        ("tvdb", "tvdb_id"),
+        ("anidb", "anidb_id"),
+        ("trakt", "trakt_id"),
+    ]:
+        id_value = ids.get(item_key)
+        if not id_value:
+            continue
+        key = (id_type, str(id_value))
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
+        except Exception as exc:
+            logger.debug("Failed to contribute manual PMDB mapping %s=%s: %s", id_type, id_value, exc)
+
+
 def _apply_unresolved_resolution(
     profile_id: str,
     private_profile: dict,
@@ -492,6 +540,7 @@ def _apply_unresolved_resolution(
             pmdb_api_key = credentials.get("pmdb", {}).get("api_key", "")
             if pmdb_api_key:
                 pmdb = PublicMetaDBClient(PublicMetaDBConfig(api_key=pmdb_api_key))
+                _contribute_manual_resolution_mapping(pmdb, target_item, tmdb_id)
                 media_type = str(target_item.get("media_type") or "").strip()
                 list_name = str(target_item.get("list_name") or "").strip()
                 managed_lists = private_profile.get("managed_lists") or []
@@ -1314,10 +1363,8 @@ def api_profile_unresolved_resolve():
     if not cache_key:
         return _json_error("cache_key is required", 400)
     try:
-        tmdb_id = int(tmdb_id_raw)
-        if tmdb_id <= 0:
-            raise ValueError
-    except (TypeError, ValueError):
+        tmdb_id = _parse_tmdb_id(tmdb_id_raw)
+    except ValueError:
         return _json_error("tmdb_id must be a positive integer", 400)
 
     try:
