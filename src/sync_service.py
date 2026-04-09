@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _LIST_WRITE_WORKERS = 4
 _ACTIVITY_WRITE_WORKERS = 4
+_ANILIST_PREWARM_LIMIT = 200
 
 
 class SyncCancelled(Exception):
@@ -975,15 +976,20 @@ class SyncService:
         # This ensures SIMKL anime (which runs concurrently) gets cache hits for
         # any AniList IDs it shares, instead of each thread walking the same chains.
         all_items_by_status: list[tuple[str, list[dict]]] = []
+        fetch_started = time.perf_counter()
+        fetched_by_status = client.get_statuses(list(self._config.anilist.selected_statuses))
+        logger.info(
+            "Fetched AniList selections in %.2fs (%d statuses)",
+            time.perf_counter() - fetch_started,
+            len(self._config.anilist.selected_statuses),
+        )
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
-            fetch_started = time.perf_counter()
-            items = client.get_status(status_key)
+            items = fetched_by_status.get(status_key, [])
             logger.info(
-                "Fetched AniList %s in %.2fs (%d items)",
+                "Loaded AniList %s (%d items)",
                 _STATUS_LABELS.get(status_key, status_key),
-                time.perf_counter() - fetch_started,
                 len(items),
             )
             all_items_by_status.append((status_key, items))
@@ -997,18 +1003,32 @@ class SyncService:
             for item in items
             if item.get("anilist_id")
         })
-        if all_anilist_ids:
+        simkl_anime_enabled = bool(
+            self._config.simkl.selected_statuses.get("anime")
+            and "anime" in self._config.sync.media_types
+        )
+        if all_anilist_ids and simkl_anime_enabled:
+            prewarm_ids = all_anilist_ids[:_ANILIST_PREWARM_LIMIT]
             self._set_status("Pre-warming anime metadata cache")
             get_ctx = getattr(client, "_get_root_context", None)
             if callable(get_ctx):
                 with ThreadPoolExecutor(max_workers=4) as pool:
-                    futures = {pool.submit(get_ctx, aid): aid for aid in all_anilist_ids}
+                    futures = {pool.submit(get_ctx, aid): aid for aid in prewarm_ids}
                     for future in as_completed(futures):
                         try:
                             future.result()
                         except Exception as exc:
                             logger.debug("Cache warm failed for anilist_id=%s: %s", futures[future], exc)
-            logger.info("Pre-warmed anime chain cache for %d AniList IDs", len(all_anilist_ids))
+            logger.info(
+                "Pre-warmed anime chain cache for %d/%d AniList IDs",
+                len(prewarm_ids),
+                len(all_anilist_ids),
+            )
+        elif all_anilist_ids:
+            logger.info(
+                "Skipped AniList pre-warm for %d IDs because SIMKL anime sync is not enabled",
+                len(all_anilist_ids),
+            )
 
         for status_key, items in all_items_by_status:
             self._check_cancelled()

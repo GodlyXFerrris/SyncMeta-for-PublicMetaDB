@@ -118,6 +118,7 @@ class AniListClient:
     def __init__(self, config: AniListConfig):
         self._config = config
         self._session = self._build_session()
+        self._status_cache: dict[str, list[dict]] = {}
         # Point to the module-level shared caches so all instances benefit
         # from chain data already fetched by another user's sync.
         self._root_cache = _SHARED_ROOT_CACHE
@@ -197,12 +198,31 @@ class AniListClient:
         Synthetic statuses like COMPLETED_ONA / COMPLETED_MOVIE fetch the
         underlying base status and post-filter by AniList media format.
         """
-        if status in self._FORMAT_FILTER_MAP:
-            base_status, fmt = self._FORMAT_FILTER_MAP[status]
-            return self._fetch_list(base_status, format_filter=fmt)
-        return self._fetch_list(status)
+        return self.get_statuses([status]).get(status, [])
 
-    def _fetch_list(self, status: str, format_filter: str | None = None) -> list[dict]:
+    def get_statuses(self, statuses: list[str]) -> dict[str, list[dict]]:
+        """Fetch multiple AniList statuses while reusing base-status responses."""
+        results: dict[str, list[dict]] = {}
+        for status in statuses:
+            base_status, format_filter = self._base_status_and_filter(status)
+            base_items = self._fetch_base_status(base_status)
+            if format_filter:
+                results[status] = [item for item in base_items if item.get("anilist_format") == format_filter]
+            else:
+                results[status] = list(base_items)
+        return results
+
+    @classmethod
+    def _base_status_and_filter(cls, status: str) -> tuple[str, str | None]:
+        if status in cls._FORMAT_FILTER_MAP:
+            base_status, fmt = cls._FORMAT_FILTER_MAP[status]
+            return base_status, fmt
+        return status, None
+
+    def _fetch_base_status(self, status: str) -> list[dict]:
+        cached = self._status_cache.get(status)
+        if cached is not None:
+            return list(cached)
         data = self._query(_LIST_QUERY, {"userName": self._config.username, "status": status})
         if not data:
             return []
@@ -215,15 +235,13 @@ class AniListClient:
         for lst in collection.get("lists", []):
             for entry in lst.get("entries", []):
                 media = entry.get("media", {})
-                if format_filter and media.get("format") != format_filter:
-                    continue
                 normalized = self._normalize(media)
                 if normalized:
                     items.append(normalized)
 
-        label = f"{status}:{format_filter}" if format_filter else status
-        logger.info("AniList: fetched %d anime for status '%s'", len(items), label)
-        return items
+        self._status_cache[status] = list(items)
+        logger.info("AniList: fetched %d anime for status '%s'", len(items), status)
+        return list(items)
 
     def _normalize(self, media: dict) -> dict | None:
         if not media:
@@ -274,6 +292,7 @@ class AniListClient:
             "root_title": root_title,
             "anidb_id": None,
             "tvdb_id": None,
+            "anilist_format": fmt,
             "ids": ids,
             "status": None,
             "added_at": None,

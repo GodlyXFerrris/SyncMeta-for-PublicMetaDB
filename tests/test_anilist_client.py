@@ -104,6 +104,54 @@ class AniListClientTests(unittest.TestCase):
         self.assertEqual(context["root"]["id"], 140960)
         self.assertEqual(context["episode_offset"], 25)
 
+    def test_get_statuses_reuses_completed_fetch_for_filtered_statuses(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+        calls: list[str] = []
+
+        def fake_query(query, variables):
+            calls.append(str(variables["status"]))
+            return {
+                "MediaListCollection": {
+                    "lists": [
+                        {
+                            "entries": [
+                                {
+                                    "media": {
+                                        "id": 1,
+                                        "idMal": 11,
+                                        "title": {"english": "Movie OVA"},
+                                        "seasonYear": 2024,
+                                        "format": "OVA",
+                                        "episodes": 1,
+                                    }
+                                },
+                                {
+                                    "media": {
+                                        "id": 2,
+                                        "idMal": 22,
+                                        "title": {"english": "Movie ONA"},
+                                        "seasonYear": 2024,
+                                        "format": "ONA",
+                                        "episodes": 1,
+                                    }
+                                },
+                            ]
+                        }
+                    ]
+                }
+            }
+
+        client._query = fake_query
+
+        results = client.get_statuses(["COMPLETED_OVA", "COMPLETED_ONA", "COMPLETED"])
+
+        self.assertEqual(calls, ["COMPLETED"])
+        self.assertEqual(len(results["COMPLETED"]), 2)
+        self.assertEqual(len(results["COMPLETED_OVA"]), 1)
+        self.assertEqual(results["COMPLETED_OVA"][0]["anilist_format"], "OVA")
+        self.assertEqual(len(results["COMPLETED_ONA"]), 1)
+        self.assertEqual(results["COMPLETED_ONA"][0]["anilist_format"], "ONA")
+
     def test_query_returns_none_on_http_error(self) -> None:
         client = AniListClient(AniListConfig(username="tester"))
 
