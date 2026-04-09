@@ -79,6 +79,70 @@ def _normalize_activity_state(raw_state: dict | None) -> dict:
     }
 
 
+def _result_totals(rows: list[dict] | None) -> dict[str, int]:
+    totals = {
+        "lists": 0,
+        "fetched": 0,
+        "resolved": 0,
+        "added": 0,
+        "removed": 0,
+        "duplicates": 0,
+        "unresolved": 0,
+        "errors": 0,
+    }
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("list_name", "")).strip():
+            totals["lists"] += 1
+        totals["fetched"] += int(row.get("items_fetched") or 0)
+        totals["resolved"] += int(row.get("items_resolved") or 0)
+        totals["added"] += int(row.get("items_added") or 0)
+        totals["removed"] += int(row.get("items_removed") or 0)
+        totals["duplicates"] += int(row.get("items_skipped_duplicate") or 0)
+        totals["unresolved"] += int(row.get("items_skipped_unresolved") or 0)
+        totals["errors"] += int(row.get("error_count") or 0)
+    return totals
+
+
+def _configured_sources_for_profile(profile: dict) -> list[str]:
+    credentials = normalize_credentials(profile.get("credentials"))
+    options = normalize_profile_options(profile.get("options"))
+    sources: list[str] = []
+
+    if (
+        credentials["simkl"]["client_id"]
+        and credentials["simkl"]["access_token"]
+        and (
+            any(credentials["simkl"]["selected_statuses"].get(media_type) for media_type in ["shows", "movies", "anime"])
+            or options["activity_history_source"] == "simkl"
+        )
+    ):
+        sources.append("simkl")
+
+    if credentials["anilist"]["username"] and credentials["anilist"]["selected_statuses"]:
+        sources.append("anilist")
+
+    if (
+        credentials["trakt"]["client_id"]
+        and credentials["trakt"]["access_token"]
+        and (
+            credentials["trakt"]["sync_watchlist_movies"]
+            or credentials["trakt"]["sync_watchlist_shows"]
+            or credentials["trakt"]["sync_liked_lists"]
+            or credentials["trakt"]["selected_lists"]
+            or options["activity_history_source"] == "trakt"
+            or options["activity_resume_source"] == "trakt"
+        )
+    ):
+        sources.append("trakt")
+
+    if credentials["mdblist"]["api_key"] and credentials["mdblist"]["selected_lists"]:
+        sources.append("mdblist")
+
+    return sources
+
+
 class CredentialCipher:
     """Encrypts stored source credentials with a Fernet key."""
 
@@ -770,6 +834,102 @@ class ProfileStore:
         if include_credentials:
             result["credentials"] = public_credentials(profile.get("credentials", {}))
         return result
+
+    def get_site_stats(self) -> dict:
+        with self._lock:
+            now = utc_now()
+            cutoff_24h = now - timedelta(hours=24)
+            source_usage = {"simkl": 0, "anilist": 0, "trakt": 0, "mdblist": 0}
+            totals = {
+                "profiles": len(self._profiles),
+                "profiles_with_sync": 0,
+                "profiles_syncing_now": 0,
+                "managed_lists": 0,
+                "current_synced_lists": 0,
+                "sync_runs": 0,
+            }
+            current_totals = _result_totals([])
+            last_24h = {
+                "sync_runs": 0,
+                "dry_runs": 0,
+                "completed_runs": 0,
+                "failed_runs": 0,
+                "stopped_runs": 0,
+                "lists": 0,
+                "fetched": 0,
+                "resolved": 0,
+                "added": 0,
+                "removed": 0,
+                "duplicates": 0,
+                "unresolved": 0,
+                "errors": 0,
+            }
+            recent_runs: list[dict] = []
+
+            for profile in self._profiles.values():
+                if profile.get("last_sync"):
+                    totals["profiles_with_sync"] += 1
+                if profile.get("sync_running"):
+                    totals["profiles_syncing_now"] += 1
+                totals["managed_lists"] += len(profile.get("managed_lists", []))
+                profile_current_totals = _result_totals(profile.get("last_results", []))
+                totals["current_synced_lists"] += profile_current_totals["lists"]
+                for key in ["fetched", "resolved", "added", "removed", "duplicates", "unresolved", "errors"]:
+                    current_totals[key] += profile_current_totals[key]
+
+                for source in _configured_sources_for_profile(profile):
+                    source_usage[source] += 1
+
+                for entry in profile.get("history", []):
+                    if not isinstance(entry, dict):
+                        continue
+                    totals["sync_runs"] += 1
+                    timestamp = parse_iso_datetime(entry.get("timestamp"))
+                    entry_totals = _result_totals(entry.get("results", []))
+                    status = str(entry.get("status", "completed") or "completed").strip().lower()
+                    recent_runs.append({
+                        "timestamp": entry.get("timestamp"),
+                        "profile_id_short": str(profile.get("profile_id", ""))[:8],
+                        "status": status,
+                        "dry_run": bool(entry.get("dry_run", False)),
+                        "lists": entry_totals["lists"],
+                        "added": entry_totals["added"],
+                        "removed": entry_totals["removed"],
+                        "errors": entry_totals["errors"] + (1 if entry.get("error_message") else 0),
+                        "unresolved": entry_totals["unresolved"],
+                    })
+                    if timestamp is None or timestamp < cutoff_24h:
+                        continue
+                    last_24h["sync_runs"] += 1
+                    last_24h["dry_runs"] += int(bool(entry.get("dry_run", False)))
+                    if status == "failed":
+                        last_24h["failed_runs"] += 1
+                    elif status == "stopped":
+                        last_24h["stopped_runs"] += 1
+                    else:
+                        last_24h["completed_runs"] += 1
+                    for key in ["lists", "fetched", "resolved", "added", "removed", "duplicates", "unresolved", "errors"]:
+                        last_24h[key] += entry_totals[key]
+                    if entry.get("error_message"):
+                        last_24h["errors"] += 1
+
+            recent_runs.sort(key=lambda item: str(item.get("timestamp", "")), reverse=True)
+
+            return {
+                "generated_at": now.isoformat(),
+                "totals": {
+                    **totals,
+                    "current_items_fetched": current_totals["fetched"],
+                    "current_items_resolved": current_totals["resolved"],
+                    "current_items_added": current_totals["added"],
+                    "current_items_removed": current_totals["removed"],
+                    "current_items_unresolved": current_totals["unresolved"],
+                    "current_errors": current_totals["errors"],
+                },
+                "last_24h": last_24h,
+                "source_usage": source_usage,
+                "recent_runs": recent_runs[:20],
+            }
 
     def create_profile(self, password: str, credentials: dict, options: dict) -> dict:
         if not password:

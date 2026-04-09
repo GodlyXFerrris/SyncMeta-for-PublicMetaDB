@@ -783,6 +783,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/api/site/stats", methods=["GET"])
+def api_site_stats():
+    return jsonify(_profile_store.get_site_stats())
+
+
 @app.route("/access", methods=["GET", "POST"])
 def access():
     if not SITE_ACCESS_PASSWORD:

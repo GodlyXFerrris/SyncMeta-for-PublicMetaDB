@@ -135,6 +135,7 @@
       </a>
       <div class="nav-links">
         <button class="nav-link" data-nav="dashboard" style="display:none">Dashboard</button>
+        <button class="nav-link" data-nav="stats" style="display:none">Stats</button>
         <button class="nav-link" data-nav="settings" style="display:none">Settings</button>
         <a class="nav-external" href="https://github.com/Febsho/SyncMeta-for-PublicMetaDB" target="_blank" rel="noopener">GitHub</a>
       </div>
@@ -196,6 +197,22 @@
         <div class="panel">
           <div class="panel-header">Sync History</div>
           <div id="history-body"><div class="empty">No history yet.</div></div>
+        </div>
+      </div>
+
+      <div id="view-stats" style="display:none">
+        <div class="cards" id="site-stats-cards"></div>
+        <div class="panel">
+          <div class="panel-header"><span>Source Adoption</span><span id="site-stats-time" class="history-time"></span></div>
+          <div id="site-stats-sources"><div class="empty">Loading site stats…</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">Last 24 Hours</div>
+          <div id="site-stats-window"><div class="empty">Loading site stats…</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">Recent Combined Runs</div>
+          <div id="site-stats-runs"><div class="empty">Loading site stats…</div></div>
         </div>
       </div>
 
@@ -517,11 +534,13 @@
     let sessionProfileId = '';
     let secretState = emptySecretState();
     let lastDashboardProfile = null;
+    let lastSiteStats = null;
     let currentResultsPage = 1;
     let pendingDeleteListName = '';
     let deletingManagedListName = '';
     let pendingClearWatchHistory = false;
     let clearingWatchHistory = false;
+    let siteStatsPolling = null;
 
     function el(id) { return document.getElementById(id); }
 
@@ -1013,6 +1032,7 @@
       el('app').classList.add('active');
       document.querySelectorAll('.nav-link').forEach(link => { link.style.display = ''; });
       localStorage.setItem(ENTERED_KEY, '1');
+      fetchSiteStats();
       switchView(targetView);
     }
 
@@ -1021,6 +1041,10 @@
       el('app').classList.remove('active');
       document.querySelectorAll('.nav-link').forEach(link => { link.style.display = 'none'; });
       localStorage.removeItem(ENTERED_KEY);
+      if (siteStatsPolling) {
+        clearInterval(siteStatsPolling);
+        siteStatsPolling = null;
+      }
     }
 
     function switchView(name) {
@@ -1028,7 +1052,12 @@
         link.classList.toggle('active', link.dataset.nav === name);
       });
       el('view-dashboard').style.display = name === 'dashboard' ? 'block' : 'none';
+      el('view-stats').style.display = name === 'stats' ? 'block' : 'none';
       el('view-settings').style.display = name === 'settings' ? 'block' : 'none';
+      if (name === 'stats') fetchSiteStats();
+      if (!siteStatsPolling) {
+        siteStatsPolling = setInterval(fetchSiteStats, 30000);
+      }
     }
 
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -1041,6 +1070,15 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
+      let data = {};
+      try {
+        data = await response.json();
+      } catch {}
+      return { ok: response.ok, status: response.status, data: data };
+    }
+
+    async function apiGet(url) {
+      const response = await fetch(url, { method: 'GET' });
       let data = {};
       try {
         data = await response.json();
@@ -1082,6 +1120,70 @@
       const node = document.createElement('div');
       node.textContent = value;
       return node.innerHTML;
+    }
+
+    function renderSiteStats(stats) {
+      lastSiteStats = stats || null;
+      if (!stats) {
+        el('site-stats-cards').innerHTML = `
+          <div class="card"><div class="card-label">Profiles</div><div class="card-value">0</div><div class="card-sub">No data</div></div>
+          <div class="card"><div class="card-label">Current Lists</div><div class="card-value">0</div><div class="card-sub">0 managed</div></div>
+          <div class="card"><div class="card-label">Sync Runs</div><div class="card-value">0</div><div class="card-sub">All time</div></div>
+          <div class="card"><div class="card-label">Added (24h)</div><div class="card-value">0</div><div class="card-sub">Waiting for activity</div></div>
+        `;
+        el('site-stats-time').textContent = '';
+        el('site-stats-sources').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
+        el('site-stats-window').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
+        el('site-stats-runs').innerHTML = '<div class="empty">Site stats are unavailable.</div>';
+        return;
+      }
+
+      const totals = stats.totals || {};
+      const sourceUsage = stats.source_usage || {};
+      const last24h = stats.last_24h || {};
+      const recentRuns = Array.isArray(stats.recent_runs) ? stats.recent_runs : [];
+
+      el('site-stats-cards').innerHTML = `
+        <div class="card"><div class="card-label">Profiles</div><div class="card-value">${totals.profiles || 0}</div><div class="card-sub">${totals.profiles_with_sync || 0} with at least one completed sync</div></div>
+        <div class="card"><div class="card-label">Current Lists</div><div class="card-value">${totals.current_synced_lists || 0}</div><div class="card-sub">${totals.managed_lists || 0} managed across all users</div></div>
+        <div class="card"><div class="card-label">Sync Runs</div><div class="card-value">${totals.sync_runs || 0}</div><div class="card-sub">${totals.profiles_syncing_now || 0} running right now</div></div>
+        <div class="card"><div class="card-label">Added (24h)</div><div class="card-value" style="color:${(last24h.added || 0) > 0 ? 'var(--green)' : 'var(--z100)'}">${last24h.added || 0}</div><div class="card-sub">${last24h.removed || 0} removed in the same window</div></div>
+      `;
+      el('site-stats-time').textContent = stats.generated_at ? `Updated ${timeAgo(stats.generated_at)}` : '';
+      el('site-stats-sources').innerHTML = `<div class="table-scroll"><table><thead><tr><th>Source</th><th class="num">Profiles Using It</th><th class="num">Share</th></tr></thead><tbody>${[
+        ['SIMKL', sourceUsage.simkl || 0],
+        ['AniList', sourceUsage.anilist || 0],
+        ['Trakt', sourceUsage.trakt || 0],
+        ['MDBList', sourceUsage.mdblist || 0],
+      ].map(([label, count]) => `<tr><td>${label}</td><td class="num">${count}</td><td class="num">${(totals.profiles || 0) ? Math.round((count / totals.profiles) * 100) : 0}%</td></tr>`).join('')}</tbody></table></div>`;
+      el('site-stats-window').innerHTML = `<div class="table-scroll"><table><thead><tr><th>Metric</th><th class="num">Last 24h</th></tr></thead><tbody>
+        <tr><td>Sync runs</td><td class="num">${last24h.sync_runs || 0}</td></tr>
+        <tr><td>Lists processed</td><td class="num">${last24h.lists || 0}</td></tr>
+        <tr><td>Items fetched</td><td class="num">${last24h.fetched || 0}</td></tr>
+        <tr><td>Items resolved</td><td class="num">${last24h.resolved || 0}</td></tr>
+        <tr><td>Items added</td><td class="num c-green">${last24h.added || 0}</td></tr>
+        <tr><td>Items removed</td><td class="num c-red">${last24h.removed || 0}</td></tr>
+        <tr><td>Unresolved</td><td class="num ${(last24h.unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${last24h.unresolved || 0}</td></tr>
+        <tr><td>Errors</td><td class="num ${(last24h.errors || 0) > 0 ? 'c-red' : 'c-dim'}">${last24h.errors || 0}</td></tr>
+      </tbody></table></div>`;
+      if (!recentRuns.length) {
+        el('site-stats-runs').innerHTML = '<div class="empty">No completed or attempted sync runs recorded yet.</div>';
+      } else {
+        el('site-stats-runs').innerHTML = `<div class="table-scroll"><table><thead><tr><th>When</th><th>Profile</th><th>Status</th><th class="num">Lists</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Unresolved</th><th class="num">Errors</th></tr></thead><tbody>${recentRuns.map(run => `<tr><td>${run.timestamp ? esc(new Date(run.timestamp).toLocaleString()) : ''}</td><td class="mono">${esc(run.profile_id_short || '')}</td><td>${esc(run.status || 'completed')}${run.dry_run ? ' <span class="c-dim">dry run</span>' : ''}</td><td class="num">${run.lists || 0}</td><td class="num ${(run.added || 0) > 0 ? 'c-green' : 'c-dim'}">${run.added || 0}</td><td class="num ${(run.removed || 0) > 0 ? 'c-red' : 'c-dim'}">${run.removed || 0}</td><td class="num ${(run.unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${run.unresolved || 0}</td><td class="num ${(run.errors || 0) > 0 ? 'c-red' : 'c-dim'}">${run.errors || 0}</td></tr>`).join('')}</tbody></table></div>`;
+      }
+    }
+
+    async function fetchSiteStats() {
+      try {
+        const result = await apiGet('/api/site/stats');
+        if (result.ok) {
+          renderSiteStats(result.data);
+        } else if (!lastSiteStats) {
+          renderSiteStats(null);
+        }
+      } catch {
+        if (!lastSiteStats) renderSiteStats(null);
+      }
     }
 
     function showToast(message, isError, isSuccess) {
