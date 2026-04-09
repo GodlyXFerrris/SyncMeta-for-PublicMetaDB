@@ -24,6 +24,34 @@ class AniListClientTests(unittest.TestCase):
         self.assertIsNone(normalized["root_anilist_id"])
         self.assertIsNone(normalized["root_mal_id"])
 
+    def test_normalize_single_episode_ona_as_movie(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+
+        normalized = client._normalize({
+            "id": 21783,
+            "idMal": 31387,
+            "title": {"english": "Star Fox Zero: The Battle Begins"},
+            "seasonYear": 2016,
+            "format": "ONA",
+            "episodes": 1,
+        })
+
+        self.assertEqual(normalized["media_type"], "movie")
+
+    def test_normalize_multi_episode_ona_stays_tv(self) -> None:
+        client = AniListClient(AniListConfig(username="tester"))
+
+        normalized = client._normalize({
+            "id": 99999,
+            "idMal": 99999,
+            "title": {"english": "Example Episodic ONA"},
+            "seasonYear": 2026,
+            "format": "ONA",
+            "episodes": 6,
+        })
+
+        self.assertEqual(normalized["media_type"], "tv")
+
     def test_root_context_computes_episode_offset_from_prequels(self) -> None:
         client = AniListClient(AniListConfig(username="tester"))
 

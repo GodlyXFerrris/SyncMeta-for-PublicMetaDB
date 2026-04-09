@@ -243,7 +243,21 @@ class AniListClient:
         root_title = None
 
         fmt = str(media.get("format") or "").strip().upper()
-        media_type = "movie" if fmt == "MOVIE" else "tv"
+        try:
+            episodes = int(media.get("episodes") or 0)
+        except (TypeError, ValueError):
+            episodes = 0
+
+        # AniList ONA/OVA/SPECIAL entries are mixed: some are episodic series,
+        # others are effectively standalone films that PMDB indexes as movies.
+        # Treat single-episode entries as movies so PMDB community mappings can
+        # hit the correct target for cases like Star Fox Zero.
+        if fmt == "MOVIE":
+            media_type = "movie"
+        elif fmt in {"ONA", "OVA", "SPECIAL"} and episodes == 1:
+            media_type = "movie"
+        else:
+            media_type = "tv"
 
         return {
             "title": title,
