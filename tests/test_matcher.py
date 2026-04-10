@@ -14,6 +14,12 @@ class StubPMDBClient:
         return None
 
 
+class DetailedStubPMDBClient(StubPMDBClient):
+    def lookup_by_external_id_detailed(self, id_type: str, id_value: str, media_type: str) -> dict:
+        self.calls.append((id_type, id_value, media_type))
+        return {"tmdb_id": None, "status": "lookup_unavailable"}
+
+
 class ItemMatcherTests(unittest.TestCase):
     def test_falls_back_to_root_series_ids(self) -> None:
         matcher = ItemMatcher(StubPMDBClient())
@@ -62,6 +68,35 @@ class ItemMatcherTests(unittest.TestCase):
 
         self.assertEqual(tmdb_id, 777)
         self.assertEqual(client.calls[0], ("anilist", "12345", "tv"))
+
+    def test_resolve_match_reports_missing_ids(self) -> None:
+        matcher = ItemMatcher(StubPMDBClient())
+
+        result = matcher.resolve_match({
+            "title": "No IDs Anime",
+            "year": 2026,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "ids": {},
+        })
+
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.unresolved_reason, "missing_ids")
+
+    def test_resolve_match_reports_lookup_unavailable(self) -> None:
+        matcher = ItemMatcher(DetailedStubPMDBClient())
+
+        result = matcher.resolve_match({
+            "title": "Unavailable Mapping Anime",
+            "year": 2026,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "12345",
+            "ids": {"anilist": "12345"},
+        })
+
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.unresolved_reason, "lookup_unavailable")
 
 
 if __name__ == "__main__":

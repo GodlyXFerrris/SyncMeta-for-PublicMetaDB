@@ -1,6 +1,7 @@
 import unittest
 
 from src.config import AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
+from src.matcher import MatchResult
 from src.sync_service import SyncCancelled, SyncService
 
 
@@ -56,6 +57,7 @@ class StubPMDBClient:
         self.watched: list[dict] = []
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
+        self.list_item_reads = 0
 
     def get_or_create_list(self, name: str, description: str, is_public: bool = False) -> dict:
         self.created_lists.append({
@@ -65,6 +67,7 @@ class StubPMDBClient:
         return {"id": "pmdb-active", "name": name}
 
     def get_list_items(self, list_id: str) -> list[dict]:
+        self.list_item_reads += 1
         return []
 
     def add_item_to_list(self, list_id: str, tmdb_id: int, media_type: str) -> None:
@@ -135,6 +138,16 @@ class StubPMDBClient:
         self.deleted_watched.append(watched_id)
         self.watched = [item for item in self.watched if str(item.get("id", "")) != watched_id]
         return True
+
+    def stats_snapshot(self) -> dict[str, int]:
+        return {
+            "mapping_lookup_hits": 0,
+            "mapping_lookup_misses": 0,
+            "mapping_lookup_auth_soft_misses": 0,
+            "mapping_lookup_errors": 0,
+            "list_write_successes": len(self.created_lists) + len(self.added_items),
+            "list_write_failures": 0,
+        }
 
 
 class StubTraktClient:
@@ -275,6 +288,16 @@ class SyncServiceTests(unittest.TestCase):
             for event in progress_events
         ))
 
+    def test_pmdb_list_items_are_cached_per_run(self) -> None:
+        service, pmdb = self.build_service(delete_disabled_lists=False)
+
+        items_first = service._get_cached_list_items("pmdb-active")
+        items_second = service._get_cached_list_items("pmdb-active")
+
+        self.assertEqual(items_first, [])
+        self.assertEqual(items_second, [])
+        self.assertEqual(pmdb.list_item_reads, 1)
+
     def test_deletes_disabled_managed_lists_when_enabled(self) -> None:
         service, pmdb = self.build_service(delete_disabled_lists=True)
 
@@ -357,6 +380,47 @@ class SyncServiceTests(unittest.TestCase):
         self.assertIn(("imdb", "tt22248376"), contributed)
         self.assertIn(("trakt", "12345"), contributed)
         self.assertEqual(len(contributed), len(pmdb.created_mappings))
+
+    def test_sync_list_tracks_unresolved_reasons_and_phase_metrics(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"shows": ["watching"], "movies": [], "anime": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["shows"]),
+            )
+        )
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class DiagnosticMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 2, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                if item["title"] == "Resolvable":
+                    return MatchResult(tmdb_id=111, resolution_kind="external_mapping")
+                return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="missing_ids")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return self.resolve_match(item).tmdb_id
+
+        service._matcher = DiagnosticMatcher()
+
+        stats = service._sync_list(
+            [
+                {"title": "Resolvable", "media_type": "tv"},
+                {"title": "Missing", "media_type": "tv"},
+            ],
+            "Watching - Series",
+            "Auto-synced testing list",
+        )
+
+        self.assertEqual(stats.match_breakdown["external_mapping"], 1)
+        self.assertEqual(stats.unresolved_reason_counts["missing_ids"], 1)
+        self.assertIn("resolve_seconds", stats.phase_timings)
+        self.assertIn("pmdb_read_seconds", stats.phase_timings)
+        self.assertIn("pmdb_write_seconds", stats.phase_timings)
+        self.assertIn("list_write_successes", stats.pmdb_metrics)
 
     def test_can_cancel_before_sync_work_starts(self) -> None:
         service, _ = self.build_service(delete_disabled_lists=False)

@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -18,6 +19,16 @@ _CANCEL_POLL_INTERVAL = 0.25
 # Rate limit: 300 requests per 10 seconds
 RATE_LIMIT_MAX = 280  # Leave some headroom
 RATE_LIMIT_WINDOW = 10.0
+
+
+@dataclass
+class PublicMetaDBStats:
+    mapping_lookup_hits: int = 0
+    mapping_lookup_misses: int = 0
+    mapping_lookup_auth_soft_misses: int = 0
+    mapping_lookup_errors: int = 0
+    list_write_successes: int = 0
+    list_write_failures: int = 0
 
 
 class RateLimiter:
@@ -68,6 +79,8 @@ class PublicMetaDBClient:
         self._lists_by_name: dict[str, dict] | None = None
         self._cancel_requested_callback = cancel_requested_callback
         self._mapping_auth_warning_logged = False
+        self._stats = PublicMetaDBStats()
+        self._stats_lock = threading.Lock()
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:
@@ -80,6 +93,14 @@ class PublicMetaDBClient:
             raise
         except Exception:
             logger.debug("Cancel callback failed", exc_info=True)
+
+    def stats_snapshot(self) -> dict[str, int]:
+        with self._stats_lock:
+            return vars(self._stats).copy()
+
+    def _record_stat(self, field_name: str, delta: int = 1) -> None:
+        with self._stats_lock:
+            setattr(self._stats, field_name, int(getattr(self._stats, field_name, 0)) + delta)
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -328,8 +349,8 @@ class PublicMetaDBClient:
 
     # ── Mapping lookups ────────────────────────────────────────────
 
-    def lookup_by_external_id(self, id_type: str, id_value: str, media_type: str) -> int | None:
-        """Resolve an external ID (imdb, mal, anidb, tvdb, etc.) to a TMDB ID."""
+    def lookup_by_external_id_detailed(self, id_type: str, id_value: str, media_type: str) -> dict:
+        """Resolve an external ID to a TMDB ID with a richer status code."""
         try:
             resp = self._get("/api/external/mappings/lookup", params={
                 "id_type": id_type,
@@ -337,20 +358,33 @@ class PublicMetaDBClient:
                 "media_type": media_type,
             })
             if resp and resp.get("results"):
-                return resp["results"][0].get("tmdb_id")
+                self._record_stat("mapping_lookup_hits")
+                return {
+                    "tmdb_id": resp["results"][0].get("tmdb_id"),
+                    "status": "hit",
+                }
+            self._record_stat("mapping_lookup_misses")
+            return {"tmdb_id": None, "status": "miss"}
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
-                return None
+                self._record_stat("mapping_lookup_misses")
+                return {"tmdb_id": None, "status": "miss"}
             if e.response is not None and e.response.status_code == 401:
+                self._record_stat("mapping_lookup_auth_soft_misses")
                 if not self._mapping_auth_warning_logged:
                     logger.warning(
                         "PMDB mapping lookup returned 401 Unauthorized; "
                         "treating external-ID lookup as unavailable for this sync run"
                     )
                     self._mapping_auth_warning_logged = True
-                return None
+                return {"tmdb_id": None, "status": "lookup_unavailable"}
+            self._record_stat("mapping_lookup_errors")
             raise
-        return None
+
+    def lookup_by_external_id(self, id_type: str, id_value: str, media_type: str) -> int | None:
+        """Resolve an external ID (imdb, mal, anidb, tvdb, etc.) to a TMDB ID."""
+        detail = self.lookup_by_external_id_detailed(id_type, id_value, media_type)
+        return detail.get("tmdb_id")
 
     def create_id_mapping(
         self,
@@ -457,10 +491,12 @@ class PublicMetaDBClient:
         })
         if resp and resp.get("success"):
             logger.info("Created list '%s' (id=%s)", name, resp["item"]["id"])
+            self._record_stat("list_write_successes")
             with self._lists_lock:
                 if self._lists_by_name is not None:
                     self._lists_by_name[str(name).strip()] = resp["item"]
             return resp["item"]
+        self._record_stat("list_write_failures")
         raise RuntimeError(f"Failed to create list '{name}': {resp}")
 
     def get_or_create_list(self, name: str, description: str = "", is_public: bool = False) -> dict:
@@ -515,11 +551,18 @@ class PublicMetaDBClient:
         })
         if resp and resp.get("success"):
             logger.debug("Added tmdb_id=%s (%s) to list %s", tmdb_id, media_type, list_id)
+            self._record_stat("list_write_successes")
             return resp.get("item")
         logger.warning("Failed to add tmdb_id=%s to list %s: %s", tmdb_id, list_id, resp)
+        self._record_stat("list_write_failures")
         return None
 
     def remove_item_from_list(self, list_id: str, item_id: str) -> None:
         """Remove an item from a list by its list-item ID."""
-        self._delete(f"/api/external/lists/{list_id}/items/{item_id}")
+        try:
+            self._delete(f"/api/external/lists/{list_id}/items/{item_id}")
+            self._record_stat("list_write_successes")
+        except Exception:
+            self._record_stat("list_write_failures")
+            raise
         logger.debug("Removed item %s from list %s", item_id, list_id)
