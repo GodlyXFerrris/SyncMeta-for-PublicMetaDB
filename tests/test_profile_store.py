@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.profile_store import MIN_SYNC_INTERVAL_SECONDS, MIN_WATCHED_HISTORY_INTERVAL_SECONDS, ProfileStore
@@ -82,6 +83,19 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertEqual(loaded["credentials"]["anilist"]["selected_statuses"], ["CURRENT", "COMPLETED"])
         self.assertEqual(loaded["credentials"]["mdblist"]["selected_lists"][0]["id"], 11)
         self.assertIsNotNone(loaded["next_sync_at"])
+        self.assertGreater(
+            datetime.fromisoformat(loaded["next_sync_at"]),
+            datetime.now(timezone.utc),
+        )
+
+    def test_create_profile_does_not_become_due_immediately(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+
+        due = self.store.claim_due_profiles()
+
+        self.assertEqual(due, [])
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+        self.assertFalse(loaded["sync_running"])
 
     def test_rejects_interval_below_minimum(self) -> None:
         with self.assertRaises(ValueError):
@@ -153,6 +167,21 @@ class ProfileStoreTests(unittest.TestCase):
 
         self.assertEqual(len(updated["sync_live_results"]), 1)
         self.assertEqual(updated["sync_live_results"][0]["items_fetched"], 20)
+
+    def test_enabling_auto_sync_schedules_next_run_in_future(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "auto_sync": False,
+        })
+
+        updated = self.store.update_profile(created["profile_id"], "secret", {}, self.options)
+
+        self.assertIsNotNone(updated["next_sync_at"])
+        self.assertGreater(
+            datetime.fromisoformat(updated["next_sync_at"]),
+            datetime.now(timezone.utc),
+        )
+        self.assertEqual(self.store.claim_due_profiles(), [])
 
     def test_sync_success_persists_managed_lists(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)

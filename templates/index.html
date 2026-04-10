@@ -2009,6 +2009,10 @@
         renderEmptyDashboard('Save a profile in Settings to enable background sync.');
         return;
       }
+      if (profile.profile_id) {
+        sessionProfileId = profile.profile_id;
+        el('profile-id').value = profile.profile_id;
+      }
       lastDashboardProfile = profile;
       if (!resultsHaveList(profile.last_results || [], pendingDeleteListName)) {
         pendingDeleteListName = '';
@@ -2481,6 +2485,10 @@
           return;
         }
         const profile = result.data.profile;
+        if (profile && profile.profile_id) {
+          sessionProfileId = profile.profile_id;
+          el('profile-id').value = profile.profile_id;
+        }
         if (includeCredentials) {
           populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         }
@@ -2735,16 +2743,19 @@
     resumeTraktDeviceState();
 
     if (localStorage.getItem(ENTERED_KEY)) enterApp('settings');
-    fetchStatus(true).then(profile => {
+    fetchStatus(false).then(profile => {
       if (profile) {
         if (localStorage.getItem(ENTERED_KEY)) switchView('dashboard');
         fetchUnresolved();
-        if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
-          refreshTraktLists(true);
-        }
-        if (profile.credentials && profile.credentials.mdblist && profile.credentials.mdblist.api_key_saved) {
-          refreshMdbListLists(true);
-        }
+        fetchStatus(true).then(fullProfile => {
+          const hydratedProfile = fullProfile || profile;
+          if (hydratedProfile && hydratedProfile.credentials && hydratedProfile.credentials.trakt && hydratedProfile.credentials.trakt.client_id && hydratedProfile.credentials.trakt.access_token_saved) {
+            refreshTraktLists(true);
+          }
+          if (hydratedProfile && hydratedProfile.credentials && hydratedProfile.credentials.mdblist && hydratedProfile.credentials.mdblist.api_key_saved) {
+            refreshMdbListLists(true);
+          }
+        });
       } else {
         renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
       }

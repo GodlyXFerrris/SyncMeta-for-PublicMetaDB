@@ -940,12 +940,16 @@ class ProfileStore:
             "sync_started_at": None,
             "sync_updated_at": None,
             "history": [],
-            "next_sync_at": now if normalized_options["auto_sync"] else None,
+            "next_sync_at": (
+                self._next_sync_iso(normalized_options["interval_seconds"])
+                if normalized_options["auto_sync"]
+                else None
+            ),
             "last_history_sync": None,
             "next_history_sync_at": None,
             "last_resume_sync": None,
             "next_resume_sync_at": (
-                now
+                self._next_resume_sync_iso()
                 if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off"
                 else None
             ),
@@ -990,7 +994,11 @@ class ProfileStore:
             if not profile["sync_running"]:
                 profile["sync_live_results"] = []
                 if normalized_options["auto_sync"]:
-                    profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
+                    profile["next_sync_at"] = (
+                        previous_next_sync_at
+                        if previous_auto_sync and previous_next_sync_at
+                        else self._next_sync_iso(normalized_options["interval_seconds"])
+                    )
                 else:
                     profile["next_sync_at"] = None
                 profile["next_history_sync_at"] = None
@@ -998,7 +1006,7 @@ class ProfileStore:
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
                         if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
-                        else utc_now_iso()
+                        else self._next_resume_sync_iso()
                     )
                 else:
                     profile["next_resume_sync_at"] = None
@@ -1022,7 +1030,11 @@ class ProfileStore:
             if not profile["sync_running"]:
                 profile["sync_live_results"] = []
                 if normalized_options["auto_sync"]:
-                    profile["next_sync_at"] = previous_next_sync_at if previous_auto_sync and previous_next_sync_at else utc_now_iso()
+                    profile["next_sync_at"] = (
+                        previous_next_sync_at
+                        if previous_auto_sync and previous_next_sync_at
+                        else self._next_sync_iso(normalized_options["interval_seconds"])
+                    )
                 else:
                     profile["next_sync_at"] = None
                 profile["next_history_sync_at"] = None
@@ -1030,7 +1042,7 @@ class ProfileStore:
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
                         if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
-                        else utc_now_iso()
+                        else self._next_resume_sync_iso()
                     )
                 else:
                     profile["next_resume_sync_at"] = None
