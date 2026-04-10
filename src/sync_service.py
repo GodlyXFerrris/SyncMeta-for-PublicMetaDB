@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 _LIST_WRITE_WORKERS = 4
 _ACTIVITY_WRITE_WORKERS = 4
+_MAPPING_WRITE_WORKERS = 4
 _ANILIST_PREWARM_LIMIT = 200
 _FUTURE_POLL_INTERVAL = 0.25
 
@@ -1450,6 +1451,7 @@ class SyncService:
         pmdb_stats_snapshot = getattr(self._pmdb, "stats_snapshot", None)
         pmdb_stats_before = pmdb_stats_snapshot() if callable(pmdb_stats_snapshot) else {}
         resolved: list[dict] = []
+        pending_mapping_contributions: list[tuple[int, str, str, str]] = []
         for item in source_items:
             self._check_cancelled()
             match_result = self._matcher.resolve_match(item)
@@ -1467,7 +1469,7 @@ class SyncService:
                     not self._config.sync.dry_run
                     and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
                 ):
-                    self._contribute_id_mapping(item, tmdb_id)
+                    pending_mapping_contributions.extend(self._collect_id_mapping_contributions(item, tmdb_id))
             else:
                 stats.items_skipped_unresolved += 1
                 unresolved_reason = match_result.unresolved_reason or "not_found"
@@ -1583,6 +1585,11 @@ class SyncService:
             self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
             self._publish_progress([stats], force=True)
+
+        if pending_mapping_contributions:
+            self._set_status(f"Contributing PMDB mappings for {actual_list_name}")
+            self._flush_id_mapping_contributions(pending_mapping_contributions)
+
         pmdb_write_elapsed = time.perf_counter() - pmdb_write_started
         stats.phase_timings["pmdb_write_seconds"] = round(pmdb_write_elapsed, 4)
         pmdb_stats_after = pmdb_stats_snapshot() if callable(pmdb_stats_snapshot) else {}
@@ -1666,17 +1673,12 @@ class SyncService:
         finally:
             pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
-    def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
-        """Silently contribute a resolved external ID mapping back to PMDB.
-
-        When we resolve a TMDB ID, we submit every trustworthy external ID we
-        have so future PMDB lookups can short-circuit much earlier, especially
-        for anime where AniList/MAL/root-series IDs are often better keys than
-        the sequel-specific TMDB IDs returned by source APIs.
-        """
+    def _collect_id_mapping_contributions(self, item: dict, tmdb_id: int) -> list[tuple[int, str, str, str]]:
+        """Return unique PMDB mapping contributions to send after resolving."""
         media_type = item.get("media_type", "")
         ids = item.get("ids") or {}
         seen: set[tuple[str, str]] = set()
+        contributions: list[tuple[int, str, str, str]] = []
         for id_type, item_key in [
             ("mal", "mal_id"),
             ("anilist", "anilist_id"),
@@ -1704,14 +1706,48 @@ class SyncService:
                 if contribution_key in self._contributed_mapping_keys:
                     continue
                 self._contributed_mapping_keys.add(contribution_key)
-            try:
-                self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
-                logger.debug(
-                    "Contributed %s mapping: %s=%s → tmdb_id=%d",
-                    media_type, id_type, id_value, tmdb_id,
+            contributions.append(contribution_key)
+        return contributions
+
+    def _flush_id_mapping_contributions(self, contributions: list[tuple[int, str, str, str]]) -> None:
+        if not contributions:
+            return
+        pool = ThreadPoolExecutor(max_workers=min(_MAPPING_WRITE_WORKERS, len(contributions)))
+        shutdown_wait = True
+        try:
+            futures = {
+                pool.submit(self._pmdb.create_id_mapping, tmdb_id, media_type, id_type, id_value): (
+                    tmdb_id,
+                    media_type,
+                    id_type,
+                    id_value,
                 )
-            except Exception as exc:
-                logger.debug("Failed to contribute ID mapping: %s", exc)
+                for tmdb_id, media_type, id_type, id_value in contributions
+            }
+            for future in self._iter_completed_futures(futures):
+                tmdb_id, media_type, id_type, id_value = futures[future]
+                try:
+                    future.result()
+                    logger.debug(
+                        "Contributed %s mapping: %s=%s -> tmdb_id=%d",
+                        media_type,
+                        id_type,
+                        id_value,
+                        tmdb_id,
+                    )
+                except SyncCancelled:
+                    raise
+                except Exception as exc:
+                    logger.debug("Failed to contribute ID mapping: %s", exc)
+        except SyncCancelled:
+            shutdown_wait = False
+            raise
+        finally:
+            pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
+
+    def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
+        """Compatibility wrapper for one-off activity/resume backfills."""
+        self._flush_id_mapping_contributions(self._collect_id_mapping_contributions(item, tmdb_id))
 
     def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
         return (
