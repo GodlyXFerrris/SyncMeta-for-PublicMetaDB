@@ -5,6 +5,8 @@ import threading
 import time
 from dataclasses import dataclass
 
+import requests
+
 from .publicmetadb_client import PublicMetaDBClient
 
 logger = logging.getLogger(__name__)
@@ -227,12 +229,26 @@ class ItemMatcher:
             self._stats["not_found_failures"] += 1
 
     def _lookup_external_mapping(self, id_type: str, ext_id: str, media_type: str) -> tuple[int | None, str]:
-        detailed_lookup = getattr(self._pmdb, "lookup_by_external_id_detailed", None)
-        if callable(detailed_lookup):
-            detail = detailed_lookup(id_type, ext_id, media_type) or {}
-            return detail.get("tmdb_id"), str(detail.get("status") or "miss")
-        tmdb_id = self._pmdb.lookup_by_external_id(id_type, ext_id, media_type)
-        return tmdb_id, "hit" if tmdb_id else "miss"
+        try:
+            detailed_lookup = getattr(self._pmdb, "lookup_by_external_id_detailed", None)
+            if callable(detailed_lookup):
+                detail = detailed_lookup(id_type, ext_id, media_type) or {}
+                return detail.get("tmdb_id"), str(detail.get("status") or "miss")
+            tmdb_id = self._pmdb.lookup_by_external_id(id_type, ext_id, media_type)
+            return tmdb_id, "hit" if tmdb_id else "miss"
+        except requests.HTTPError as exc:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            if status_code in {401, 403}:
+                logger.warning(
+                    "PMDB mapping lookup failed for %s=%s (%s) with %s; treating mapping lookup as unavailable",
+                    id_type,
+                    ext_id,
+                    media_type,
+                    status_code,
+                )
+                return None, "lookup_unavailable"
+            raise
 
     def _try_resolve(self, item: dict) -> MatchResult:
         title = item.get("title", "Unknown")
