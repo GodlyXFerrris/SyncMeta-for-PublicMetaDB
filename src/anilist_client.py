@@ -1,8 +1,12 @@
 """AniList GraphQL API client for fetching user anime lists."""
 
+import atexit
+import json
 import logging
+import os
 import threading
 import time
+from pathlib import Path
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -18,8 +22,16 @@ logger = logging.getLogger(__name__)
 # This avoids re-fetching the same chain data per user.
 _SHARED_ROOT_CACHE: dict[int, dict | None] = {}
 _SHARED_ROOT_CONTEXT_CACHE: dict[int, dict | None] = {}
+_SHARED_ROOT_CONTEXT_CACHED_AT: dict[int, int] = {}
 _SHARED_ROOT_INFLIGHT: dict[int, threading.Event] = {}
 _SHARED_CACHE_LOCK = threading.Lock()
+_PERSISTED_CACHE_LOADED = False
+_PERSISTED_CACHE_DIRTY = False
+_PERSISTED_CACHE_LAST_SAVE = 0.0
+
+_ROOT_CACHE_TTL_SECONDS = 30 * 24 * 3600
+_PERSISTED_CACHE_VERSION = 1
+_PERSISTED_CACHE_MIN_SAVE_INTERVAL = 2.0
 
 GRAPHQL_URL = "https://graphql.anilist.co"
 REQUEST_TIMEOUT = (5, 12)
@@ -114,10 +126,145 @@ _ROOT_FORMAT_PRIORITY = {
 }
 
 
+def _persistent_cache_path() -> Path:
+    configured = os.getenv("ANILIST_ROOT_CACHE_FILE", "").strip()
+    if configured:
+        return Path(configured)
+    return Path("data") / "anilist_root_cache.json"
+
+
+def _mark_persistent_cache_dirty() -> None:
+    global _PERSISTED_CACHE_DIRTY
+    _PERSISTED_CACHE_DIRTY = True
+
+
+def _serialize_cache_entry(context: dict | None, cached_at: int) -> dict:
+    return {
+        "context": context,
+        "cached_at": cached_at,
+    }
+
+
+def _load_persistent_root_cache() -> None:
+    global _PERSISTED_CACHE_LOADED
+    if _PERSISTED_CACHE_LOADED:
+        return
+    with _SHARED_CACHE_LOCK:
+        if _PERSISTED_CACHE_LOADED:
+            return
+        path = _persistent_cache_path()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            _PERSISTED_CACHE_LOADED = True
+            return
+        except Exception:
+            logger.warning("Failed to load AniList root cache from %s", path, exc_info=True)
+            _PERSISTED_CACHE_LOADED = True
+            return
+
+        if not isinstance(payload, dict) or payload.get("version") != _PERSISTED_CACHE_VERSION:
+            _PERSISTED_CACHE_LOADED = True
+            return
+
+        entries = payload.get("entries")
+        if not isinstance(entries, dict):
+            _PERSISTED_CACHE_LOADED = True
+            return
+
+        now = int(time.time())
+        cutoff = now - _ROOT_CACHE_TTL_SECONDS
+        expired = False
+        loaded = 0
+        for raw_media_id, raw_entry in entries.items():
+            try:
+                media_id = int(raw_media_id)
+            except (TypeError, ValueError):
+                expired = True
+                continue
+            if not isinstance(raw_entry, dict):
+                expired = True
+                continue
+            cached_at = raw_entry.get("cached_at")
+            context = raw_entry.get("context")
+            try:
+                cached_at_int = int(cached_at)
+            except (TypeError, ValueError):
+                expired = True
+                continue
+            if cached_at_int < cutoff:
+                expired = True
+                continue
+            if context is not None and not isinstance(context, dict):
+                expired = True
+                continue
+            _SHARED_ROOT_CONTEXT_CACHE[media_id] = context
+            _SHARED_ROOT_CONTEXT_CACHED_AT[media_id] = cached_at_int
+            root = (context or {}).get("root") if isinstance(context, dict) else None
+            _SHARED_ROOT_CACHE[media_id] = root if isinstance(root, dict) else root
+            loaded += 1
+
+        _PERSISTED_CACHE_LOADED = True
+        if expired:
+            _mark_persistent_cache_dirty()
+        logger.info("Loaded %d persisted AniList root cache entries", loaded)
+
+
+def _save_persistent_root_cache(force: bool = False) -> None:
+    global _PERSISTED_CACHE_DIRTY, _PERSISTED_CACHE_LAST_SAVE
+    if not _PERSISTED_CACHE_LOADED:
+        return
+    now_monotonic = time.monotonic()
+    if not force and (not _PERSISTED_CACHE_DIRTY or now_monotonic - _PERSISTED_CACHE_LAST_SAVE < _PERSISTED_CACHE_MIN_SAVE_INTERVAL):
+        return
+
+    with _SHARED_CACHE_LOCK:
+        if not force and (not _PERSISTED_CACHE_DIRTY or now_monotonic - _PERSISTED_CACHE_LAST_SAVE < _PERSISTED_CACHE_MIN_SAVE_INTERVAL):
+            return
+        now = int(time.time())
+        entries = {}
+        for media_id, context in _SHARED_ROOT_CONTEXT_CACHE.items():
+            cached_at = int(_SHARED_ROOT_CONTEXT_CACHED_AT.get(int(media_id), now))
+            if context is not None and not isinstance(context, dict):
+                continue
+            entries[str(int(media_id))] = _serialize_cache_entry(context, cached_at)
+        path = _persistent_cache_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_suffix(path.suffix + ".tmp")
+            tmp_path.write_text(json.dumps({
+                "version": _PERSISTED_CACHE_VERSION,
+                "saved_at": now,
+                "ttl_seconds": _ROOT_CACHE_TTL_SECONDS,
+                "entries": entries,
+            }, indent=2, sort_keys=True), encoding="utf-8")
+            tmp_path.replace(path)
+            _PERSISTED_CACHE_DIRTY = False
+            _PERSISTED_CACHE_LAST_SAVE = now_monotonic
+        except Exception:
+            logger.warning("Failed to save AniList root cache to %s", path, exc_info=True)
+
+
+def _reset_persistent_root_cache_state() -> None:
+    global _PERSISTED_CACHE_LOADED, _PERSISTED_CACHE_DIRTY, _PERSISTED_CACHE_LAST_SAVE
+    with _SHARED_CACHE_LOCK:
+        _SHARED_ROOT_CACHE.clear()
+        _SHARED_ROOT_CONTEXT_CACHE.clear()
+        _SHARED_ROOT_CONTEXT_CACHED_AT.clear()
+        _SHARED_ROOT_INFLIGHT.clear()
+        _PERSISTED_CACHE_LOADED = False
+        _PERSISTED_CACHE_DIRTY = False
+        _PERSISTED_CACHE_LAST_SAVE = 0.0
+
+
+atexit.register(_save_persistent_root_cache, True)
+
+
 class AniListClient:
     """Client for the AniList GraphQL API (public, no auth required for public lists)."""
 
     def __init__(self, config: AniListConfig, cancel_requested_callback=None):
+        _load_persistent_root_cache()
         self._config = config
         self._session = self._build_session()
         self._status_cache: dict[str, list[dict]] = {}
@@ -344,6 +491,7 @@ class AniListClient:
                 root = self._root_cache[media_id]
                 context = {"root": root, "episode_offset": 0}
                 self._root_context_cache[media_id] = context
+                _SHARED_ROOT_CONTEXT_CACHED_AT[media_id] = int(time.time())
                 return context
             in_flight = _SHARED_ROOT_INFLIGHT.get(media_id)
             if in_flight is None:
@@ -385,18 +533,23 @@ class AniListClient:
                 candidate_id = candidate.get("id")
                 if candidate_id:
                     self._root_cache[int(candidate_id)] = root
+                    _SHARED_ROOT_CONTEXT_CACHED_AT[int(candidate_id)] = int(time.time())
                     self._root_context_cache[int(candidate_id)] = context_by_id.get(
                         int(candidate_id),
                         {"root": root, "episode_offset": 0},
                     )
             self._root_cache[media_id] = root
+            _SHARED_ROOT_CONTEXT_CACHED_AT[media_id] = int(time.time())
             self._root_context_cache[media_id] = context_by_id.get(
                 media_id,
                 {"root": root, "episode_offset": 0},
             )
+            _mark_persistent_cache_dirty()
             _SHARED_ROOT_INFLIGHT.pop(media_id, None)
             in_flight.set()
-            return self._root_context_cache[media_id]
+            context = self._root_context_cache[media_id]
+        _save_persistent_root_cache()
+        return context
 
     def _fetch_root_chain(self, media_id: int) -> list[dict]:
         seen: set[int] = set()
