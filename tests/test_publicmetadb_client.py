@@ -1,5 +1,7 @@
 import unittest
 
+import requests
+
 from src.config import PublicMetaDBConfig
 from src.publicmetadb_client import PublicMetaDBClient
 
@@ -95,6 +97,22 @@ class PublicMetaDBClientTests(unittest.TestCase):
         self.assertEqual(deleted_count, 5)
         self.assertEqual(deleted_ids, ["w1", "w2", "w3", "w4", "w5"])
         self.assertEqual(call_count["value"], 4)
+
+    def test_lookup_by_external_id_treats_401_as_unavailable(self) -> None:
+        client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+
+        class _Response:
+            status_code = 401
+
+        def fake_get(path: str, params: dict | None = None):
+            response = _Response()
+            raise requests.HTTPError("401 unauthorized", response=response)
+
+        client._get = fake_get  # type: ignore[method-assign]
+
+        result = client.lookup_by_external_id("imdb", "tt8336214", "tv")
+
+        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

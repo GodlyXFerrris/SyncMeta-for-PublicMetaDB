@@ -67,6 +67,7 @@ class PublicMetaDBClient:
         self._lists_lock = threading.Lock()
         self._lists_by_name: dict[str, dict] | None = None
         self._cancel_requested_callback = cancel_requested_callback
+        self._mapping_auth_warning_logged = False
 
     def _check_cancelled(self) -> None:
         if not self._cancel_requested_callback:
@@ -339,6 +340,14 @@ class PublicMetaDBClient:
                 return resp["results"][0].get("tmdb_id")
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
+                return None
+            if e.response is not None and e.response.status_code == 401:
+                if not self._mapping_auth_warning_logged:
+                    logger.warning(
+                        "PMDB mapping lookup returned 401 Unauthorized; "
+                        "treating external-ID lookup as unavailable for this sync run"
+                    )
+                    self._mapping_auth_warning_logged = True
                 return None
             raise
         return None
