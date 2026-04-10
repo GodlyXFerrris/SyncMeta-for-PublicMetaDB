@@ -267,17 +267,18 @@ class ItemMatcher:
                     self._record_match_stat(root_result)
                 return root_result
 
-        tmdb_raw = item.get("tmdb_id")
-        if tmdb_raw:
-            try:
-                tmdb_id = int(tmdb_raw)
-                logger.debug("Resolved '%s' via direct TMDB ID: %d", title, tmdb_id)
-                result = MatchResult(tmdb_id=tmdb_id, resolution_kind="direct_tmdb")
-                with self._lock:
-                    self._record_match_stat(result)
-                return result
-            except (ValueError, TypeError):
-                pass
+        if not is_anime:
+            tmdb_raw = item.get("tmdb_id")
+            if tmdb_raw:
+                try:
+                    tmdb_id = int(tmdb_raw)
+                    logger.debug("Resolved '%s' via direct TMDB ID: %d", title, tmdb_id)
+                    result = MatchResult(tmdb_id=tmdb_id, resolution_kind="direct_tmdb")
+                    with self._lock:
+                        self._record_match_stat(result)
+                    return result
+                except (ValueError, TypeError):
+                    pass
 
         ids = item.get("ids", {})
         had_lookup_candidate = False
@@ -327,6 +328,24 @@ class ItemMatcher:
                     self._record_match_stat(root_result)
                 return root_result
 
+        tmdb_raw = item.get("tmdb_id")
+        if tmdb_raw:
+            if not is_anime or self._can_accept_anime_direct_tmdb(item):
+                try:
+                    tmdb_id = int(tmdb_raw)
+                    logger.debug("Resolved '%s' via direct TMDB ID: %d", title, tmdb_id)
+                    result = MatchResult(tmdb_id=tmdb_id, resolution_kind="direct_tmdb")
+                    with self._lock:
+                        self._record_match_stat(result)
+                    return result
+                except (ValueError, TypeError):
+                    pass
+            elif had_lookup_candidate:
+                logger.warning(
+                    "Skipping direct TMDB fallback for SIMKL anime '%s' because its AniList/MAL identity could not be verified",
+                    title,
+                )
+
         if not had_lookup_candidate and not item.get("tmdb_id"):
             result = MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="missing_ids")
             with self._lock:
@@ -347,6 +366,34 @@ class ItemMatcher:
         with self._lock:
             self._record_match_stat(result)
         return result
+
+    def _can_accept_anime_direct_tmdb(self, item: dict) -> bool:
+        """Allow raw TMDB only after the anime identity is verified."""
+        if item.get("simkl_type") != "anime":
+            return True
+        if not self._anime_root_resolver:
+            return bool(item.get("anilist_id") or item.get("mal_id"))
+
+        anilist_id: int | None = None
+        mal_id: int | None = None
+        try:
+            if item.get("anilist_id"):
+                anilist_id = int(item["anilist_id"])
+            if item.get("mal_id"):
+                mal_id = int(item["mal_id"])
+        except (TypeError, ValueError):
+            return False
+
+        if not anilist_id and not mal_id:
+            return False
+
+        try:
+            root_context = self._anime_root_resolver(anilist_id, mal_id)
+        except Exception:
+            logger.debug("Anime identity verification failed", exc_info=True)
+            return False
+        root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
+        return isinstance(root, dict) and bool(root.get("id"))
 
     @staticmethod
     def _lookup_chain_for_item(item: dict) -> list[tuple[str, str]]:

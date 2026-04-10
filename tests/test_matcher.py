@@ -98,6 +98,78 @@ class ItemMatcherTests(unittest.TestCase):
         self.assertIsNone(result.tmdb_id)
         self.assertEqual(result.unresolved_reason, "lookup_unavailable")
 
+    def test_simkl_anime_prefers_external_mapping_before_direct_tmdb(self) -> None:
+        client = StubPMDBClient()
+
+        def fake_lookup(id_type: str, id_value: str, media_type: str) -> int | None:
+            client.calls.append((id_type, id_value, media_type))
+            if (id_type, id_value, media_type) == ("anilist", "12345", "tv"):
+                return 777
+            return None
+
+        client.lookup_by_external_id = fake_lookup  # type: ignore[method-assign]
+        matcher = ItemMatcher(
+            client,
+            anime_root_resolver=lambda anilist_id, mal_id: {
+                "root": {"id": anilist_id or 999, "idMal": mal_id},
+                "episode_offset": 0,
+            },
+        )
+
+        result = matcher.resolve_match({
+            "title": "Verified Anime",
+            "year": 2026,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "tmdb_id": "999999",
+            "anilist_id": "12345",
+            "ids": {"anilist": "12345"},
+        })
+
+        self.assertEqual(result.tmdb_id, 777)
+        self.assertEqual(result.resolution_kind, "external_mapping")
+
+    def test_simkl_anime_rejects_unverified_direct_tmdb(self) -> None:
+        matcher = ItemMatcher(
+            StubPMDBClient(),
+            anime_root_resolver=lambda anilist_id, mal_id: None,
+        )
+
+        result = matcher.resolve_match({
+            "title": "Suspicious Anime Entry",
+            "year": 2026,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "tmdb_id": "1575337",
+            "anilist_id": "12345",
+            "ids": {"anilist": "12345"},
+        })
+
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.unresolved_reason, "not_found")
+
+    def test_simkl_anime_allows_verified_direct_tmdb_after_mapping_miss(self) -> None:
+        matcher = ItemMatcher(
+            StubPMDBClient(),
+            anime_root_resolver=lambda anilist_id, mal_id: {
+                "root": {"id": anilist_id or 999, "idMal": mal_id},
+                "episode_offset": 0,
+            },
+        )
+
+        result = matcher.resolve_match({
+            "title": "Verified Direct TMDB Anime",
+            "year": 2026,
+            "media_type": "movie",
+            "simkl_type": "anime",
+            "tmdb_id": "1575337",
+            "anilist_id": "999",
+            "ids": {"anilist": "999"},
+        })
+
+        self.assertEqual(result.tmdb_id, 1575337)
+        self.assertEqual(result.resolution_kind, "direct_tmdb")
+
 
 if __name__ == "__main__":
     unittest.main()
