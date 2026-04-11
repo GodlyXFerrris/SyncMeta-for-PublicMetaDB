@@ -295,21 +295,25 @@ class SimklClient:
                 return None
 
             # Determine PMDB media type.
-            # Priority: SIMKL anime_type > SIMKL generic type > Fribb type > episode-count heuristic.
-            effective_type = anime_type or generic_type
-            if not effective_type and fribb_entry:
-                effective_type = str(fribb_entry.get("type", "")).strip().lower()
-            if effective_type in {"movie", "film"}:
+            # Determine media type. Fribb is authoritative for "Movie" —
+            # SIMKL sometimes misclassifies anime movies as TV/special, so if
+            # Fribb says Movie we always trust it over SIMKL's own type fields.
+            fribb_type = str(fribb_entry.get("type", "")).strip().lower() if fribb_entry else ""
+            if fribb_type == "movie":
                 pmdb_type = "movie"
-            elif effective_type:
-                pmdb_type = "tv"
             else:
-                ep_count = media.get("total_episodes") or media.get("episodes")
-                try:
-                    ep_count = int(ep_count)
-                except (TypeError, ValueError):
-                    ep_count = None
-                pmdb_type = "movie" if ep_count == 1 else "tv"
+                effective_type = anime_type or generic_type or fribb_type
+                if effective_type in {"movie", "film"}:
+                    pmdb_type = "movie"
+                elif effective_type:
+                    pmdb_type = "tv"
+                else:
+                    ep_count = media.get("total_episodes") or media.get("episodes")
+                    try:
+                        ep_count = int(ep_count)
+                    except (TypeError, ValueError):
+                        ep_count = None
+                    pmdb_type = "movie" if ep_count == 1 else "tv"
         else:
             pmdb_type = "tv"  # Shows map to "tv"
 
