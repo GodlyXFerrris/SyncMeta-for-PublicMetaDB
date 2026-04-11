@@ -1059,7 +1059,7 @@ def api_trakt_device_check():
                 "message": payload.get("error_description") or payload.get("message") or payload.get("error") or "",
             }), 400
 
-        logger.exception("Failed to check Trakt device auth")
+        logger.warning("Trakt device auth check failed (error=%s): %s", error_code or "unknown", exc)
         return _json_error(f"Failed to check Trakt auth: {exc}", 400)
 
     if data.get("access_token"):
