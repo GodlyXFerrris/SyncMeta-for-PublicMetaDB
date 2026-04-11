@@ -588,6 +588,9 @@
     let pendingClearWatchHistory = false;
     let clearingWatchHistory = false;
     let siteStatsPolling = null;
+    let draftSaveTimer = null;
+    let credentialsHydrated = false;
+    let lastStatusRenderKey = '';
 
     function el(id) { return document.getElementById(id); }
 
@@ -918,6 +921,14 @@
       saveJson(OPTIONS_KEY, gatherOptions());
     }
 
+    function scheduleSaveDraft() {
+      if (draftSaveTimer) clearTimeout(draftSaveTimer);
+      draftSaveTimer = setTimeout(() => {
+        draftSaveTimer = null;
+        saveDraft();
+      }, 250);
+    }
+
     function populateForm(creds, opts, profileMeta) {
       const meta = profileMeta || {};
       const simkl = creds && creds.simkl ? creds.simkl : {};
@@ -945,6 +956,7 @@
           api_key_saved: !!pmdb.api_key_saved,
         },
       };
+      credentialsHydrated = true;
 
       el('profile-id').value = meta.profile_id || '';
       el('profile-password').value = '';
@@ -1128,9 +1140,17 @@
       el('view-dashboard').style.display = name === 'dashboard' ? 'block' : 'none';
       el('view-stats').style.display = name === 'stats' ? 'block' : 'none';
       el('view-settings').style.display = name === 'settings' ? 'block' : 'none';
-      if (name === 'stats') fetchSiteStats();
-      if (!siteStatsPolling) {
-        siteStatsPolling = setInterval(fetchSiteStats, 30000);
+      if (name === 'stats') {
+        fetchSiteStats();
+        if (!siteStatsPolling) {
+          siteStatsPolling = setInterval(fetchSiteStats, 30000);
+        }
+      } else if (siteStatsPolling) {
+        clearInterval(siteStatsPolling);
+        siteStatsPolling = null;
+      }
+      if (name === 'settings' && sessionProfileId && !credentialsHydrated) {
+        fetchStatus(true);
       }
     }
 
@@ -2596,6 +2616,25 @@
         if (includeCredentials) {
           populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         }
+        const renderKey = JSON.stringify({
+          sync_running: !!profile.sync_running,
+          sync_status: profile.sync_status || '',
+          sync_updated_at: profile.sync_updated_at || '',
+          last_sync: profile.last_sync || '',
+          next_sync_at: profile.next_sync_at || '',
+          sync_error: profile.sync_error || '',
+          last_results: profile.last_results || [],
+          sync_live_results: profile.sync_live_results || [],
+          history: profile.history || [],
+          activity_results: profile.activity_results || {},
+          options: profile.options || {},
+          profile_id: profile.profile_id || '',
+          sync_cancel_requested: !!profile.sync_cancel_requested,
+        });
+        if (!includeCredentials && renderKey === lastStatusRenderKey) {
+          return profile;
+        }
+        lastStatusRenderKey = renderKey;
         renderDashboard(profile);
         return profile;
       } catch {
@@ -2753,6 +2792,8 @@
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
+      credentialsHydrated = false;
+      lastStatusRenderKey = '';
       showToast('Logged out.', false, true);
     }
 
@@ -2790,6 +2831,8 @@
         mdblist: { selected_lists: [] },
       }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
+      credentialsHydrated = false;
+      lastStatusRenderKey = '';
       showToast('Profile data deleted.', false, true);
     }
 
@@ -2843,6 +2886,7 @@
     });
     const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
     populateForm(draftCreds, draftOptions, {});
+    credentialsHydrated = false;
     resumeSimklPinState();
     resumeTraktDeviceState();
 
@@ -2851,15 +2895,6 @@
       if (profile) {
         if (localStorage.getItem(ENTERED_KEY)) switchView('dashboard');
         fetchUnresolved();
-        fetchStatus(true).then(fullProfile => {
-          const hydratedProfile = fullProfile || profile;
-          if (hydratedProfile && hydratedProfile.credentials && hydratedProfile.credentials.trakt && hydratedProfile.credentials.trakt.client_id && hydratedProfile.credentials.trakt.access_token_saved) {
-            refreshTraktLists(true);
-          }
-          if (hydratedProfile && hydratedProfile.credentials && hydratedProfile.credentials.mdblist && hydratedProfile.credentials.mdblist.api_key_saved) {
-            refreshMdbListLists(true);
-          }
-        });
       } else {
         renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
       }
@@ -2867,11 +2902,11 @@
 
     setInterval(fetchStatus, 30000);
     document.querySelectorAll('.form-section input').forEach(input => {
-      input.addEventListener('input', () => { updateDots(); saveDraft(); });
-      input.addEventListener('change', () => { updateDots(); saveDraft(); });
+      input.addEventListener('input', () => { updateDots(); scheduleSaveDraft(); });
+      input.addEventListener('change', () => { updateDots(); scheduleSaveDraft(); });
     });
     document.querySelectorAll('.form-section select').forEach(select => {
-      select.addEventListener('change', () => { renderActivityOptionVisibility(); updateDots(); saveDraft(); });
+      select.addEventListener('change', () => { renderActivityOptionVisibility(); updateDots(); scheduleSaveDraft(); });
     });
     el('trakt-discover-query').addEventListener('keydown', event => {
       if (event.key === 'Enter') {
