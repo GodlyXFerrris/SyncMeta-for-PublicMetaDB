@@ -866,8 +866,9 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        cursor = self._config.sync.trakt_history_cursor or None
-        items = self._trakt.get_watched_history(since=cursor)
+        # Always fetch full Trakt history — no cursor. Ensures re-watched or
+        # previously-removed episodes are picked up. PMDB mark_watched is idempotent.
+        items = self._trakt.get_watched_history(since=None)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -876,7 +877,7 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
-        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
+        stats.history_cursor = ""  # no cursor for Trakt
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
