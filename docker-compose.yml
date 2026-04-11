@@ -1,6 +1,7 @@
 services:
   syncmeta:
     image: ghcr.io/febsho/syncmeta:latest
+    pull_policy: always
     ports:
       - "8080:8080"
     restart: unless-stopped
