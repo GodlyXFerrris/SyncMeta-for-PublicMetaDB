@@ -12,6 +12,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .config import AniListConfig, SimklConfig
+from . import fribb_client as _fribb
 
 logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = (5, 12)
@@ -269,6 +270,20 @@ class SimklClient:
                     media.get("title", "Unknown"), media.get("year", ""),
                 )
                 return None
+
+            # Gate 3: verify MAL ID exists in Fribb anime-lists.
+            # Non-anime content (Popeye, Soccer Aid, etc.) may have a SIMKL-assigned
+            # MAL ID that doesn't correspond to a real anime entry in Fribb.
+            if mal_id and not anilist_id:
+                try:
+                    if _fribb.lookup_by_mal(int(mal_id)) is None:
+                        logger.debug(
+                            "Skipping SIMKL anime entry '%s' — MAL ID %s not in Fribb anime-lists",
+                            media.get("title", "Unknown"), mal_id,
+                        )
+                        return None
+                except (TypeError, ValueError):
+                    pass
 
             # Determine PMDB media type.
             # Check anime_type first, then fall back to SIMKL's generic "type"
