@@ -357,9 +357,13 @@
                 <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="600" step="1" value="43200" onblur="if(parseInt(this.value)<600||!this.value)this.value=600"><div class="hint">Minimum 600 seconds (10 min). Default 43200 (12h). The next automatic sync is scheduled from the end of the previous successful run.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>Sync SIMKL Plan to Watch → PMDB Watchlist</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Sync Trakt Watchlist → PMDB Watchlist</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>Sync AniList Planning → PMDB Watchlist</label></div>
+                <div class="form-row" style="margin-top:4px;margin-bottom:0">
+                  <label>PMDB Native Watchlist</label>
+                  <div class="hint" style="margin-top:0;margin-bottom:10px">Select which services contribute their "plan to watch" items to your PublicMetaDB native Watchlist. All enabled sources are merged into one watchlist on every list sync.</div>
+                  <div class="toggle-row" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>SIMKL — Plan to Watch</label></div>
+                  <div class="toggle-row" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Trakt — Watchlist</label></div>
+                  <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>AniList — Planning</label></div>
+                </div>
                 <div class="form-row">
                   <label>Watch History Source</label>
                   <select id="opt-activity-history-source">
