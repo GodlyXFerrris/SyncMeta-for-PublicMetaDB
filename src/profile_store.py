@@ -17,8 +17,8 @@ from .config import ANILIST_DEFAULT_SELECTED_STATUSES, SIMKL_DEFAULT_SELECTED_ST
 
 ALLOWED_MEDIA_TYPES = {"shows", "movies", "anime"}
 DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
-DEFAULT_SYNC_INTERVAL_SECONDS = 21600  # 6 hours
-MIN_SYNC_INTERVAL_SECONDS = 300
+DEFAULT_SYNC_INTERVAL_SECONDS = 43200  # 12 hours
+MIN_SYNC_INTERVAL_SECONDS = 600
 DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 600
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
@@ -474,7 +474,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         raise ValueError("Sync interval must be a whole number of seconds") from exc
 
     if interval_seconds < MIN_SYNC_INTERVAL_SECONDS:
-        raise ValueError(f"Sync interval must be at least {MIN_SYNC_INTERVAL_SECONDS} seconds")
+        interval_seconds = MIN_SYNC_INTERVAL_SECONDS
 
     watched_interval_raw = raw.get("trakt_watched_history_interval_seconds", DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS)
     try:
