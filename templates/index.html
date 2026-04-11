@@ -56,6 +56,17 @@
     .form-row input[type=text],.form-row input[type=password],.form-row input[type=number],.form-row select{width:100%;padding:9px 12px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z100);font-size:13px;font-family:inherit}
     .form-row input:focus,.form-row select:focus{outline:none;border-color:var(--z600)} .form-row input::placeholder{color:var(--z600)}
     .hint{font-size:11px;color:var(--z600);margin-top:4px}.hint a{color:var(--z400);text-decoration:none}.hint a:hover{color:var(--white)}
+    .guide-box{padding:16px 18px;border:1px solid var(--z800);border-radius:10px;background:linear-gradient(180deg,rgba(39,39,46,.38),rgba(10,10,11,.88));margin-bottom:16px}
+    .guide-title{font-size:13px;font-weight:800;color:var(--white);margin-bottom:8px}
+    .guide-list{display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--z400);line-height:1.5}
+    .guide-step{display:flex;gap:10px;align-items:flex-start}
+    .guide-step-num{width:20px;height:20px;border-radius:999px;background:var(--z900);border:1px solid var(--z700);color:var(--white);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .provider-guide{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:rgba(10,10,11,.45)}
+    .provider-guide-title{font-size:11px;text-transform:uppercase;letter-spacing:.45px;color:var(--z500);font-weight:700;margin-bottom:8px}
+    .provider-guide-list{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--z400);line-height:1.5}
+    .copy-row{display:flex;gap:8px;align-items:center}
+    .copy-row input[readonly]{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .mini-note{font-size:11px;color:var(--z500);margin-top:6px;line-height:1.45}
     .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}.toggle-row:last-child{margin-bottom:0}.toggle-row>label:last-child{margin-bottom:0;text-transform:none;font-size:13px;color:var(--z300);font-weight:400}
     .toggle{position:relative;width:36px;height:20px;flex-shrink:0}.toggle input{opacity:0;width:0;height:0}.toggle .slider{position:absolute;inset:0;background:var(--z800);border:1px solid var(--z700);border-radius:10px;cursor:pointer}.toggle .slider:before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--z500);border-radius:50%;transition:all .2s}.toggle input:checked + .slider{background:var(--accent2);border-color:var(--accent)}.toggle input:checked + .slider:before{transform:translateX(16px);background:var(--white)}
     .btn{padding:9px 18px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z300);font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.btn:hover{border-color:var(--z600);color:var(--z100)}.btn:disabled{opacity:.4;cursor:not-allowed}.btn-primary{background:var(--accent2);border-color:var(--accent2);color:var(--white);font-weight:600}.btn-primary:hover{background:var(--accent)}.btn-danger{background:rgba(127,29,29,.9);border-color:rgba(248,113,113,.35);color:var(--white);font-weight:700}.btn-danger:hover{background:rgba(153,27,27,.95);border-color:rgba(248,113,113,.55);color:var(--white)}.btn-sm{padding:6px 12px;font-size:12px}.btn-ghost{background:transparent;border-color:transparent;color:var(--z400)}.btn-ghost:hover{color:var(--red)}
@@ -216,16 +227,24 @@
         <div class="form-grid">
           <div class="form-section full">
             <h3>Profile</h3>
-            <p class="desc">Each profile gets its own UUID and password so the server can keep syncing in the background even when your browser is closed.</p>
+            <p class="desc">Each profile keeps its own saved tokens, list picks, sync history, and background schedule.</p>
+            <div class="guide-box">
+              <div class="guide-title">Quick Setup</div>
+              <div class="guide-list">
+                <div class="guide-step"><div class="guide-step-num">1</div><div>Enter profile password. Leave UUID empty first time. Click <strong>Save Profile</strong>.</div></div>
+                <div class="guide-step"><div class="guide-step-num">2</div><div>Add PublicMetaDB API key. Then connect any source you want: SIMKL, Trakt, AniList, MDBList.</div></div>
+                <div class="guide-step"><div class="guide-step-num">3</div><div>Choose lists/statuses below. Return dashboard. Click <strong>Sync Lists</strong>.</div></div>
+              </div>
+            </div>
             <div class="form-row">
               <label>Profile UUID</label>
               <input type="text" id="profile-id" class="mono" placeholder="Leave blank to create a new profile" autocomplete="off">
-              <div class="hint">Use this UUID plus your password to load the same profile on another device.</div>
+              <div class="hint">Use this UUID + password to open same profile on another browser or server.</div>
             </div>
             <div class="form-row">
               <label>Profile Password</label>
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
-              <div class="hint">Needed to create a profile or sign in on a new device. After that, this browser uses a secure server-side session.</div>
+              <div class="hint">Needed to save profile first time and sign back in later.</div>
             </div>
             <div class="actions-bar" style="margin-top:4px">
               <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
@@ -238,30 +257,46 @@
             <div class="settings-stack settings-stack-left">
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
-                <p class="desc">Destination for your synced lists.</p>
-                <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key</a></div></div>
+                <p class="desc">Destination. All synced lists and activity go here.</p>
+                <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get API key from PublicMetaDB</a></div></div>
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Connect AniList and choose which anime lists should sync into PublicMetaDB.</p>
-                <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty to sync anime from SIMKL</div></div>
+                <p class="desc">Use for anime list sync direct from AniList.</p>
+                <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty if anime should come only from SIMKL.</div></div>
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Load your MDBList account lists and choose which personal or public-style catalog lists should sync into PublicMetaDB.</p>
-                <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> to get your API key</div></div>
+                <p class="desc">Use for custom catalog lists from MDBList.</p>
+                <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> and copy API key from settings.</div></div>
               </div>
             </div>
             <div class="settings-stack">
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
-                <p class="desc">Connect SIMKL and choose exactly which movie, show, and anime statuses should sync.</p>
-                <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint"><a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">Create a SIMKL app</a> to get your Client ID. If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses PIN auth, so the redirect is not used directly.</div></div>
+                <p class="desc">Use for movies, shows, anime, watch history, and PIN auth.</p>
+                <div class="provider-guide">
+                  <div class="provider-guide-title">SIMKL App Setup</div>
+                  <div class="provider-guide-list">
+                    <div>1. Open <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">SIMKL Developer Settings</a>.</div>
+                    <div>2. Create app or open existing app.</div>
+                    <div>3. If SIMKL asks for <strong>Redirect URL</strong>, use site root URL below.</div>
+                  </div>
+                  <div class="form-row" style="margin-top:10px;margin-bottom:0">
+                    <label>SIMKL Redirect URL</label>
+                    <div class="copy-row">
+                      <input type="text" id="simkl-redirect-url" readonly value="">
+                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('simkl-redirect-url')">Copy</button>
+                    </div>
+                    <div class="mini-note">Standard value: current SyncMeta HTTPS root. Example: <span class="mono">https://syncmeta.example.com/</span></div>
+                  </div>
+                </div>
+                <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint">Paste SIMKL Client ID here.</div></div>
                 <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
                 <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
                 <div class="actions-bar" style="margin-top:0">
                   <button class="btn btn-sm" id="btn-simkl-auth" onclick="startSimklAuth()">Get SIMKL Token</button>
-                  <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if you do not have an access token yet.</span>
+                  <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if no token yet.</span>
                 </div>
                 <div class="auth-box hidden" id="simkl-auth-box">
                   <div class="actions-meta">SIMKL PIN</div>
@@ -270,21 +305,37 @@
                     <button class="btn btn-sm" type="button" onclick="copySimklCode()">Copy PIN</button>
                     <button class="btn btn-sm" type="button" onclick="openSimklVerification()">Open SIMKL</button>
                   </div>
-                  <div class="hint">If SIMKL does not auto-fill the code, paste this PIN into the SIMKL page manually.</div>
+                  <div class="hint">If SIMKL page does not auto-fill, paste PIN there by hand.</div>
                 </div>
               </div>
               <div class="form-section source-card">
                 <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Sync your Trakt watchlist, personal created lists, liked lists, and selected public Trakt lists into PublicMetaDB.</p>
+                <p class="desc">Use for watchlist, liked lists, personal lists, public lists, history, and device auth.</p>
                 <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
                 <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
-                <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL. SyncMeta uses device auth here, so the redirect is only a dashboard requirement.</div></div>
+                <div class="provider-guide">
+                  <div class="provider-guide-title">Trakt App Setup</div>
+                  <div class="provider-guide-list">
+                    <div>1. Open Trakt API app settings.</div>
+                    <div>2. Create app with <strong>Redirect URI</strong> set to site root URL below.</div>
+                    <div>3. Copy Client ID and Client Secret here. SyncMeta still uses device auth for login.</div>
+                  </div>
+                  <div class="form-row" style="margin-top:10px;margin-bottom:0">
+                    <label>Trakt Redirect URI</label>
+                    <div class="copy-row">
+                      <input type="text" id="trakt-redirect-url" readonly value="">
+                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('trakt-redirect-url')">Copy</button>
+                    </div>
+                    <div class="mini-note">Standard value: current SyncMeta HTTPS root. Example: <span class="mono">https://syncmeta.example.com/</span></div>
+                  </div>
+                </div>
+                <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">Paste Trakt Client ID here.</div></div>
                 <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
                 <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
                 <div class="form-row"><label>Refresh Token</label><input type="password" id="trakt-refresh-token" placeholder="Saved for future refresh support" autocomplete="off"></div>
                 <div class="actions-bar" style="margin-top:0">
                   <button class="btn btn-sm" id="btn-trakt-auth" onclick="startTraktAuth()">Connect Trakt</button>
-                  <span class="actions-meta" id="trakt-auth-status">Start Trakt device auth here if you do not have a token yet.</span>
+                  <span class="actions-meta" id="trakt-auth-status">Start device auth here if no token yet.</span>
                 </div>
                 <div class="auth-box hidden" id="trakt-auth-box">
                   <div class="actions-meta">Trakt Code</div>
@@ -293,7 +344,7 @@
                     <button class="btn btn-sm" type="button" onclick="copyTraktCode()">Copy Code</button>
                     <button class="btn btn-sm" type="button" onclick="openTraktVerification()">Open Trakt</button>
                   </div>
-                  <div class="hint">If Trakt does not auto-fill the code, paste this code into the Trakt activation page manually.</div>
+                  <div class="hint">If Trakt page does not auto-fill, paste code there by hand.</div>
                 </div>
               </div>
             </div>
@@ -539,6 +590,32 @@
     let siteStatsPolling = null;
 
     function el(id) { return document.getElementById(id); }
+
+    function currentSiteRoot() {
+      const origin = window.location.origin || '';
+      return origin ? `${origin}/` : '';
+    }
+
+    function refreshRedirectUrlHints() {
+      const value = currentSiteRoot();
+      const simklInput = el('simkl-redirect-url');
+      const traktInput = el('trakt-redirect-url');
+      if (simklInput) simklInput.value = value;
+      if (traktInput) traktInput.value = value;
+    }
+
+    async function copyRedirectUrl(inputId) {
+      const input = el(inputId);
+      if (!input || !input.value) return;
+      try {
+        await navigator.clipboard.writeText(input.value);
+        showToast('Copied redirect URL', true);
+      } catch {
+        input.select();
+        document.execCommand('copy');
+        showToast('Copied redirect URL', true);
+      }
+    }
 
     function emptySecretState() {
       return {
@@ -898,6 +975,7 @@
       mdblistLists = [];
       mdblistDiscoverLists = [];
       setSecretInputState('pmdb-api-key', 'pmdb', 'api_key_saved', 'pm-...');
+      refreshRedirectUrlHints();
       el('opt-auto-sync').checked = options.auto_sync !== false;
       el('opt-interval-seconds').value = options.interval_seconds || 1800;
       el('opt-remove-missing').checked = !!options.remove_missing;
@@ -1059,6 +1137,8 @@
     document.querySelectorAll('.nav-link').forEach(link => {
       link.addEventListener('click', () => switchView(link.dataset.nav));
     });
+
+    refreshRedirectUrlHints();
 
     async function apiPost(url, payload) {
       const response = await fetch(url, {
