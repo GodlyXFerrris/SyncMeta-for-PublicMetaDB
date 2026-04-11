@@ -316,7 +316,7 @@
                 <div class="provider-guide">
                   <div class="provider-guide-title">Trakt App Setup</div>
                   <div class="provider-guide-list">
-                    <div>1. Open Trakt API app settings.</div>
+                    <div>1. Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">Trakt API app settings</a>.</div>
                     <div>2. Create app with <strong>Redirect URI</strong> set to site root URL below.</div>
                     <div>3. Copy Client ID and Client Secret here. SyncMeta still uses device auth for login.</div>
                   </div>
@@ -354,7 +354,7 @@
             <div class="options-grid">
               <div class="options-col">
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
-                <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="300" step="1" value="1800"><div class="hint">Minimum 300 seconds. The next automatic sync is scheduled from the end of the previous successful run.</div></div>
+                <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="600" step="1" value="43200"><div class="hint">Minimum 600 seconds (10 min). Default 43200 (12h). The next automatic sync is scheduled from the end of the previous successful run.</div></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
                 <div class="form-row">
@@ -868,10 +868,10 @@
     }
 
     function gatherOptions() {
-      const intervalSeconds = parseInt(el('opt-interval-seconds').value || '1800', 10);
+      const intervalSeconds = Math.max(600, parseInt(el('opt-interval-seconds').value || '43200', 10));
       return {
         auto_sync: el('opt-auto-sync').checked,
-        interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 1800,
+        interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 43200,
         remove_missing: el('opt-remove-missing').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         activity_history_source: el('opt-activity-history-source').value,
@@ -989,7 +989,7 @@
       setSecretInputState('pmdb-api-key', 'pmdb', 'api_key_saved', 'pm-...');
       refreshRedirectUrlHints();
       el('opt-auto-sync').checked = options.auto_sync !== false;
-      el('opt-interval-seconds').value = options.interval_seconds || 1800;
+      el('opt-interval-seconds').value = Math.max(600, options.interval_seconds || 43200);
       el('opt-remove-missing').checked = !!options.remove_missing;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
@@ -2790,7 +2790,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
@@ -2829,7 +2829,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
@@ -2884,7 +2884,7 @@
       trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 1800, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
     populateForm(draftCreds, draftOptions, {});
     credentialsHydrated = false;
     resumeSimklPinState();
