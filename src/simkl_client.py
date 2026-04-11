@@ -627,6 +627,26 @@ class SimklClient:
             history.extend(self._get_show_history_for_status(media_key, status, since=since))
         return history
 
+    @staticmethod
+    def _fribb_confirms_anime(show: dict) -> bool:
+        """Return True if the show's MAL or AniList ID is present in Fribb."""
+        ids = show.get("ids", {}) or {}
+        anilist_id = ids.get("anilist")
+        mal_id = ids.get("mal")
+        if anilist_id:
+            try:
+                if _fribb.lookup_by_anilist(int(anilist_id)) is not None:
+                    return True
+            except (TypeError, ValueError):
+                pass
+        if mal_id:
+            try:
+                if _fribb.lookup_by_mal(int(mal_id)) is not None:
+                    return True
+            except (TypeError, ValueError):
+                pass
+        return False
+
     def _get_show_history_for_status(self, media_key: str, status: str, since: str | None = None) -> list[dict]:
         api_type = self._api_type(media_key)
         params = {"extended": "full", "episode_watched_at": "yes"}
@@ -654,6 +674,14 @@ class SimklClient:
         for entry in items:
             show = self._show_payload(entry)
             if not isinstance(show, dict):
+                continue
+            # Apply the same Fribb anime gate used for list sync — skip non-anime
+            # content (Soccer Aid, Popeye, etc.) that ended up in the anime history.
+            if media_key == "anime" and not self._fribb_confirms_anime(show):
+                logger.debug(
+                    "Skipping SIMKL anime history entry '%s' — not found in Fribb anime-lists",
+                    show.get("title", "Unknown"),
+                )
                 continue
             history.extend(self._extract_episode_history(entry, show, media_key))
         logger.info(
