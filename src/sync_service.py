@@ -289,25 +289,22 @@ class SyncService:
         all_items: list[dict] = []
 
         if self._config.sync.simkl_sync_to_pmdb_watchlist and self._config.simkl.access_token:
-            self._set_status("Fetching SIMKL items for PMDB watchlist")
+            self._set_status("Fetching SIMKL plan-to-watch for PMDB watchlist")
             for simkl_type in self._config.sync.media_types:
-                statuses = self._config.simkl.selected_statuses.get(simkl_type, [])
-                for status_key in statuses:
-                    self._check_cancelled()
-                    grouped = self._simkl.get_status(status_key, [simkl_type])
-                    all_items.extend(grouped.get(simkl_type, []))
+                self._check_cancelled()
+                grouped = self._simkl.get_status("plantowatch", [simkl_type])
+                all_items.extend(grouped.get(simkl_type, []))
 
         if self._config.sync.trakt_sync_to_pmdb_watchlist and self._config.trakt.enabled:
-            self._set_status("Fetching Trakt items for PMDB watchlist")
+            self._set_status("Fetching Trakt watchlist for PMDB watchlist")
             watchlist = self._trakt.get_watchlist() or []
             all_items.extend(watchlist)
 
         if self._config.sync.anilist_sync_to_pmdb_watchlist and self._config.anilist.enabled:
-            self._set_status("Fetching AniList items for PMDB watchlist")
-            for status_key in self._config.anilist.selected_statuses.get("anime", []):
-                self._check_cancelled()
-                items = self._anilist_root_client.get_status(status_key) or []
-                all_items.extend(items)
+            self._set_status("Fetching AniList planning for PMDB watchlist")
+            self._check_cancelled()
+            items = self._anilist_root_client.get_status("PLANNING") or []
+            all_items.extend(items)
 
         if not all_items:
             return None
