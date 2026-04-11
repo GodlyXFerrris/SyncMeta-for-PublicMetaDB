@@ -925,7 +925,7 @@ class ProfileStore:
         now = utc_now_iso()
         profile = {
             "profile_id": profile_id,
-            "password_hash": generate_password_hash(password),
+            "password_hash": generate_password_hash(password, method="pbkdf2:sha256", salt_length=16),
             "credentials": normalized_credentials,
             "options": normalized_options,
             "created_at": now,
