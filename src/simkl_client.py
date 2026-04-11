@@ -271,19 +271,29 @@ class SimklClient:
                 )
                 return None
 
-            # Gate 3: verify MAL ID exists in Fribb anime-lists.
-            # Non-anime content (Popeye, Soccer Aid, etc.) may have a SIMKL-assigned
-            # MAL ID that doesn't correspond to a real anime entry in Fribb.
-            if mal_id and not anilist_id:
+            # Gate 3: verify the entry exists in Fribb anime-lists.
+            # Non-anime content (Popeye, Soccer Aid, Radioresepsjonen, etc.) may
+            # have SIMKL-assigned MAL/AniList IDs that don't correspond to real
+            # anime entries. Check Fribb for whichever ID is present.
+            fribb_confirmed = False
+            if anilist_id:
                 try:
-                    if _fribb.lookup_by_mal(int(mal_id)) is None:
-                        logger.debug(
-                            "Skipping SIMKL anime entry '%s' — MAL ID %s not in Fribb anime-lists",
-                            media.get("title", "Unknown"), mal_id,
-                        )
-                        return None
+                    if _fribb.lookup_by_anilist(int(anilist_id)) is not None:
+                        fribb_confirmed = True
                 except (TypeError, ValueError):
                     pass
+            if not fribb_confirmed and mal_id:
+                try:
+                    if _fribb.lookup_by_mal(int(mal_id)) is not None:
+                        fribb_confirmed = True
+                except (TypeError, ValueError):
+                    pass
+            if not fribb_confirmed:
+                logger.debug(
+                    "Skipping SIMKL anime entry '%s' — not found in Fribb anime-lists (mal=%s anilist=%s)",
+                    media.get("title", "Unknown"), mal_id, anilist_id,
+                )
+                return None
 
             # Determine PMDB media type.
             # Check anime_type first, then fall back to SIMKL's generic "type"
