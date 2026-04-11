@@ -573,15 +573,16 @@ class ProfileStore:
         created_at = raw_profile.get("created_at") or utc_now_iso()
         options = normalize_profile_options(raw_profile.get("options"))
         next_sync_at = raw_profile.get("next_sync_at")
-        if options["auto_sync"] and not next_sync_at:
-            next_sync_at = utc_now_iso()
         if not options["auto_sync"]:
             next_sync_at = None
+        elif not next_sync_at or (parse_iso_datetime(next_sync_at) or utc_now()) <= utc_now():
+            # Missing or past-due: schedule from now + interval instead of firing immediately
+            next_sync_at = (utc_now() + timedelta(seconds=options["interval_seconds"])).isoformat()
         next_resume_sync_at = raw_profile.get("next_resume_sync_at")
-        if options["auto_sync"] and options["activity_resume_source"] != "off" and not next_resume_sync_at:
-            next_resume_sync_at = utc_now_iso()
         if not options["auto_sync"] or options["activity_resume_source"] == "off":
             next_resume_sync_at = None
+        elif not next_resume_sync_at or (parse_iso_datetime(next_resume_sync_at) or utc_now()) <= utc_now():
+            next_resume_sync_at = (utc_now() + timedelta(seconds=DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)).isoformat()
 
         return {
             "profile_id": profile_id,
