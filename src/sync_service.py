@@ -19,6 +19,7 @@ from .trakt_client import TraktClient
 logger = logging.getLogger(__name__)
 
 _LIST_WRITE_WORKERS = 4
+_LIST_RESOLVE_WORKERS = 6
 _ACTIVITY_WRITE_WORKERS = 4
 _MAPPING_WRITE_WORKERS = 4
 _ANILIST_PREWARM_LIMIT = 200
@@ -1468,32 +1469,47 @@ class SyncService:
         pmdb_stats_before = pmdb_stats_snapshot() if callable(pmdb_stats_snapshot) else {}
         resolved: list[dict] = []
         pending_mapping_contributions: list[tuple[int, str, str, str]] = []
-        for item in source_items:
-            self._check_cancelled()
-            match_result = self._matcher.resolve_match(item)
-            tmdb_id = match_result.tmdb_id
-            if tmdb_id is not None:
-                resolved.append({**item, "resolved_tmdb_id": tmdb_id})
-                stats.items_resolved += 1
-                stats.match_breakdown[match_result.resolution_kind] = (
-                    int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
-                )
-                # Feed PMDB's community mappings so future anime resolutions can
-                # short-circuit on AniList/MAL/root-series IDs. For non-anime,
-                # only contribute when we had to resolve without a direct TMDB ID.
-                if (
-                    not self._config.sync.dry_run
-                    and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
-                ):
-                    pending_mapping_contributions.extend(self._collect_id_mapping_contributions(item, tmdb_id))
-            else:
-                stats.items_skipped_unresolved += 1
-                unresolved_reason = match_result.unresolved_reason or "not_found"
-                stats.unresolved_reason_counts[unresolved_reason] = (
-                    int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
-                )
-                stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
-            self._publish_progress([stats])
+        resolve_pool = ThreadPoolExecutor(max_workers=min(_LIST_RESOLVE_WORKERS, len(source_items)))
+        resolve_futures = {
+            resolve_pool.submit(self._matcher.resolve_match, item): item
+            for item in source_items
+        }
+        try:
+            for future in self._iter_completed_futures(resolve_futures):
+                self._check_cancelled()
+                item = resolve_futures[future]
+                try:
+                    match_result = future.result()
+                except SyncCancelled:
+                    raise
+                except Exception:
+                    stats.items_skipped_unresolved += 1
+                    continue
+                tmdb_id = match_result.tmdb_id
+                if tmdb_id is not None:
+                    resolved.append({**item, "resolved_tmdb_id": tmdb_id})
+                    stats.items_resolved += 1
+                    stats.match_breakdown[match_result.resolution_kind] = (
+                        int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
+                    )
+                    if (
+                        not self._config.sync.dry_run
+                        and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+                    ):
+                        pending_mapping_contributions.extend(self._collect_id_mapping_contributions(item, tmdb_id))
+                else:
+                    stats.items_skipped_unresolved += 1
+                    unresolved_reason = match_result.unresolved_reason or "not_found"
+                    stats.unresolved_reason_counts[unresolved_reason] = (
+                        int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
+                    )
+                    stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
+                self._publish_progress([stats])
+        except SyncCancelled:
+            resolve_pool.shutdown(wait=False, cancel_futures=True)
+            raise
+        finally:
+            resolve_pool.shutdown(wait=False)
         resolve_elapsed = time.perf_counter() - resolve_started
         matcher_stats_after = (
             stats_snapshot() if callable(stats_snapshot) else {"lookups": 0, "cache_hits": 0, "failed_cache_hits": 0}
