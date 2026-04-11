@@ -561,8 +561,12 @@ class ProfileStore:
                     normalized_id = self._normalize_profile_id(profile_id)
                 except ValueError:
                     continue
-                profiles[normalized_id] = self._hydrate_profile(normalized_id, raw_profile)
+                hydrated = self._hydrate_profile(normalized_id, raw_profile)
+                profiles[normalized_id] = hydrated
                 if "credentials" in raw_profile and "credentials_encrypted" not in raw_profile:
+                    changed = True
+                # Persist rescheduled next_sync_at so restarts don't re-trigger immediately
+                if hydrated.get("next_sync_at") != raw_profile.get("next_sync_at"):
                     changed = True
 
             self._profiles = profiles
