@@ -1880,6 +1880,7 @@
         saveSimklPinState(state);
         setSimklAuthCode(pin.user_code);
         setSimklAuthStatus(`Approve code ${pin.user_code} on SIMKL. Waiting for confirmation...`, false);
+        try { await navigator.clipboard.writeText(pin.user_code); showToast(`Code ${pin.user_code} copied — opening SIMKL approval page.`, false, true); } catch {}
         window.open(buildSimklVerifyUrl(pin.verification_url, pin.user_code), '_blank', 'noopener');
         scheduleSimklPinCheck(1000);
       } catch {
@@ -1922,6 +1923,7 @@
         saveTraktDeviceState(state);
         setTraktAuthCode(data.user_code);
         setTraktAuthStatus(`Approve code ${data.user_code} on Trakt. Waiting for confirmation...`, false);
+        try { await navigator.clipboard.writeText(data.user_code); showToast(`Code ${data.user_code} copied — paste it on the Trakt page opening now.`, false, true); } catch {}
         window.open(data.verification_url || 'https://trakt.tv/activate', '_blank', 'noopener');
         scheduleTraktDeviceCheck(1000);
       } catch {
