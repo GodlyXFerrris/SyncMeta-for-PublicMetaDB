@@ -413,8 +413,11 @@ class SyncService:
         # Count how many times each key appears in source (multi-watch support).
         source_seen: dict[str, int] = {}
         pending_items: list[dict] = []
-        for item in items:
+        total = len(items)
+        for idx, item in enumerate(items):
             self._check_cancelled()
+            if idx % 50 == 0:
+                self._set_status(f"Resolving SIMKL history ({idx}/{total})")
             item = self._resolve_activity_item(item)
             item = self._remap_simkl_anime_history_item(item)
 
@@ -447,7 +450,8 @@ class SyncService:
             pending_items,
             existing_counts,
             stats,
-            status_message="Writing SIMKL watched history to PublicMetaDB",
+            status_message="Writing SIMKL history to PublicMetaDB",
+            total_source=total,
         )
 
         # Season-level fallback: only for completed anime that produced zero
@@ -892,8 +896,11 @@ class SyncService:
 
         source_seen: dict[str, int] = {}
         pending_items: list[dict] = []
-        for item in items:
+        total = len(items)
+        for idx, item in enumerate(items):
             self._check_cancelled()
+            if idx % 50 == 0:
+                self._set_status(f"Resolving Trakt history ({idx}/{total})")
             item = self._resolve_activity_item(item)
             key = self._watched_identity_key(item)
             if not key:
@@ -913,7 +920,8 @@ class SyncService:
             pending_items,
             existing_counts,
             stats,
-            status_message="Writing Trakt watched history to PublicMetaDB",
+            status_message="Writing Trakt history to PublicMetaDB",
+            total_source=total,
         )
         return stats
 
@@ -1786,11 +1794,14 @@ class SyncService:
         existing_counts: dict[str, int],
         stats: SyncStats,
         status_message: str,
+        total_source: int = 0,
     ) -> None:
         if not items:
             return
 
-        self._set_status(status_message)
+        total_to_write = len(items)
+        written = 0
+        self._set_status(f"{status_message} (0/{total_to_write} new)")
         pool = ThreadPoolExecutor(max_workers=min(_ACTIVITY_WRITE_WORKERS, len(items)))
         shutdown_wait = True
         try:
@@ -1814,6 +1825,9 @@ class SyncService:
                     if key:
                         existing_counts[key] = 1
                     stats.items_added += 1
+                    written += 1
+                    if written % 10 == 0 or written == total_to_write:
+                        self._set_status(f"{status_message} ({written}/{total_to_write} new)")
                 except SyncCancelled:
                     raise
                 except Exception as exc:

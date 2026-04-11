@@ -2413,9 +2413,14 @@
       el('btn-sync-resume').disabled = !!profile.sync_running || !resumeEnabled;
       el('activity-panel').classList.remove('hidden');
       updateClearHistoryButtons(!!(watchEnabled || watchRow), !profile.sync_running);
+      const liveStatus = profile.sync_status || '';
+      const isHistorySync = profile.sync_running && liveStatus && (liveStatus.toLowerCase().includes('history') || liveStatus.toLowerCase().includes('simkl') || liveStatus.toLowerCase().includes('trakt'));
+      const watchSubtitleLive = isHistorySync
+        ? `<span class="status-inline"><span class="spinner"></span><span>${esc(liveStatus)}</span></span>`
+        : esc(watchSubtitle);
       el('activity-cards').innerHTML = [
-          buildActivityCard('Watch History', watchSubtitle, watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
-          buildActivityCard('Resume Progress', resumeSubtitle, resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
+          buildActivityCard('Watch History', watchSubtitleLive, watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
+          buildActivityCard('Resume Progress', esc(resumeSubtitle), resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
         ].join('');
       }
 
@@ -2485,7 +2490,7 @@
         <div class="card activity-card">
           <div class="card-label">${esc(title)}</div>
           <div class="card-value">${primaryValue}<span class="card-sub">${esc(primaryLabel.toLowerCase())}</span></div>
-          <div class="activity-meta">${esc(metaText)}</div>
+          <div class="activity-meta">${metaText}</div>
           <div class="card-sub">${esc(statusText)}</div>
           <div class="activity-stats">
             <div class="activity-stat"><div class="activity-stat-label">${esc(primaryLabel)}</div><div class="activity-stat-value ${primaryValue > 0 ? 'c-green' : ''}">${primaryValue}</div></div>
