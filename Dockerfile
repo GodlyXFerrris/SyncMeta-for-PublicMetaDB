@@ -10,4 +10,4 @@ COPY . .
 EXPOSE 8080
 
 # Default: run the web dashboard with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "web:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--threads", "8", "--timeout", "120", "web:app"]

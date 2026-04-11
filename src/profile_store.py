@@ -1328,7 +1328,7 @@ class ProfileStore:
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
-            self._save_locked()
+            # No disk save — status is in-memory only; polls read from memory.
             return self._public_profile(profile, include_credentials=True)
 
     def update_sync_progress(self, profile_id: str, results: list[dict]) -> dict:
@@ -1340,7 +1340,7 @@ class ProfileStore:
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
-            self._save_locked()
+            # No disk save — progress is in-memory only.
             return self._public_profile(profile, include_credentials=True)
 
     def delete_managed_list_by_id(self, profile_id: str, list_name: str, credentials: dict) -> dict:
