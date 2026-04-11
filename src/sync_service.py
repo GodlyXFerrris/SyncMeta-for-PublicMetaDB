@@ -2046,14 +2046,24 @@ class SyncService:
     def _get_or_create_pmdb_list_cached(self, name: str, description: str, is_public: bool = False, list_type: str = "custom") -> dict:
         lookup_name = str(name or "").strip()
         with self._pmdb_cache_lock:
-            existing = None if self._pmdb_run_list_index is None else self._pmdb_run_list_index.get(lookup_name)
+            # For watchlist type, search by type key in cache
+            if list_type == "watchlist":
+                existing = None
+                if self._pmdb_run_list_index is not None:
+                    for item in self._pmdb_run_list_index.values():
+                        if str(item.get("type", "")).lower() == "watchlist":
+                            existing = item
+                            break
+            else:
+                existing = None if self._pmdb_run_list_index is None else self._pmdb_run_list_index.get(lookup_name)
         if existing:
             return dict(existing)
         pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public, list_type=list_type)
         with self._pmdb_cache_lock:
             if self._pmdb_run_list_index is None:
                 self._pmdb_run_list_index = {}
-            self._pmdb_run_list_index[lookup_name] = dict(pmdb_list)
+            cache_key = str(pmdb_list.get("name", lookup_name)).strip() or lookup_name
+            self._pmdb_run_list_index[cache_key] = dict(pmdb_list)
         return pmdb_list
 
     def _get_cached_list_items(self, list_id: str) -> list[dict]:

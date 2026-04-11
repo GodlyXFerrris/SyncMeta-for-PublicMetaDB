@@ -77,6 +77,7 @@ class PublicMetaDBClient:
         self._limiter = RateLimiter()
         self._lists_lock = threading.Lock()
         self._lists_by_name: dict[str, dict] | None = None
+        self._lists_by_type: dict[str, dict] = {}
         self._cancel_requested_callback = cancel_requested_callback
         self._mapping_auth_warning_logged = False
         self._stats = PublicMetaDBStats()
@@ -461,6 +462,11 @@ class PublicMetaDBClient:
                 for item in all_lists
                 if str(item.get("name", "")).strip()
             }
+            self._lists_by_type = {}
+            for item in all_lists:
+                t = str(item.get("type", "")).strip().lower()
+                if t and t not in self._lists_by_type:
+                    self._lists_by_type[t] = item
         return all_lists
 
     def refresh_lists_index(self) -> dict[str, dict]:
@@ -499,12 +505,32 @@ class PublicMetaDBClient:
         self._record_stat("list_write_failures")
         raise RuntimeError(f"Failed to create list '{name}': {resp}")
 
+    def find_list_by_type(self, list_type: str) -> dict | None:
+        """Find a list by its type (e.g. 'watchlist'). Returns the first match."""
+        lookup = str(list_type or "").strip().lower()
+        if not lookup:
+            return None
+        with self._lists_lock:
+            cached = self._lists_by_type.get(lookup)
+        if cached:
+            return cached
+        self.get_lists()
+        with self._lists_lock:
+            return self._lists_by_type.get(lookup)
+
     def get_or_create_list(self, name: str, description: str = "", is_public: bool = False, list_type: str = "custom") -> dict:
-        """Find a list by name, or create it if missing."""
-        existing = self.find_list_by_name(name)
-        if existing:
-            logger.debug("Found existing list '%s' (id=%s)", name, existing["id"])
-            return existing
+        """Find a list by name (or by type for 'watchlist'), or create it if missing."""
+        # For watchlist type, prefer finding by type since PMDB may already have one
+        if list_type == "watchlist":
+            existing = self.find_list_by_type("watchlist")
+            if existing:
+                logger.debug("Found existing watchlist '%s' (id=%s)", existing.get("name"), existing["id"])
+                return existing
+        else:
+            existing = self.find_list_by_name(name)
+            if existing:
+                logger.debug("Found existing list '%s' (id=%s)", name, existing["id"])
+                return existing
         return self.create_list(name, description, is_public=is_public, list_type=list_type)
 
     def delete_list(self, list_id: str) -> bool:
