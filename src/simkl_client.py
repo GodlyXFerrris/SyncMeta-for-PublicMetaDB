@@ -275,20 +275,19 @@ class SimklClient:
             # Non-anime content (Popeye, Soccer Aid, Radioresepsjonen, etc.) may
             # have SIMKL-assigned MAL/AniList IDs that don't correspond to real
             # anime entries. Check Fribb for whichever ID is present.
-            fribb_confirmed = False
+            # Also keep the Fribb entry to use its type for media-type detection.
+            fribb_entry: dict | None = None
             if anilist_id:
                 try:
-                    if _fribb.lookup_by_anilist(int(anilist_id)) is not None:
-                        fribb_confirmed = True
+                    fribb_entry = _fribb.lookup_by_anilist(int(anilist_id))
                 except (TypeError, ValueError):
                     pass
-            if not fribb_confirmed and mal_id:
+            if fribb_entry is None and mal_id:
                 try:
-                    if _fribb.lookup_by_mal(int(mal_id)) is not None:
-                        fribb_confirmed = True
+                    fribb_entry = _fribb.lookup_by_mal(int(mal_id))
                 except (TypeError, ValueError):
                     pass
-            if not fribb_confirmed:
+            if fribb_entry is None:
                 logger.debug(
                     "Skipping SIMKL anime entry '%s' — not found in Fribb anime-lists (mal=%s anilist=%s)",
                     media.get("title", "Unknown"), mal_id, anilist_id,
@@ -296,10 +295,10 @@ class SimklClient:
                 return None
 
             # Determine PMDB media type.
-            # Check anime_type first, then fall back to SIMKL's generic "type"
-            # field (used on some list endpoints instead of anime_type), then
-            # use an episode-count heuristic for entries without either field.
+            # Priority: SIMKL anime_type > SIMKL generic type > Fribb type > episode-count heuristic.
             effective_type = anime_type or generic_type
+            if not effective_type and fribb_entry:
+                effective_type = str(fribb_entry.get("type", "")).strip().lower()
             if effective_type in {"movie", "film"}:
                 pmdb_type = "movie"
             elif effective_type:
