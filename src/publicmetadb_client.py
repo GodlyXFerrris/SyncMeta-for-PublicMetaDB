@@ -481,13 +481,13 @@ class PublicMetaDBClient:
         with self._lists_lock:
             return None if self._lists_by_name is None else self._lists_by_name.get(lookup_name)
 
-    def create_list(self, name: str, description: str = "", is_public: bool = False) -> dict:
+    def create_list(self, name: str, description: str = "", is_public: bool = False, list_type: str = "custom") -> dict:
         """Create a new list and return its metadata."""
         resp = self._post("/api/external/lists", data={
             "name": name,
             "description": description,
             "is_public": is_public,
-            "type": "custom",
+            "type": list_type,
         })
         if resp and resp.get("success"):
             logger.info("Created list '%s' (id=%s)", name, resp["item"]["id"])
@@ -499,13 +499,13 @@ class PublicMetaDBClient:
         self._record_stat("list_write_failures")
         raise RuntimeError(f"Failed to create list '{name}': {resp}")
 
-    def get_or_create_list(self, name: str, description: str = "", is_public: bool = False) -> dict:
+    def get_or_create_list(self, name: str, description: str = "", is_public: bool = False, list_type: str = "custom") -> dict:
         """Find a list by name, or create it if missing."""
         existing = self.find_list_by_name(name)
         if existing:
             logger.debug("Found existing list '%s' (id=%s)", name, existing["id"])
             return existing
-        return self.create_list(name, description, is_public=is_public)
+        return self.create_list(name, description, is_public=is_public, list_type=list_type)
 
     def delete_list(self, list_id: str) -> bool:
         """Delete a list by ID. Returns False if it is already gone."""

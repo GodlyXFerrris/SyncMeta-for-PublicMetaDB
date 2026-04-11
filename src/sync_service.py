@@ -255,6 +255,17 @@ class SyncService:
                 all_stats.extend(self._sync_mdblist())
                 self._publish_progress(all_stats, force=True)
 
+        if self._sync_modes["lists"] and any([
+            self._config.sync.simkl_sync_to_pmdb_watchlist,
+            self._config.sync.trakt_sync_to_pmdb_watchlist,
+            self._config.sync.anilist_sync_to_pmdb_watchlist,
+        ]):
+            logger.info("── PMDB Watchlist Sync ────────────────────────────────")
+            wl_stats = self._sync_pmdb_watchlist()
+            if wl_stats:
+                all_stats.append(wl_stats)
+                self._publish_progress(all_stats, force=True)
+
         if self._sync_modes["history"] or self._sync_modes["resume"]:
             logger.info("── Watch History / Resume ─────────────────────────────")
             activity_rows: list[SyncStats] = []
@@ -272,6 +283,44 @@ class SyncService:
         self._set_status("Finalizing sync results")
         self._log_results(all_stats)
         return all_stats
+
+    def _sync_pmdb_watchlist(self) -> SyncStats | None:
+        """Merge selected watchlist items from enabled providers into the PMDB native watchlist."""
+        all_items: list[dict] = []
+
+        if self._config.sync.simkl_sync_to_pmdb_watchlist and self._config.simkl.access_token:
+            self._set_status("Fetching SIMKL items for PMDB watchlist")
+            for simkl_type in self._config.sync.media_types:
+                statuses = self._config.simkl.selected_statuses.get(simkl_type, [])
+                for status_key in statuses:
+                    self._check_cancelled()
+                    grouped = self._simkl.get_status(status_key, [simkl_type])
+                    all_items.extend(grouped.get(simkl_type, []))
+
+        if self._config.sync.trakt_sync_to_pmdb_watchlist and self._config.trakt.enabled:
+            self._set_status("Fetching Trakt items for PMDB watchlist")
+            watchlist = self._trakt.get_watchlist() or []
+            all_items.extend(watchlist)
+
+        if self._config.sync.anilist_sync_to_pmdb_watchlist and self._config.anilist.enabled:
+            self._set_status("Fetching AniList items for PMDB watchlist")
+            for status_key in self._config.anilist.selected_statuses.get("anime", []):
+                self._check_cancelled()
+                items = self._anilist_root_client.get_status(status_key) or []
+                all_items.extend(items)
+
+        if not all_items:
+            return None
+
+        return self._sync_list(
+            all_items,
+            "Watchlist",
+            "SyncMeta combined watchlist",
+            display_name="PMDB Watchlist",
+            source_name="Combined",
+            is_public=False,
+            list_type="watchlist",
+        )
 
     def _sync_simkl(self) -> list[SyncStats]:
         """Sync all configured SIMKL lists."""
@@ -1441,6 +1490,7 @@ class SyncService:
         source_name: str | None = None,
         is_public: bool = False,
         selection: dict | None = None,
+        list_type: str = "custom",
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         actual_list_name = self._resolve_managed_list_name(list_name, source_name or "", selection)
@@ -1531,7 +1581,7 @@ class SyncService:
 
         try:
             self._set_status(f"Preparing PublicMetaDB list {actual_list_name}")
-            pmdb_list = self._get_or_create_pmdb_list_cached(actual_list_name, list_description, is_public=is_public)
+            pmdb_list = self._get_or_create_pmdb_list_cached(actual_list_name, list_description, is_public=is_public, list_type=list_type)
             self._register_managed_list(
                 actual_list_name,
                 str(pmdb_list.get("id", "")),
@@ -1996,13 +2046,13 @@ class SyncService:
         with self._pmdb_cache_lock:
             self._pmdb_run_list_index = dict(index)
 
-    def _get_or_create_pmdb_list_cached(self, name: str, description: str, is_public: bool = False) -> dict:
+    def _get_or_create_pmdb_list_cached(self, name: str, description: str, is_public: bool = False, list_type: str = "custom") -> dict:
         lookup_name = str(name or "").strip()
         with self._pmdb_cache_lock:
             existing = None if self._pmdb_run_list_index is None else self._pmdb_run_list_index.get(lookup_name)
         if existing:
             return dict(existing)
-        pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public)
+        pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public, list_type=list_type)
         with self._pmdb_cache_lock:
             if self._pmdb_run_list_index is None:
                 self._pmdb_run_list_index = {}

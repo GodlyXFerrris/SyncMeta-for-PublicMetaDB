@@ -532,6 +532,9 @@ def normalize_profile_options(options: dict | None) -> dict:
         "trakt_personal_visibility": _normalize_visibility(raw.get("trakt_personal_visibility"), "private"),
         "trakt_public_visibility": _normalize_visibility(raw.get("trakt_public_visibility"), "public"),
         "mdblist_visibility": _normalize_visibility(raw.get("mdblist_visibility"), "public"),
+        "simkl_sync_to_pmdb_watchlist": bool(raw.get("simkl_sync_to_pmdb_watchlist", False)),
+        "trakt_sync_to_pmdb_watchlist": bool(raw.get("trakt_sync_to_pmdb_watchlist", False)),
+        "anilist_sync_to_pmdb_watchlist": bool(raw.get("anilist_sync_to_pmdb_watchlist", False)),
     }
 
 

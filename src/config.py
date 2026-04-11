@@ -101,6 +101,9 @@ class SyncConfig:
     trakt_personal_visibility: str = "private"
     trakt_public_visibility: str = "public"
     mdblist_visibility: str = "public"
+    simkl_sync_to_pmdb_watchlist: bool = False
+    trakt_sync_to_pmdb_watchlist: bool = False
+    anilist_sync_to_pmdb_watchlist: bool = False
 
 
 @dataclass

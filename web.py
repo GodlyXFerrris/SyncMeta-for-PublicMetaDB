@@ -235,6 +235,9 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             trakt_personal_visibility=options["trakt_personal_visibility"],
             trakt_public_visibility=options["trakt_public_visibility"],
             mdblist_visibility=options["mdblist_visibility"],
+            simkl_sync_to_pmdb_watchlist=options["simkl_sync_to_pmdb_watchlist"],
+            trakt_sync_to_pmdb_watchlist=options["trakt_sync_to_pmdb_watchlist"],
+            anilist_sync_to_pmdb_watchlist=options["anilist_sync_to_pmdb_watchlist"],
         ),
     )
 
