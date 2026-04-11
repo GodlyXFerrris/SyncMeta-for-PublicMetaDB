@@ -1,6 +1,6 @@
 services:
-  web:
-    build: .
+  syncmeta:
+    image: ghcr.io/febsho/syncmeta:latest
     ports:
       - "8080:8080"
     restart: unless-stopped

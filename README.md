@@ -86,12 +86,12 @@ Each user gets a persistent profile with encrypted credentials. The server keeps
 
 ## Docker Setup
 
-The included `docker-compose.yml` is the recommended deployment path.
+The recommended deployment path uses the pre-built image from GHCR — no local build needed.
 
 ```yaml
 services:
-  web:
-    build: .
+  syncmeta:
+    image: ghcr.io/febsho/syncmeta:latest
     ports:
       - "8080:8080"
     restart: unless-stopped
@@ -102,10 +102,12 @@ services:
       - ./data:/app/data
 ```
 
+The included `docker-compose.yml` already has this configured.
+
 Start:
 
 ```bash
-docker compose up -d --build web
+docker compose up -d syncmeta
 ```
 
 Stop:
@@ -116,6 +118,8 @@ docker compose down
 
 Then open `http://127.0.0.1:8080`.
 
+> **Dev image:** Use `ghcr.io/febsho/syncmeta:dev` to track the latest development builds.
+
 ---
 
 ## Quick Start
@@ -123,7 +127,7 @@ Then open `http://127.0.0.1:8080`.
 ### 1. Start SyncMeta
 
 ```bash
-docker compose up -d --build web
+docker compose up -d syncmeta
 ```
 
 ### 2. Create a profile
@@ -201,7 +205,7 @@ If you move hosts, bring both the `data` folder and the same encryption key.
 ## Updates
 
 ```bash
-docker compose up -d --build web
+docker compose pull syncmeta && docker compose up -d syncmeta
 ```
 
 Profile data and credentials are preserved as long as the `data` folder and encryption key are intact.
@@ -311,7 +315,7 @@ requirements.txt
 - Background auto-sync covers list syncing only
 - Watch history and resume progress are triggered manually from the dashboard
 - The scheduler runs inside the web process — one worker is expected
-- Auto-sync interval defaults to 6 hours
+- Auto-sync interval defaults to 12 hours
 
 ---
 
