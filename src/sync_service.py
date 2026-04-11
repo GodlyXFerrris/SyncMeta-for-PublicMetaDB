@@ -378,8 +378,9 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        cursor = self._config.sync.simkl_history_cursor or None
-        items = self._simkl.get_watched_history(since=cursor)
+        # Always fetch full SIMKL history — no cursor. Ensures re-watched episodes
+        # and play counts stay in sync with PMDB.
+        items = self._simkl.get_watched_history(since=None)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -390,7 +391,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
-        stats.history_cursor = self._latest_history_cursor(items, cursor or "")
+        stats.history_cursor = ""  # no cursor for SIMKL
         stats.items_fetched = len(items)
 
         # Fetch completed anime list up-front so we can use it as a fallback
@@ -409,6 +410,8 @@ class SyncService:
         # season-level fallback pass can skip them (avoids double-counting).
         shows_with_episode_records: set[str] = set()
 
+        # Count how many times each key appears in source (multi-watch support).
+        source_seen: dict[str, int] = {}
         pending_items: list[dict] = []
         for item in items:
             self._check_cancelled()
@@ -429,11 +432,13 @@ class SyncService:
                     if val:
                         shows_with_episode_records.add(f"{id_key}:{val}")
 
-            if existing_counts.get(key, 0) > 0:
+            source_seen[key] = source_seen.get(key, 0) + 1
+            # Only add if PMDB has fewer plays than source for this key.
+            if existing_counts.get(key, 0) >= source_seen[key]:
                 stats.items_skipped_duplicate += 1
                 continue
             if self._config.sync.dry_run:
-                existing_counts[key] = 1
+                existing_counts[key] = existing_counts.get(key, 0) + 1
                 stats.items_added += 1
                 continue
             pending_items.append(item)
@@ -885,6 +890,7 @@ class SyncService:
             if key:
                 existing_counts[key] = existing_counts.get(key, 0) + 1
 
+        source_seen: dict[str, int] = {}
         pending_items: list[dict] = []
         for item in items:
             self._check_cancelled()
@@ -894,11 +900,12 @@ class SyncService:
                 stats.items_skipped_unresolved += 1
                 continue
             stats.items_resolved += 1
-            if existing_counts.get(key, 0) > 0:
+            source_seen[key] = source_seen.get(key, 0) + 1
+            if existing_counts.get(key, 0) >= source_seen[key]:
                 stats.items_skipped_duplicate += 1
                 continue
             if self._config.sync.dry_run:
-                existing_counts[key] = 1
+                existing_counts[key] = existing_counts.get(key, 0) + 1
                 stats.items_added += 1
                 continue
             pending_items.append(item)
