@@ -190,7 +190,7 @@ class SimklClient:
                 if normalized:
                     item_status = self._normalize_status(normalized.get("status"))
                     if item_status and item_status != requested_status:
-                        logger.info(
+                        logger.debug(
                             "Skipping SIMKL %s entry '%s' because it reported status '%s' during '%s' sync",
                             media_type,
                             normalized.get("title", "Unknown"),

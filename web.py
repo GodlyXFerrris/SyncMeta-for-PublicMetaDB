@@ -783,14 +783,22 @@ class ProfileScheduler:
         self._thread.start()
 
     def _run(self) -> None:
+        first_poll = True
         while not self._stop.is_set():
-            for profile in self._store.claim_due_profiles():
+            due = self._store.claim_due_profiles()
+            for i, profile in enumerate(due):
+                if first_poll and i > 0:
+                    # Stagger startup syncs by 30s each to avoid hammering APIs
+                    self._stop.wait(30)
+                    if self._stop.is_set():
+                        return
                 threading.Thread(
                     target=_run_profile_sync,
                     args=(profile, False, profile.get("pending_sync_modes")),
                     name=f"sync-{profile['profile_id'][:8]}",
                     daemon=True,
                 ).start()
+            first_poll = False
             self._stop.wait(self._poll_seconds)
 
 
