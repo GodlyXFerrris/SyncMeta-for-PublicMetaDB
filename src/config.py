@@ -91,6 +91,7 @@ class SyncConfig:
     trakt_sync_watched_history: bool = False
     simkl_history_cursor: str = ""
     trakt_history_cursor: str = ""
+    full_history_sync: bool = False  # True = ignore cursor, fetch everything
     trakt_watched_history_interval_seconds: int = 43200
     trakt_sync_full_watch_counts: bool = False
     trakt_reconcile_watched_history: bool = False

@@ -378,9 +378,9 @@ class SyncService:
             source_name="SIMKL",
         )
         self._set_status("Fetching SIMKL watched history")
-        # Always fetch full SIMKL history — no cursor. Ensures re-watched episodes
-        # and play counts stay in sync with PMDB.
-        items = self._simkl.get_watched_history(since=None)
+        full_sync = self._config.sync.full_history_sync
+        cursor = None if full_sync else (self._config.sync.simkl_history_cursor or None)
+        items = self._simkl.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -391,7 +391,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
-        stats.history_cursor = ""  # no cursor for SIMKL
+        stats.history_cursor = "" if full_sync else self._latest_history_cursor(items, cursor or "")
         stats.items_fetched = len(items)
 
         # Fetch completed anime list up-front so we can use it as a fallback
@@ -875,9 +875,9 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        # Always fetch full Trakt history — no cursor. Ensures re-watched or
-        # previously-removed episodes are picked up. PMDB mark_watched is idempotent.
-        items = self._trakt.get_watched_history(since=None)
+        full_sync = self._config.sync.full_history_sync
+        cursor = None if full_sync else (self._config.sync.trakt_history_cursor or None)
+        items = self._trakt.get_watched_history(since=cursor)
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -886,7 +886,7 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
-        stats.history_cursor = ""  # no cursor for Trakt
+        stats.history_cursor = "" if full_sync else self._latest_history_cursor(items, cursor or "")
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -1828,6 +1828,7 @@ class SyncService:
                     written += 1
                     if written % 10 == 0 or written == total_to_write:
                         self._set_status(f"{status_message} ({written}/{total_to_write} new)")
+                        self._publish_progress([stats])
                 except SyncCancelled:
                     raise
                 except Exception as exc:
