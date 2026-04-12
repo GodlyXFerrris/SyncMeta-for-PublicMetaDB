@@ -1633,6 +1633,7 @@ class SyncService:
                     if (
                         not self._config.sync.dry_run
                         and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
+                        and match_result.resolution_kind != "external_mapping"
                     ):
                         pending_mapping_contributions.extend(self._collect_id_mapping_contributions(item, tmdb_id))
                 else:
