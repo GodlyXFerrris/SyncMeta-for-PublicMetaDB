@@ -711,38 +711,58 @@ class SyncService:
         if cached is not None:
             return {**item, **cached}
 
-        # Fetch TMDB season plan once — used for validation and fallback.
+        def _build_tmdb_season_map(tid: int) -> dict[int, int]:
+            """Build {tmdb_season: total_episode_count} from PMDB anime-seasons data.
+
+            PMDB anime-seasons maps TVDB arcs to TMDB season+start. We aggregate
+            episode_count per tmdb_season to get how many episodes each TMDB season
+            actually has, without scraping TMDB's website.
+            """
+            try:
+                seasons = self._get_cached_anime_seasons(tid)
+            except Exception:
+                return {}
+            totals: dict[int, int] = {}
+            for s in seasons:
+                try:
+                    ts = int(s["tmdb_season"])
+                    ec = int(s["episode_count"])
+                    tmdb_start = int(s["tmdb_episode_start"])
+                    # max episode in this arc within the tmdb_season
+                    max_ep = tmdb_start + ec - 1
+                    totals[ts] = max(totals.get(ts, 0), max_ep)
+                except (TypeError, ValueError, KeyError):
+                    continue
+            return totals
+
+        # Build season episode-count maps from PMDB data (reliable API, no scraping).
+        season_plan_map: dict[int, int] = _build_tmdb_season_map(tmdb_id) if tmdb_id > 0 else {}
+        # Also keep TMDB scraper plan as secondary fallback for validation only.
         try:
-            season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id) if tmdb_id > 0 else []
+            _tmdb_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id) if tmdb_id > 0 else []
+            for _sn, _cnt in _tmdb_plan:
+                if _sn > 0 and _sn not in season_plan_map:
+                    season_plan_map[_sn] = _cnt
         except Exception:
-            season_plan = []
-        season_plan_map: dict[int, int] = {sn: cnt for sn, cnt in season_plan if sn > 0}
+            pass
 
         def _validate_and_fix(remapped: dict) -> dict | None:
-            """Validate remapped season/episode against TMDB plan.
+            """Validate remapped season/episode against known episode counts.
 
             - If the target season has 0 episodes (placeholder), fall back to S1.
             - If the episode number exceeds the season's known count, redistribute
-              using cumulative TMDB season plan so long-running shows like Naruto
-              and One Piece land in the correct season instead of overflowing S1.
+              using cumulative season map so long-running shows like Naruto and
+              One Piece land in the correct season instead of overflowing S1.
             Returns a (possibly corrected) remapped dict, or None if unresolvable.
             """
             target_season = int(remapped.get("season") or 1)
             target_episode = int(remapped.get("episode") or 1)
             target_tmdb_id = int(remapped.get("tmdb_id") or tmdb_id)
-            plan = season_plan_map
-            if target_tmdb_id != tmdb_id:
-                try:
-                    alt_plan = self._simkl._get_tmdb_season_plan_cached(target_tmdb_id)
-                    plan = {sn: cnt for sn, cnt in alt_plan if sn > 0}
-                except Exception:
-                    plan = {}
+            plan = season_plan_map if target_tmdb_id == tmdb_id else _build_tmdb_season_map(target_tmdb_id)
             season_ep_count = plan.get(target_season)
             if season_ep_count is None:
-                # No TMDB data — accept as-is
-                return remapped
+                return remapped  # No data — accept as-is
             if season_ep_count == 0 or target_episode > season_ep_count:
-                # Season is empty or episode overflows — redistribute via cumulative plan
                 absolute = offset + episode
                 redistributed = self._map_absolute_via_season_plan(plan, absolute)
                 if redistributed:
@@ -751,7 +771,6 @@ class SyncService:
                         out["tmdb_id"] = target_tmdb_id
                     return out
                 if season_ep_count == 0:
-                    # Placeholder season — fall back to S1
                     return {**remapped, "season": 1, "episode": offset + episode}
             return remapped
 
@@ -781,19 +800,18 @@ class SyncService:
         except Exception:
             pass
 
-        # ── Path 4: TMDB season plan cumulative distribution ───────────────────
-        # Handles both single-season shows and multi-season shows where the
-        # absolute episode (offset + episode) can be distributed across seasons.
+        # ── Path 4: PMDB season map cumulative distribution ────────────────────
+        # Handles both single-season and multi-season shows using episode counts
+        # from PMDB anime-seasons (reliable API, no scraping required).
         try:
-            positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
-            if positive_seasons:
+            if season_plan_map:
                 absolute = offset + episode
                 redistributed = self._map_absolute_via_season_plan(season_plan_map, absolute)
                 if redistributed:
                     self._anime_history_remap_cache[cache_key] = dict(redistributed)
                     return {**item, **redistributed}
                 # Single-season fallback
-                if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
+                if list(season_plan_map.keys()) == [1]:
                     remapped = {"season": 1, "episode": absolute}
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
