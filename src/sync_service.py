@@ -711,11 +711,56 @@ class SyncService:
         if cached is not None:
             return {**item, **cached}
 
+        # Fetch TMDB season plan once — used for validation and fallback.
+        try:
+            season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id) if tmdb_id > 0 else []
+        except Exception:
+            season_plan = []
+        season_plan_map: dict[int, int] = {sn: cnt for sn, cnt in season_plan if sn > 0}
+
+        def _validate_and_fix(remapped: dict) -> dict | None:
+            """Validate remapped season/episode against TMDB plan.
+
+            - If the target season has 0 episodes (placeholder), fall back to S1.
+            - If the episode number exceeds the season's known count, redistribute
+              using cumulative TMDB season plan so long-running shows like Naruto
+              and One Piece land in the correct season instead of overflowing S1.
+            Returns a (possibly corrected) remapped dict, or None if unresolvable.
+            """
+            target_season = int(remapped.get("season") or 1)
+            target_episode = int(remapped.get("episode") or 1)
+            target_tmdb_id = int(remapped.get("tmdb_id") or tmdb_id)
+            plan = season_plan_map
+            if target_tmdb_id != tmdb_id:
+                try:
+                    alt_plan = self._simkl._get_tmdb_season_plan_cached(target_tmdb_id)
+                    plan = {sn: cnt for sn, cnt in alt_plan if sn > 0}
+                except Exception:
+                    plan = {}
+            season_ep_count = plan.get(target_season)
+            if season_ep_count is None:
+                # No TMDB data — accept as-is
+                return remapped
+            if season_ep_count == 0 or target_episode > season_ep_count:
+                # Season is empty or episode overflows — redistribute via cumulative plan
+                absolute = offset + episode
+                redistributed = self._map_absolute_via_season_plan(plan, absolute)
+                if redistributed:
+                    out = {**remapped, **redistributed}
+                    if target_tmdb_id != tmdb_id:
+                        out["tmdb_id"] = target_tmdb_id
+                    return out
+                if season_ep_count == 0:
+                    # Placeholder season — fall back to S1
+                    return {**remapped, "season": 1, "episode": offset + episode}
+            return remapped
+
         # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
         fribb = self._lookup_fribb_entry(item)
         if fribb is not None:
             remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
             if remapped:
+                remapped = _validate_and_fix(remapped) or remapped
                 self._anime_history_remap_cache[cache_key] = dict(remapped)
                 return {**item, **remapped}
 
@@ -730,24 +775,52 @@ class SyncService:
             if anime_seasons:
                 remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
                 if remapped:
+                    remapped = _validate_and_fix(remapped) or remapped
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
         except Exception:
             pass
 
-        # ── Path 4: Single-season TMDB heuristic ───────────────────────────────
+        # ── Path 4: TMDB season plan cumulative distribution ───────────────────
+        # Handles both single-season shows and multi-season shows where the
+        # absolute episode (offset + episode) can be distributed across seasons.
         try:
-            season_plan = self._simkl._get_tmdb_season_plan_cached(tmdb_id)
             positive_seasons = [(sn, cnt) for sn, cnt in season_plan if sn > 0 and cnt > 0]
-            if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
-                remapped = {"season": 1, "episode": offset + episode}
-                self._anime_history_remap_cache[cache_key] = dict(remapped)
-                return {**item, **remapped}
+            if positive_seasons:
+                absolute = offset + episode
+                redistributed = self._map_absolute_via_season_plan(season_plan_map, absolute)
+                if redistributed:
+                    self._anime_history_remap_cache[cache_key] = dict(redistributed)
+                    return {**item, **redistributed}
+                # Single-season fallback
+                if len(positive_seasons) == 1 and positive_seasons[0][0] == 1:
+                    remapped = {"season": 1, "episode": absolute}
+                    self._anime_history_remap_cache[cache_key] = dict(remapped)
+                    return {**item, **remapped}
         except Exception:
             pass
 
         self._anime_history_remap_cache[cache_key] = {}
         return item
+
+    @staticmethod
+    def _map_absolute_via_season_plan(season_plan_map: dict[int, int], absolute: int) -> dict | None:
+        """Distribute an absolute episode number across TMDB seasons using cumulative counts.
+
+        season_plan_map: {season_number: episode_count, ...}
+        Returns {"season": N, "episode": E} or None if the episode is out of range.
+        """
+        if not season_plan_map or absolute <= 0:
+            return None
+        cumulative = 0
+        for season_number in sorted(season_plan_map):
+            ep_count = season_plan_map[season_number]
+            if ep_count <= 0:
+                continue
+            if cumulative < absolute <= cumulative + ep_count:
+                return {"season": season_number, "episode": absolute - cumulative}
+            cumulative += ep_count
+        return None
 
     def _lookup_fribb_entry(self, item: dict) -> dict | None:
         """Return the Fribb anime-lists entry for this SIMKL item, or None."""
