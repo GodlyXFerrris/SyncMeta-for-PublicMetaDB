@@ -1,5 +1,6 @@
 # SyncMeta for PublicMetaDB
-syncmeta.febsho.me
+https://syncmeta.febsho.me
+
 SyncMeta is a self-hosted web app that syncs your watchlists and watch history from:
 
 - **SIMKL** — movies, shows, anime (including anime movies)
