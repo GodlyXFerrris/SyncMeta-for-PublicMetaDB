@@ -130,6 +130,7 @@ class SyncService:
         sync_modes: dict | None = None,
         resolution_cache: dict | None = None,
         failed_resolution_cache: dict | None = None,
+        manual_list_additions: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
@@ -157,6 +158,7 @@ class SyncService:
         self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
         self._fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
         self._anime_seasons_cache: dict[int, list[dict]] = {}
+        self._manual_list_additions: dict[str, list[dict]] = manual_list_additions or {}
         self._anime_history_remap_cache: dict[tuple, dict | None] = {}
         self._pmdb_cache_lock = threading.Lock()
         self._pmdb_run_list_index: dict[str, dict] | None = None
@@ -1712,6 +1714,18 @@ class SyncService:
                 self._publish_progress([stats])
                 continue
             pending_adds.append((item, tmdb_id, media_type, key))
+
+        # Inject manually-resolved items so remove_missing never evicts them.
+        for manual_entry in self._manual_list_additions.get(actual_list_name, []):
+            m_tmdb_id = manual_entry.get("tmdb_id")
+            m_media_type = manual_entry.get("media_type") or "movie"
+            if not m_tmdb_id:
+                continue
+            m_key = f"{m_tmdb_id}:{m_media_type}"
+            desired_keys.add(m_key)
+            if m_key not in existing_map:
+                synthetic = {"title": f"manual:{m_tmdb_id}", "media_type": m_media_type}
+                pending_adds.append((synthetic, m_tmdb_id, m_media_type, m_key))
 
         pmdb_write_started = time.perf_counter()
         if pending_adds:

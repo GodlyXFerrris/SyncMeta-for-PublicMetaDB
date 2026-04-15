@@ -408,6 +408,7 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
                 **profile.get("manual_resolution_cache", {}),
             },
             failed_resolution_cache=profile.get("failed_resolution_cache", {}),
+            manual_list_additions=profile.get("manual_list_additions", {}),
         )
         results = service.run()
         result_dicts = [_stats_to_dict(stats) for stats in results]

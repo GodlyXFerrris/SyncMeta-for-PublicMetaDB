@@ -1270,6 +1270,17 @@ class ProfileStore:
             # without waiting for the next full sync.
             if resolved_item:
                 self._patch_resolved_stats(profile, resolved_item)
+                # Track manual list addition so the sync worker never removes it.
+                list_name = resolved_item.get("list_name") or ""
+                media_type = resolved_item.get("media_type") or "movie"
+                if list_name:
+                    mla = dict(profile.get("manual_list_additions") or {})
+                    entries = list(mla.get(list_name) or [])
+                    entry = {"tmdb_id": tmdb_id, "media_type": media_type}
+                    if not any(e.get("tmdb_id") == tmdb_id and e.get("media_type") == media_type for e in entries):
+                        entries.append(entry)
+                    mla[list_name] = entries
+                    profile["manual_list_additions"] = mla
             self._save_locked()
             return copy.deepcopy(profile["unresolved_items"])
 
