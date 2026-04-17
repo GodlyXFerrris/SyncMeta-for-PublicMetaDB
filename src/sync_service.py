@@ -96,10 +96,10 @@ class SyncStats:
 _DRY_RUN_PREVIEW_LIMIT = 50
 
 
-def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
+def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason: str = "") -> dict:
     """Extract a compact, serialisable record for an item that could not be resolved."""
     ids = item.get("ids") or {}
-    return {
+    summary = {
         "title": item.get("title") or "Unknown",
         "year": item.get("year"),
         "media_type": item.get("media_type"),
@@ -113,16 +113,18 @@ def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
         "anidb_id": item.get("anidb_id") or ids.get("anidb"),
         "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
         "simkl_id": ids.get("simkl"),
-        # Which PMDB list this item belongs to — used by the manual-resolve
-        # endpoint to add the item instantly without waiting for the next sync.
         "list_name": list_name,
-        # Use ItemMatcher._cache_key so this key is byte-for-byte identical to
-        # the key the matcher will generate when it looks this item up on the
-        # next sync.  Previously a hand-rolled copy caused None→"" vs None→"None"
-        # mismatches (Python's f"{None}" == "None", not ""), which meant the
-        # manual_resolution_cache was never hit and items reappeared as unresolved.
         "cache_key": ItemMatcher._cache_key(item),
     }
+    if unresolved_reason:
+        summary["unresolved_reason"] = unresolved_reason
+    if item.get("simkl_type") == "anime":
+        summary.update({
+            "root_episode_offset": item.get("root_episode_offset") or 0,
+            "has_root_ids": bool(item.get("root_anilist_id") or item.get("root_mal_id") or ids.get("root_anilist") or ids.get("root_mal")),
+            "has_anime_ids": bool(item.get("anilist_id") or item.get("mal_id") or ids.get("anilist") or ids.get("mal")),
+        })
+    return summary
 
 
 class SyncService:
@@ -138,6 +140,7 @@ class SyncService:
         sync_modes: dict | None = None,
         resolution_cache: dict | None = None,
         failed_resolution_cache: dict | None = None,
+        manual_list_additions: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
@@ -165,6 +168,7 @@ class SyncService:
         self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
         self._fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
         self._anime_seasons_cache: dict[int, list[dict]] = {}
+        self._manual_list_additions: dict[str, list[dict]] = manual_list_additions or {}
         self._anime_history_remap_cache: dict[tuple, dict | None] = {}
         self._pmdb_cache_lock = threading.Lock()
         self._pmdb_run_list_index: dict[str, dict] | None = None
@@ -757,10 +761,11 @@ class SyncService:
         def _validate_and_fix(remapped: dict) -> dict | None:
             """Validate remapped season/episode against known episode counts.
 
-            - If the target season has 0 episodes (placeholder), fall back to S1.
-            - If the episode number exceeds the season's known count, redistribute
-              using cumulative season map so long-running shows like Naruto and
-              One Piece land in the correct season instead of overflowing S1.
+            - Redistribute across known seasons when cumulative counts are reliable.
+            - Refuse unsafe "collapse to season 1" remaps for sequel/root-offset
+              items when PMDB is missing future-season metadata.
+            - Only allow season-1 overflow when the mapping evidence says this is
+              effectively a single-season target.
             Returns a (possibly corrected) remapped dict, or None if unresolvable.
             """
             target_season = int(remapped.get("season") or 1)
@@ -778,8 +783,16 @@ class SyncService:
                     if target_tmdb_id != tmdb_id:
                         out["tmdb_id"] = target_tmdb_id
                     return out
-                if season_ep_count == 0:
-                    return {**remapped, "season": 1, "episode": offset + episode}
+                known_positive_seasons = sorted(sn for sn, cnt in plan.items() if int(cnt or 0) > 0)
+                has_multi_season_evidence = (
+                    offset > 0
+                    or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
+                    or len(known_positive_seasons) > 1
+                )
+                only_season_one_known = known_positive_seasons == [1]
+                if season_ep_count == 0 and only_season_one_known and not has_multi_season_evidence:
+                    return {**remapped, "season": 1, "episode": absolute}
+                return None
             return remapped
 
         # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
@@ -818,8 +831,13 @@ class SyncService:
                 if redistributed:
                     self._anime_history_remap_cache[cache_key] = dict(redistributed)
                     return {**item, **redistributed}
-                # Single-season fallback
-                if list(season_plan_map.keys()) == [1]:
+                known_positive_seasons = sorted(sn for sn, cnt in season_plan_map.items() if int(cnt or 0) > 0)
+                has_multi_season_evidence = (
+                    offset > 0
+                    or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
+                    or len(known_positive_seasons) > 1
+                )
+                if known_positive_seasons == [1] and not has_multi_season_evidence:
                     remapped = {"season": 1, "episode": absolute}
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
@@ -1650,7 +1668,9 @@ class SyncService:
                     stats.unresolved_reason_counts[unresolved_reason] = (
                         int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
                     )
-                    stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
+                    stats.unresolved_items.append(
+                        _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
+                    )
                 self._publish_progress([stats])
         except SyncCancelled:
             resolve_pool.shutdown(wait=False, cancel_futures=True)
@@ -1720,6 +1740,18 @@ class SyncService:
                 self._publish_progress([stats])
                 continue
             pending_adds.append((item, tmdb_id, media_type, key))
+
+        # Inject manually-resolved items so remove_missing never evicts them.
+        for manual_entry in self._manual_list_additions.get(actual_list_name, []):
+            m_tmdb_id = manual_entry.get("tmdb_id")
+            m_media_type = manual_entry.get("media_type") or "movie"
+            if not m_tmdb_id:
+                continue
+            m_key = f"{m_tmdb_id}:{m_media_type}"
+            desired_keys.add(m_key)
+            if m_key not in existing_map:
+                synthetic = {"title": f"manual:{m_tmdb_id}", "media_type": m_media_type}
+                pending_adds.append((synthetic, m_tmdb_id, m_media_type, m_key))
 
         pmdb_write_started = time.perf_counter()
         if pending_adds:
