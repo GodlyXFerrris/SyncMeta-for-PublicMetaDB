@@ -854,6 +854,103 @@ class SyncServiceTests(unittest.TestCase):
             [(1, 14), (1, 25)],
         )
 
+    def test_simkl_history_does_not_collapse_sequel_into_season_one_when_future_pmdb_season_is_missing(self) -> None:
+        class MissingFutureSeasonAnimeSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 9601,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "season": 2,
+                    "episode": 3,
+                    "watched_at": "2026-04-01T13:00:00Z",
+                    "title": "Future Season Anime 2",
+                    "root_episode_offset": 12,
+                    "anilist_id": "2222",
+                    "root_anilist_id": "1111",
+                    "ids": {"anilist": "2222", "root_anilist": "1111"},
+                }]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.anime_seasons_by_tmdb[9601] = [
+            {"season_number": 1, "episode_count": 12, "tmdb_season": 1, "tmdb_episode_start": 1},
+            {"season_number": 2, "episode_count": 12, "tmdb_season": 2, "tmdb_episode_start": 1},
+        ]
+        service._simkl = MissingFutureSeasonAnimeSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(pmdb.watched, [])
+
+    def test_simkl_history_allows_single_season_overflow_when_no_multi_season_evidence_exists(self) -> None:
+        class SingleSeasonOverflowSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 9701,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "season": 1,
+                    "episode": 15,
+                    "watched_at": "2026-04-01T13:00:00Z",
+                    "title": "Single Season Overflow Anime",
+                }]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.anime_seasons_by_tmdb[9701] = [
+            {"season_number": 1, "episode_count": 12, "tmdb_season": 1, "tmdb_episode_start": 1},
+        ]
+        service._simkl = SingleSeasonOverflowSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 1)
+        self.assertEqual([(item["season"], item["episode"]) for item in pmdb.watched], [(1, 15)])
+
     def test_history_sync_always_fetches_full_source_history(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
