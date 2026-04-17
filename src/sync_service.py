@@ -1667,9 +1667,14 @@ class SyncService:
                     if (
                         not self._config.sync.dry_run
                         and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
-                        and match_result.resolution_kind != "external_mapping"
                     ):
-                        pending_mapping_contributions.extend(self._collect_id_mapping_contributions(item, tmdb_id))
+                        pending_mapping_contributions.extend(
+                            self._collect_id_mapping_contributions(
+                                item,
+                                tmdb_id,
+                                resolution_kind=match_result.resolution_kind,
+                            )
+                        )
                 else:
                     stats.items_skipped_unresolved += 1
                     unresolved_reason = match_result.unresolved_reason or "not_found"
@@ -1892,22 +1897,56 @@ class SyncService:
         finally:
             pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
-    def _collect_id_mapping_contributions(self, item: dict, tmdb_id: int) -> list[tuple[int, str, str, str]]:
+    def _collect_id_mapping_contributions(
+        self,
+        item: dict,
+        tmdb_id: int,
+        resolution_kind: str | None = None,
+    ) -> list[tuple[int, str, str, str]]:
         """Return unique PMDB mapping contributions to send after resolving."""
         media_type = item.get("media_type", "")
         ids = item.get("ids") or {}
+        is_anime = item.get("simkl_type") == "anime"
+        resolution_kind = str(resolution_kind or "")
+
+        if is_anime and resolution_kind == "root_series":
+            # Root-series fallback is good enough for syncing a title under its
+            # franchise/root PMDB entry, but it is NOT proof that sequel/spinoff
+            # AniList/MAL IDs belong permanently on that root PMDB mapping.
+            direct_anime_ids_safe = False
+        else:
+            direct_anime_ids_safe = True
+
         seen: set[tuple[str, str]] = set()
         contributions: list[tuple[int, str, str, str]] = []
-        for id_type, item_key in [
-            ("mal", "mal_id"),
-            ("anilist", "anilist_id"),
-            ("mal", "root_mal_id"),
-            ("anilist", "root_anilist_id"),
-            ("imdb", "imdb_id"),
-            ("tvdb", "tvdb_id"),
-            ("anidb", "anidb_id"),
-            ("trakt", "trakt_id"),
-        ]:
+        candidates = []
+        if is_anime:
+            if direct_anime_ids_safe:
+                candidates.extend([
+                    ("mal", "mal_id"),
+                    ("anilist", "anilist_id"),
+                ])
+            candidates.extend([
+                ("mal", "root_mal_id"),
+                ("anilist", "root_anilist_id"),
+                ("imdb", "imdb_id"),
+                ("tvdb", "tvdb_id"),
+                ("anidb", "anidb_id"),
+                ("trakt", "trakt_id"),
+            ])
+        else:
+            candidates.extend([
+                ("mal", "mal_id"),
+                ("anilist", "anilist_id"),
+                ("mal", "root_mal_id"),
+                ("anilist", "root_anilist_id"),
+                ("imdb", "imdb_id"),
+                ("tvdb", "tvdb_id"),
+                ("anidb", "anidb_id"),
+                ("trakt", "trakt_id"),
+            ])
+
+        for id_type, item_key in candidates:
             id_value = (
                 item.get(item_key)
                 or ids.get(id_type)
@@ -1964,9 +2003,11 @@ class SyncService:
         finally:
             pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
-    def _contribute_id_mapping(self, item: dict, tmdb_id: int) -> None:
+    def _contribute_id_mapping(self, item: dict, tmdb_id: int, resolution_kind: str | None = None) -> None:
         """Compatibility wrapper for one-off activity/resume backfills."""
-        self._flush_id_mapping_contributions(self._collect_id_mapping_contributions(item, tmdb_id))
+        self._flush_id_mapping_contributions(
+            self._collect_id_mapping_contributions(item, tmdb_id, resolution_kind=resolution_kind)
+        )
 
     def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
         return (
@@ -2332,7 +2373,7 @@ class SyncService:
             tmdb_id = match_result.tmdb_id
             if tmdb_id is not None:
                 if self._should_backfill_pmdb_mapping(item):
-                    self._contribute_id_mapping(item, tmdb_id)
+                    self._contribute_id_mapping(item, tmdb_id, resolution_kind=match_result.resolution_kind)
                 return {
                     **item,
                     "tmdb_id": tmdb_id,
@@ -2340,7 +2381,7 @@ class SyncService:
         if item.get("tmdb_id"):
             if self._should_backfill_pmdb_mapping(item):
                 try:
-                    self._contribute_id_mapping(item, int(item["tmdb_id"]))
+                    self._contribute_id_mapping(item, int(item["tmdb_id"]), resolution_kind="direct_tmdb")
                 except (TypeError, ValueError):
                     pass
             return item
@@ -2349,7 +2390,7 @@ class SyncService:
         if tmdb_id is None:
             return item
         if self._should_backfill_pmdb_mapping(item):
-            self._contribute_id_mapping(item, tmdb_id)
+            self._contribute_id_mapping(item, tmdb_id, resolution_kind=match_result.resolution_kind)
         return {
             **item,
             "tmdb_id": tmdb_id,

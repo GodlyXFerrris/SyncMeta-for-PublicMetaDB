@@ -347,6 +347,12 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class AnimeMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=209867, resolution_kind="direct_tmdb")
+
             def resolve_tmdb_id(self, item: dict) -> int | None:
                 return 209867
 
@@ -380,6 +386,52 @@ class SyncServiceTests(unittest.TestCase):
         self.assertIn(("imdb", "tt22248376"), contributed)
         self.assertIn(("trakt", "12345"), contributed)
         self.assertEqual(len(contributed), len(pmdb.created_mappings))
+
+    def test_anime_root_series_resolution_does_not_contribute_child_ids_to_pmdb(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": ["watching"], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class RootSeriesMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=20, resolution_kind="root_series")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 20
+
+        service._matcher = RootSeriesMatcher()
+
+        service._sync_list([{
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "97938",
+            "mal_id": "34566",
+            "root_anilist_id": "20",
+            "root_mal_id": "1735",
+            "ids": {
+                "anilist": "97938",
+                "mal": "34566",
+                "root_anilist": "20",
+                "root_mal": "1735",
+            },
+        }], "Watching - Anime", "Auto-synced anime")
+
+        contributed = {(item["id_type"], item["id_value"]) for item in pmdb.created_mappings}
+        self.assertNotIn(("anilist", "97938"), contributed)
+        self.assertNotIn(("mal", "34566"), contributed)
+        self.assertIn(("anilist", "20"), contributed)
+        self.assertIn(("mal", "1735"), contributed)
 
     def test_sync_list_tracks_unresolved_reasons_and_phase_metrics(self) -> None:
         service = SyncService(
