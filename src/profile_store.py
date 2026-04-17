@@ -713,10 +713,18 @@ class ProfileStore:
         status: str = "completed",
         error_message: str = "",
     ) -> None:
+        # Drop the dry_run_preview items from history — it's only useful on the
+        # most recent last_results, and keeping it in N history entries bloats
+        # profiles.json without adding value.
+        trimmed_results = []
+        for row in results or []:
+            if isinstance(row, dict) and "dry_run_preview" in row:
+                row = {k: v for k, v in row.items() if k != "dry_run_preview"}
+            trimmed_results.append(copy.deepcopy(row))
         history_entry = {
             "timestamp": timestamp,
             "dry_run": dry_run,
-            "results": copy.deepcopy(results or []),
+            "results": trimmed_results,
             "status": str(status or "completed"),
         }
         if error_message:
