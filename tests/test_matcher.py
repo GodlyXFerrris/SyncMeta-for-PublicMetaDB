@@ -191,5 +191,88 @@ class ItemMatcherTests(unittest.TestCase):
         self.assertEqual(result.resolution_kind, "direct_tmdb")
 
 
+    def test_cache_key_includes_anilist_id_so_stale_entries_are_invalidated(self) -> None:
+        # Two items that differ only in anilist_id must produce different cache keys
+        # so that a stale wrong resolution for one (e.g. Boruto cached as Naruto)
+        # cannot collide with or mask the other.
+        boruto = {
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "97938",
+            "mal_id": "34566",
+            "ids": {"anilist": 97938, "mal": 34566},
+        }
+        naruto = {
+            "title": "Naruto",
+            "year": 2002,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "20",
+            "mal_id": "1735",
+            "ids": {"anilist": 20, "mal": 1735},
+        }
+        # Also verify that an item with the same MAL/title/year but different
+        # anilist_id gets a different key (guards against franchise-root collision).
+        fake_boruto_no_anilist = {
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "99999",
+            "mal_id": "34566",
+            "ids": {"anilist": 99999, "mal": 34566},
+        }
+        key_boruto = ItemMatcher._cache_key(boruto)
+        key_naruto = ItemMatcher._cache_key(naruto)
+        key_fake = ItemMatcher._cache_key(fake_boruto_no_anilist)
+
+        self.assertNotEqual(key_boruto, key_naruto)
+        self.assertNotEqual(key_boruto, key_fake)
+        self.assertIn("97938", key_boruto)
+
+    def test_highest_voted_pmdb_result_resolves_sequel_correctly(self) -> None:
+        # Simulate PMDB returning two results for Boruto's AniList ID: the
+        # wrong franchise-root mapping (Naruto, low votes) first, and the
+        # correct per-show mapping (Boruto, high votes) second.
+        client = StubPMDBClient()
+
+        def fake_lookup_detailed(id_type: str, id_value: str, media_type: str) -> dict:
+            client.calls.append((id_type, id_value, media_type))
+            if (id_type, id_value, media_type) == ("anilist", "97938", "tv"):
+                from src.publicmetadb_client import PublicMetaDBClient, PublicMetaDBConfig
+                pmdb = PublicMetaDBClient(PublicMetaDBConfig(api_key="x"))
+                import types
+
+                def fake_get(path, params=None):
+                    return {
+                        "results": [
+                            {"tmdb_id": 46260, "votes": 1},   # Naruto
+                            {"tmdb_id": 65930, "votes": 10},  # Boruto
+                        ]
+                    }
+
+                pmdb._get = fake_get  # type: ignore[method-assign]
+                return pmdb.lookup_by_external_id_detailed(id_type, id_value, media_type)
+            return {"tmdb_id": None, "status": "miss"}
+
+        client.lookup_by_external_id_detailed = fake_lookup_detailed  # type: ignore[method-assign]
+        matcher = ItemMatcher(client)
+
+        result = matcher.resolve_match({
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "97938",
+            "mal_id": "34566",
+            "ids": {"anilist": 97938, "mal": 34566},
+        })
+
+        self.assertEqual(result.tmdb_id, 65930)
+        self.assertEqual(result.resolution_kind, "external_mapping")
+
+
 if __name__ == "__main__":
     unittest.main()

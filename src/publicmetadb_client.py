@@ -360,8 +360,15 @@ class PublicMetaDBClient:
             })
             if resp and resp.get("results"):
                 self._record_stat("mapping_lookup_hits")
+                results = resp["results"]
+                # Prefer the community-upvoted result. PMDB may return multiple
+                # candidate mappings for the same external ID (e.g. both a wrong
+                # franchise-root mapping contributed by an old sync and the correct
+                # per-show mapping voted in by the community). Taking the highest-
+                # voted entry avoids landing on the wrong franchise entry.
+                best = max(results, key=lambda r: r.get("votes", 0))
                 return {
-                    "tmdb_id": resp["results"][0].get("tmdb_id"),
+                    "tmdb_id": best.get("tmdb_id"),
                     "status": "hit",
                 }
             self._record_stat("mapping_lookup_misses")

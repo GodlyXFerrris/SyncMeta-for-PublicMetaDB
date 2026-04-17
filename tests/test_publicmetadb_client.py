@@ -98,6 +98,36 @@ class PublicMetaDBClientTests(unittest.TestCase):
         self.assertEqual(deleted_ids, ["w1", "w2", "w3", "w4", "w5"])
         self.assertEqual(call_count["value"], 4)
 
+    def test_lookup_prefers_highest_voted_result_over_first(self) -> None:
+        client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+
+        def fake_get(path: str, params: dict | None = None):
+            return {
+                "results": [
+                    {"tmdb_id": 46260, "votes": 1},   # Naruto – wrong, low votes
+                    {"tmdb_id": 65930, "votes": 5},   # Boruto – correct, high votes
+                ]
+            }
+
+        client._get = fake_get  # type: ignore[method-assign]
+
+        result = client.lookup_by_external_id_detailed("anilist", "97938", "tv")
+
+        self.assertEqual(result["tmdb_id"], 65930)
+        self.assertEqual(result["status"], "hit")
+
+    def test_lookup_falls_back_to_first_result_when_no_votes(self) -> None:
+        client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
+
+        def fake_get(path: str, params: dict | None = None):
+            return {"results": [{"tmdb_id": 65930}, {"tmdb_id": 46260}]}
+
+        client._get = fake_get  # type: ignore[method-assign]
+
+        result = client.lookup_by_external_id_detailed("anilist", "97938", "tv")
+
+        self.assertEqual(result["tmdb_id"], 65930)
+
     def test_lookup_by_external_id_treats_401_as_unavailable(self) -> None:
         client = PublicMetaDBClient(PublicMetaDBConfig(api_key="pmdb-key"))
 

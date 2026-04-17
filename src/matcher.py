@@ -437,12 +437,14 @@ class ItemMatcher:
     @staticmethod
     def _cache_key(item: dict) -> str:
         ids = item.get("ids", {})
+        anilist_id = item.get("anilist_id") or ids.get("anilist") or ""
         return (
             f"{item.get('media_type', '')}:"
             f"{ids.get('simkl', '')}:"
             f"{item.get('imdb_id', '')}:"
             f"{item.get('tmdb_id', '')}:"
             f"{ids.get('mal', '')}:"
+            f"{anilist_id}:"
             f"{ids.get('root_mal', '')}:"
             f"{ids.get('root_anilist', '')}:"
             f"{item.get('title', '')}:{item.get('year', '')}"
