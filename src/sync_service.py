@@ -1664,17 +1664,8 @@ class SyncService:
                     stats.match_breakdown[match_result.resolution_kind] = (
                         int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
                     )
-                    if (
-                        not self._config.sync.dry_run
-                        and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
-                    ):
-                        pending_mapping_contributions.extend(
-                            self._collect_id_mapping_contributions(
-                                item,
-                                tmdb_id,
-                                resolution_kind=match_result.resolution_kind,
-                            )
-                        )
+                    # PMDB external ID writeback disabled: wrong mappings are
+                    # more harmful than missing community contributions.
                 else:
                     stats.items_skipped_unresolved += 1
                     unresolved_reason = match_result.unresolved_reason or "not_found"
@@ -1903,117 +1894,16 @@ class SyncService:
         tmdb_id: int,
         resolution_kind: str | None = None,
     ) -> list[tuple[int, str, str, str]]:
-        """Return unique PMDB mapping contributions to send after resolving."""
-        media_type = item.get("media_type", "")
-        ids = item.get("ids") or {}
-        is_anime = item.get("simkl_type") == "anime"
-        resolution_kind = str(resolution_kind or "")
-
-        if is_anime and resolution_kind == "root_series":
-            # Root-series fallback is good enough for syncing a title under its
-            # franchise/root PMDB entry, but it is NOT proof that sequel/spinoff
-            # AniList/MAL IDs belong permanently on that root PMDB mapping.
-            direct_anime_ids_safe = False
-        else:
-            direct_anime_ids_safe = True
-
-        seen: set[tuple[str, str]] = set()
-        contributions: list[tuple[int, str, str, str]] = []
-        candidates = []
-        if is_anime:
-            if direct_anime_ids_safe:
-                candidates.extend([
-                    ("mal", "mal_id"),
-                    ("anilist", "anilist_id"),
-                ])
-            candidates.extend([
-                ("mal", "root_mal_id"),
-                ("anilist", "root_anilist_id"),
-                ("imdb", "imdb_id"),
-                ("tvdb", "tvdb_id"),
-                ("anidb", "anidb_id"),
-                ("trakt", "trakt_id"),
-            ])
-        else:
-            candidates.extend([
-                ("mal", "mal_id"),
-                ("anilist", "anilist_id"),
-                ("mal", "root_mal_id"),
-                ("anilist", "root_anilist_id"),
-                ("imdb", "imdb_id"),
-                ("tvdb", "tvdb_id"),
-                ("anidb", "anidb_id"),
-                ("trakt", "trakt_id"),
-            ])
-
-        for id_type, item_key in candidates:
-            id_value = (
-                item.get(item_key)
-                or ids.get(id_type)
-                or ids.get(item_key)
-                or ids.get(f"root_{id_type}")
-            )
-            if not id_value:
-                continue
-            key = (id_type, str(id_value))
-            if key in seen:
-                continue
-            seen.add(key)
-            contribution_key = (int(tmdb_id), str(media_type), id_type, str(id_value))
-            with self._mapping_contribution_lock:
-                if contribution_key in self._contributed_mapping_keys:
-                    continue
-                self._contributed_mapping_keys.add(contribution_key)
-            contributions.append(contribution_key)
-        return contributions
+        return []
 
     def _flush_id_mapping_contributions(self, contributions: list[tuple[int, str, str, str]]) -> None:
-        if not contributions:
-            return
-        pool = ThreadPoolExecutor(max_workers=min(_MAPPING_WRITE_WORKERS, len(contributions)))
-        shutdown_wait = True
-        try:
-            futures = {
-                pool.submit(self._pmdb.create_id_mapping, tmdb_id, media_type, id_type, id_value): (
-                    tmdb_id,
-                    media_type,
-                    id_type,
-                    id_value,
-                )
-                for tmdb_id, media_type, id_type, id_value in contributions
-            }
-            for future in self._iter_completed_futures(futures):
-                tmdb_id, media_type, id_type, id_value = futures[future]
-                try:
-                    future.result()
-                    logger.debug(
-                        "Contributed %s mapping: %s=%s -> tmdb_id=%d",
-                        media_type,
-                        id_type,
-                        id_value,
-                        tmdb_id,
-                    )
-                except SyncCancelled:
-                    raise
-                except Exception as exc:
-                    logger.debug("Failed to contribute ID mapping: %s", exc)
-        except SyncCancelled:
-            shutdown_wait = False
-            raise
-        finally:
-            pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
+        return
 
     def _contribute_id_mapping(self, item: dict, tmdb_id: int, resolution_kind: str | None = None) -> None:
-        """Compatibility wrapper for one-off activity/resume backfills."""
-        self._flush_id_mapping_contributions(
-            self._collect_id_mapping_contributions(item, tmdb_id, resolution_kind=resolution_kind)
-        )
+        return
 
     def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
-        return (
-            not self._config.sync.dry_run
-            and (item.get("simkl_type") == "anime" or not item.get("tmdb_id"))
-        )
+        return False
 
     def _dry_run_report(self, resolved: list[dict], list_name: str, stats: SyncStats) -> SyncStats:
         logger.info(

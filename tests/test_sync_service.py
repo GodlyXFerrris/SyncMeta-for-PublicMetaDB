@@ -323,7 +323,7 @@ class SyncServiceTests(unittest.TestCase):
             ["SIMKL - Series - Watching", "Trakt List - demo - old-list", "Watching - Series"],
         )
 
-    def test_anime_sync_contributes_all_available_external_ids_to_pmdb(self) -> None:
+    def test_anime_sync_does_not_contribute_external_ids_to_pmdb(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="simkl-client",
@@ -380,12 +380,7 @@ class SyncServiceTests(unittest.TestCase):
             },
         }], "Watching - Anime", "Auto-synced anime")
 
-        contributed = {(item["id_type"], item["id_value"]) for item in pmdb.created_mappings}
-        self.assertIn(("anilist", "154587"), contributed)
-        self.assertIn(("mal", "59978"), contributed)
-        self.assertIn(("imdb", "tt22248376"), contributed)
-        self.assertIn(("trakt", "12345"), contributed)
-        self.assertEqual(len(contributed), len(pmdb.created_mappings))
+        self.assertEqual(pmdb.created_mappings, [])
 
     def test_anime_root_series_resolution_does_not_contribute_child_ids_to_pmdb(self) -> None:
         service = SyncService(
@@ -1310,7 +1305,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(stats.items_added, 1)
         self.assertEqual(stats.items_skipped_duplicate, 1)
 
-    def test_simkl_anime_history_backfills_pmdb_external_ids(self) -> None:
+    def test_simkl_anime_history_does_not_backfill_pmdb_external_ids(self) -> None:
         class DirectAnimeSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:
                 self.last_history_since = since
@@ -1360,12 +1355,9 @@ class SyncServiceTests(unittest.TestCase):
         results = service.run()
 
         watched_stats = next(item for item in results if item.display_name == "Watch History")
-        contributed = {(item["id_type"], item["id_value"]) for item in pmdb.created_mappings}
 
         self.assertEqual(watched_stats.items_added, 1)
-        self.assertIn(("anilist", "154587"), contributed)
-        self.assertIn(("mal", "59978"), contributed)
-        self.assertIn(("imdb", "tt22248376"), contributed)
+        self.assertEqual(pmdb.created_mappings, [])
 
     def test_history_only_mode_does_not_run_list_syncs(self) -> None:
         config = AppConfig(
