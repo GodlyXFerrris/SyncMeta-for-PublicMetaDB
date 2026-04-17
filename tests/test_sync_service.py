@@ -1181,6 +1181,83 @@ class SyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(pmdb.anime_seasons_calls, [9501])
 
+    def test_simkl_history_skips_zero_episode_placeholder_target_seasons(self) -> None:
+        class FrierenStyleSimklClient(StubSimklClient):
+            def get_watched_history(self, since: str | None = None) -> list[dict]:
+                self.last_history_since = since
+                return [{
+                    "tmdb_id": 209867,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "season": 1,
+                    "episode": 30,
+                    "watched_at": "2026-04-01T13:00:00Z",
+                    "title": "Frieren: Beyond Journey's End",
+                    "root_episode_offset": 0,
+                    "anilist_id": "154587",
+                    "ids": {"anilist": "154587"},
+                }]
+
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+                simkl_sync_watched_history=True,
+                simkl_history_anime_only=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.anime_seasons_by_tmdb[209867] = [
+            {"season_number": 1, "episode_count": 28, "tmdb_season": 1, "tmdb_episode_start": 1},
+            {"season_number": 2, "episode_count": 0, "tmdb_season": 2, "tmdb_episode_start": 1},
+        ]
+        service._simkl = FrierenStyleSimklClient()
+        service._matcher = StubActivityMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(pmdb.watched, [])
+
+    def test_write_watched_history_items_dedupes_duplicate_cross_season_payloads(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": [], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+        stats = SyncStats(display_name="Watch History", source_name="SIMKL")
+        existing_counts = {}
+
+        service._write_watched_history_items(
+            [
+                {"tmdb_id": 20, "media_type": "tv", "season": 1, "episode": 1, "title": "Naruto", "watched_at": "2026-04-01T00:00:00Z"},
+                {"tmdb_id": 20, "media_type": "tv", "season": 1, "episode": 1, "title": "Naruto", "watched_at": "2026-04-01T00:00:00Z"},
+            ],
+            existing_counts,
+            stats,
+            "Writing test history",
+        )
+
+        self.assertEqual(len(pmdb.watched), 1)
+        self.assertEqual(stats.items_added, 1)
+        self.assertEqual(stats.items_skipped_duplicate, 1)
+
     def test_simkl_anime_history_backfills_pmdb_external_ids(self) -> None:
         class DirectAnimeSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:

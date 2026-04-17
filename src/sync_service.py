@@ -762,8 +762,10 @@ class SyncService:
             """Validate remapped season/episode against known episode counts.
 
             - Redistribute across known seasons when cumulative counts are reliable.
-            - Refuse unsafe "collapse to season 1" remaps for sequel/root-offset
-              items when PMDB is missing future-season metadata.
+            - Treat 0-episode placeholder seasons as invalid targets unless a
+              redistribution lands on a real season.
+            - Refuse unsafe remaps for sequel/root-offset items when PMDB season
+              topology is incomplete or inconsistent.
             - Only allow season-1 overflow when the mapping evidence says this is
               effectively a single-season target.
             Returns a (possibly corrected) remapped dict, or None if unresolvable.
@@ -775,22 +777,28 @@ class SyncService:
             season_ep_count = plan.get(target_season)
             if season_ep_count is None:
                 return remapped  # No data — accept as-is
+
+            absolute = offset + episode
+            known_positive_seasons = sorted(sn for sn, cnt in plan.items() if int(cnt or 0) > 0)
+            has_placeholder_seasons = any(int(cnt or 0) == 0 for cnt in plan.values())
+            has_multi_season_evidence = (
+                offset > 0
+                or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
+                or len(known_positive_seasons) > 1
+                or has_placeholder_seasons
+            )
+            only_season_one_known = known_positive_seasons == [1]
+
             if season_ep_count == 0 or target_episode > season_ep_count:
-                absolute = offset + episode
                 redistributed = self._map_absolute_via_season_plan(plan, absolute)
                 if redistributed:
                     out = {**remapped, **redistributed}
                     if target_tmdb_id != tmdb_id:
                         out["tmdb_id"] = target_tmdb_id
                     return out
-                known_positive_seasons = sorted(sn for sn, cnt in plan.items() if int(cnt or 0) > 0)
-                has_multi_season_evidence = (
-                    offset > 0
-                    or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
-                    or len(known_positive_seasons) > 1
-                )
-                only_season_one_known = known_positive_seasons == [1]
-                if season_ep_count == 0 and only_season_one_known and not has_multi_season_evidence:
+                if season_ep_count == 0:
+                    return None
+                if only_season_one_known and not has_multi_season_evidence:
                     return {**remapped, "season": 1, "episode": absolute}
                 return None
             return remapped
@@ -2000,6 +2008,21 @@ class SyncService:
         status_message: str,
         total_source: int = 0,
     ) -> None:
+        if not items:
+            return
+
+        deduped_items: list[dict] = []
+        pending_seen: set[str] = set()
+        for item in items:
+            key = self._watched_identity_key(item)
+            if key and key in pending_seen:
+                stats.items_skipped_duplicate += 1
+                continue
+            if key:
+                pending_seen.add(key)
+            deduped_items.append(item)
+
+        items = deduped_items
         if not items:
             return
 
