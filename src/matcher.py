@@ -255,17 +255,10 @@ class ItemMatcher:
         media_type = item["media_type"]
         is_anime = item.get("simkl_type") == "anime"
 
-        # For anime with an AniList ID: walk the prequel chain BEFORE accepting
-        # the direct TMDB ID. SIMKL may supply a sequel-specific TMDB entry while
-        # PMDB indexes the whole franchise under the root series entry. Returning
-        # the root series TMDB ID avoids the mismatch. For root-series items,
-        # _try_anime_root_lookup returns None so we fall through to the TMDB ID.
-        if is_anime and self._anime_root_resolver and item.get("anilist_id"):
-            root_result = self._try_anime_root_lookup(item, media_type)
-            if root_result.tmdb_id:
-                with self._lock:
-                    self._record_match_stat(root_result)
-                return root_result
+        # Do NOT collapse anime list identity to the franchise root up front.
+        # Root-chain lookups are useful for history remapping, but for title/list
+        # sync they can incorrectly turn Boruto into Naruto or UBW into Fate/Zero.
+        # Prefer direct external mappings and verified direct TMDB first.
 
         if not is_anime:
             tmdb_raw = item.get("tmdb_id")
@@ -300,33 +293,26 @@ class ItemMatcher:
             if status == "lookup_unavailable":
                 lookup_unavailable = True
 
-        for id_type, item_key in _ROOT_LOOKUP_CHAIN:
-            ext_id = item.get(item_key) or ids.get(item_key) or ids.get(f"root_{id_type}")
-            if not ext_id:
-                continue
-            had_lookup_candidate = True
-            ext_id = str(ext_id)
-            tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
-            if tmdb_id:
-                logger.info(
-                    "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
-                    title, id_type, ext_id, tmdb_id,
-                    item.get("root_title") or "Unknown",
-                )
-                result = MatchResult(tmdb_id=tmdb_id, resolution_kind="root_series")
-                with self._lock:
-                    self._record_match_stat(result)
-                return result
-            if status == "lookup_unavailable":
-                lookup_unavailable = True
-
-        # Anime without an AniList ID: try root resolver as last resort using MAL fallback.
-        if is_anime and self._anime_root_resolver and not item.get("anilist_id"):
-            root_result = self._try_anime_root_lookup(item, media_type)
-            if root_result.tmdb_id:
-                with self._lock:
-                    self._record_match_stat(root_result)
-                return root_result
+        if not is_anime:
+            for id_type, item_key in _ROOT_LOOKUP_CHAIN:
+                ext_id = item.get(item_key) or ids.get(item_key) or ids.get(f"root_{id_type}")
+                if not ext_id:
+                    continue
+                had_lookup_candidate = True
+                ext_id = str(ext_id)
+                tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
+                if tmdb_id:
+                    logger.info(
+                        "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
+                        title, id_type, ext_id, tmdb_id,
+                        item.get("root_title") or "Unknown",
+                    )
+                    result = MatchResult(tmdb_id=tmdb_id, resolution_kind="root_series")
+                    with self._lock:
+                        self._record_match_stat(result)
+                    return result
+                if status == "lookup_unavailable":
+                    lookup_unavailable = True
 
         tmdb_raw = item.get("tmdb_id")
         if tmdb_raw:

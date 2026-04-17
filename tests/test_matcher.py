@@ -21,13 +21,32 @@ class DetailedStubPMDBClient(StubPMDBClient):
 
 
 class ItemMatcherTests(unittest.TestCase):
-    def test_falls_back_to_root_series_ids(self) -> None:
+    def test_non_anime_falls_back_to_root_series_ids(self) -> None:
         matcher = ItemMatcher(StubPMDBClient())
 
         tmdb_id = matcher.resolve_tmdb_id({
+            "title": "Example Franchise Sequel",
+            "year": 2025,
+            "media_type": "tv",
+            "root_mal_id": "48675",
+            "root_anilist_id": "140960",
+            "root_title": "Example Root",
+            "ids": {
+                "root_mal": 48675,
+                "root_anilist": 140960,
+            },
+        })
+
+        self.assertEqual(tmdb_id, 68028)
+
+    def test_anime_does_not_fall_back_to_root_series_ids(self) -> None:
+        matcher = ItemMatcher(StubPMDBClient())
+
+        result = matcher.resolve_match({
             "title": "SPY x FAMILY Season 3",
             "year": 2025,
             "media_type": "tv",
+            "simkl_type": "anime",
             "mal_id": "59027",
             "anilist_id": "177937",
             "root_mal_id": "48675",
@@ -41,7 +60,8 @@ class ItemMatcherTests(unittest.TestCase):
             },
         })
 
-        self.assertEqual(tmdb_id, 68028)
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.unresolved_reason, "not_found")
 
     def test_anime_prefers_anilist_before_imdb(self) -> None:
         client = StubPMDBClient()
