@@ -86,6 +86,14 @@ class SyncStats:
     match_breakdown: dict[str, int] = field(default_factory=dict)
     unresolved_reason_counts: dict[str, int] = field(default_factory=dict)
     pmdb_metrics: dict[str, int] = field(default_factory=dict)
+    # Populated only on dry-run list syncs. Each entry is a compact record of a
+    # resolved item so the dashboard can show a preview of what would be added.
+    dry_run_preview: list[dict] = field(default_factory=list)
+
+
+# Cap preview items per list to keep the dry-run payload bounded even for
+# profiles that have hundreds of items across many lists.
+_DRY_RUN_PREVIEW_LIMIT = 50
 
 
 def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
@@ -1933,6 +1941,7 @@ class SyncService:
             len(resolved),
             stats.items_skipped_unresolved,
         )
+        preview: list[dict] = []
         for item in resolved:
             logger.debug(
                 "    [DRY RUN] %s  year=%s  tmdb=%s  type=%s",
@@ -1941,6 +1950,14 @@ class SyncService:
                 item["resolved_tmdb_id"],
                 item["media_type"],
             )
+            if len(preview) < _DRY_RUN_PREVIEW_LIMIT:
+                preview.append({
+                    "title": item.get("title") or "Unknown",
+                    "year": item.get("year"),
+                    "tmdb_id": item.get("resolved_tmdb_id"),
+                    "media_type": item.get("media_type"),
+                })
+        stats.dry_run_preview = preview
         return stats
 
     def _write_watched_history_items(

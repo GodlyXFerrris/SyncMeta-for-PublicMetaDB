@@ -290,11 +290,52 @@ def _validate_profile_configuration(credentials: dict, options: dict) -> tuple[A
     return config, errors
 
 
-def _json_error(message: str, status_code: int, details: list[str] | None = None):
-    payload = {"error": message}
+def _json_error(
+    message: str,
+    status_code: int,
+    details: list[str] | None = None,
+    *,
+    provider: str | None = None,
+    hint: str | None = None,
+):
+    payload: dict = {"error": message}
     if details:
         payload["details"] = details
+    if provider:
+        payload["provider"] = provider
+    if hint:
+        payload["hint"] = hint
+    payload["status_code"] = status_code
     return jsonify(payload), status_code
+
+
+_PROVIDER_STATUS_HINTS = {
+    401: "Check that your access token / API key is saved and hasn't expired. Reconnect the provider in Settings.",
+    403: "The provider rejected this request — usually because the token is missing the required scope or was revoked.",
+    404: "The provider returned 'not found'. The list or resource may have been deleted on their end.",
+    429: "The provider is rate-limiting requests. Wait a minute and try again.",
+}
+
+
+def _derive_provider_hint(provider: str, exc: Exception, explicit_hint: str | None = None) -> str | None:
+    if explicit_hint:
+        return explicit_hint
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if isinstance(status, int) and status in _PROVIDER_STATUS_HINTS:
+        return _PROVIDER_STATUS_HINTS[status]
+    message = str(exc).lower()
+    if "timeout" in message or "timed out" in message:
+        return f"The {provider} API did not respond in time. Retry, or check their status page."
+    if "connection" in message and provider:
+        return f"Could not reach the {provider} API. Check your network connection."
+    return None
+
+
+def _extract_upstream_status(exc: Exception) -> int | None:
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
 
 
 def _profile_response(profile: dict, include_credentials: bool = False):
@@ -884,7 +925,11 @@ def api_profile_login():
     client_key = _request_client_key()
 
     if _login_limiter.is_limited(client_key):
-        return _json_error("Too many login attempts. Please wait and try again.", 429)
+        return _json_error(
+            "Too many login attempts. Please wait and try again.",
+            429,
+            hint=f"Login is locked for up to {LOGIN_WINDOW_SECONDS // 60} minutes. Wait before retrying.",
+        )
 
     try:
         profile = _profile_store.get_profile(profile_id, password, include_credentials=True)
@@ -946,7 +991,12 @@ def api_simkl_pin_start():
         pin_data = client.request_pin()
     except Exception as exc:
         logger.exception("Failed to start SIMKL PIN auth")
-        return _json_error(f"Failed to start SIMKL auth: {exc}", 400)
+        return _json_error(
+            f"Failed to start SIMKL auth: {exc}",
+            400,
+            provider="SIMKL",
+            hint=_derive_provider_hint("SIMKL", exc, "Double-check your SIMKL client ID in Settings."),
+        )
 
     response = {
         "user_code": pin_data.get("user_code"),
@@ -976,7 +1026,12 @@ def api_simkl_pin_check():
         check = client.check_pin(user_code) or {}
     except Exception as exc:
         logger.exception("Failed to check SIMKL PIN auth")
-        return _json_error(f"Failed to check SIMKL auth: {exc}", 400)
+        return _json_error(
+            f"Failed to check SIMKL auth: {exc}",
+            400,
+            provider="SIMKL",
+            hint=_derive_provider_hint("SIMKL", exc),
+        )
 
     if check.get("result") == "OK" and check.get("access_token"):
         return jsonify({
@@ -1010,7 +1065,12 @@ def api_trakt_device_start():
         data = client.request_device_code()
     except Exception as exc:
         logger.exception("Failed to start Trakt device auth")
-        return _json_error(f"Failed to start Trakt auth: {exc}", 400)
+        return _json_error(
+            f"Failed to start Trakt auth: {exc}",
+            400,
+            provider="Trakt",
+            hint=_derive_provider_hint("Trakt", exc, "Verify the Trakt client ID and secret in Settings."),
+        )
 
     return jsonify({
         "device_code": data.get("device_code"),
@@ -1064,7 +1124,12 @@ def api_trakt_device_check():
             }), 400
 
         logger.warning("Trakt device auth check failed (error=%s): %s", error_code or "unknown", exc)
-        return _json_error(f"Failed to check Trakt auth: {exc}", 400)
+        return _json_error(
+            f"Failed to check Trakt auth: {exc}",
+            400,
+            provider="Trakt",
+            hint=_derive_provider_hint("Trakt", exc),
+        )
 
     if data.get("access_token"):
         return jsonify({
@@ -1103,7 +1168,14 @@ def api_trakt_catalogs():
             items = client.get_personal_lists_metadata() + client.get_liked_lists_metadata()
     except Exception as exc:
         logger.exception("Failed to load Trakt catalogs")
-        return _json_error(f"Failed to load Trakt catalogs: {exc}", 400)
+        upstream = _extract_upstream_status(exc)
+        fallback_hint = "Your Trakt access token may be expired — reconnect Trakt in Settings." if upstream == 401 else None
+        return _json_error(
+            f"Failed to load Trakt catalogs: {exc}",
+            400,
+            provider="Trakt",
+            hint=_derive_provider_hint("Trakt", exc, fallback_hint),
+        )
 
     return jsonify({"items": items, "query": query})
 
@@ -1125,7 +1197,14 @@ def api_mdblist_lists():
         items = client.search_public_lists(query) if query else client.get_user_lists()
     except Exception as exc:
         logger.exception("Failed to load MDBList lists")
-        return _json_error(f"Failed to load MDBList lists: {exc}", 400)
+        upstream = _extract_upstream_status(exc)
+        fallback_hint = "Your MDBList API key looks invalid — copy a fresh key from mdblist.com settings." if upstream in (401, 403) else None
+        return _json_error(
+            f"Failed to load MDBList lists: {exc}",
+            400,
+            provider="MDBList",
+            hint=_derive_provider_hint("MDBList", exc, fallback_hint),
+        )
 
     return jsonify({"items": items, "query": query})
 

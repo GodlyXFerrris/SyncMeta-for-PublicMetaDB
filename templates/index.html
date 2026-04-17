@@ -81,8 +81,38 @@
     .activity-stat{padding:10px 12px;border:1px solid var(--z900);border-radius:8px;background:rgba(24,24,27,.55)}
     .activity-stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.45px;color:var(--z500);font-weight:700;margin-bottom:4px}
     .activity-stat-value{font-size:16px;font-weight:700;color:var(--z100);font-variant-numeric:tabular-nums}
-    .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.9);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300)}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
+    .toast{position:fixed;bottom:24px;right:24px;padding:12px 16px;border-radius:8px;font-size:13px;background:rgba(10,10,11,.92);border:1px solid var(--z800);backdrop-filter:blur(16px);opacity:0;transform:translateY(10px);transition:all .3s;z-index:100;color:var(--z300);max-width:min(420px,calc(100vw - 48px));display:flex;flex-direction:column;gap:4px}.toast.show{opacity:1;transform:translateY(0)}.toast.error{border-color:rgba(248,113,113,.3);color:var(--red)}.toast.success{border-color:rgba(52,211,153,.3);color:var(--green)}
+    .toast-message{font-weight:500;word-break:break-word;line-height:1.35}
+    .toast-hint{font-size:12px;color:var(--z500);font-weight:400;word-break:break-word;line-height:1.35}
+    .toast.error .toast-hint{color:rgba(248,113,113,.8)}
+    .toast.success .toast-hint{color:rgba(52,211,153,.8)}
+    .toast-actions{display:flex;gap:10px;margin-top:2px}
+    .toast-action{background:none;border:none;padding:0;font-size:11px;color:var(--z400);cursor:pointer;text-decoration:underline;font-weight:600}
+    .toast-action:hover{color:var(--z100)}
     .save-flash{font-size:12px;color:var(--green);opacity:0;transition:opacity .3s;margin-left:8px}.save-flash.show{opacity:1}.actions-bar{margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}.actions-meta{font-size:12px;color:var(--z600)}.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    .next-sync-badge{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;border:1px solid var(--z800);background:var(--z950);color:var(--z400);font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;cursor:default}
+    .next-sync-badge.soon{border-color:rgba(124,109,247,.45);color:var(--accent);background:rgba(124,109,247,.08)}
+    .next-sync-badge.imminent{border-color:rgba(52,211,153,.45);color:var(--green);background:rgba(20,83,45,.18)}
+    .next-sync-badge.off{border-color:var(--z800);color:var(--z600);background:var(--z950)}
+    .next-sync-dot{width:6px;height:6px;border-radius:999px;background:currentColor;box-shadow:0 0 8px currentColor}
+    .provider-progress{display:flex;flex-direction:column;gap:8px;padding:14px 18px;border-bottom:1px solid var(--z900)}
+    .provider-progress-title{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--z500);font-weight:700}
+    .provider-progress-row{display:grid;grid-template-columns:110px minmax(0,1fr) auto;align-items:center;gap:10px;font-size:12px}
+    .provider-progress-label{color:var(--z300);font-weight:600;display:flex;align-items:center;gap:8px}
+    .provider-progress-label .dot{width:8px;height:8px;border-radius:999px;background:var(--z700)}
+    .provider-progress-bar{position:relative;height:8px;border-radius:4px;background:var(--z900);overflow:hidden;min-width:0}
+    .provider-progress-bar .fill{position:absolute;inset:0;right:auto;background:var(--accent);border-radius:4px;transition:width .2s linear}
+    .provider-progress-bar .fill.done{background:var(--green)}
+    .provider-progress-stats{color:var(--z500);font-variant-numeric:tabular-nums;white-space:nowrap}
+    .provider-progress-stats .added{color:var(--green)} .provider-progress-stats .skipped{color:var(--z500)}
+    .dry-run-preview{padding:14px 18px;border-top:1px dashed var(--z800);background:rgba(124,109,247,.04)}
+    .dry-run-preview-header{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--z500);margin-bottom:10px;font-weight:600}
+    .dry-run-preview-header .pill{padding:2px 8px;border-radius:999px;background:rgba(124,109,247,.12);color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+    .dry-run-preview-tabs{display:flex;gap:6px;margin-bottom:8px}
+    .dry-run-preview-tab{padding:5px 12px;border-radius:999px;border:1px solid var(--z800);background:var(--z950);color:var(--z400);font-size:11px;font-weight:600;cursor:pointer}
+    .dry-run-preview-tab.active{border-color:rgba(124,109,247,.55);background:rgba(124,109,247,.18);color:var(--white)}
+    .dry-run-preview-list{display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto;font-size:12px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--z400)}
+    .dry-run-preview-list .preview-row{padding:4px 8px;border-radius:4px;background:var(--z950);border:1px solid var(--z900)}
     .hidden{display:none}
     .inline-actions{display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:nowrap;min-width:150px}
     .auth-box{margin-top:12px;padding:12px;border:1px solid var(--z800);border-radius:8px;background:var(--z900)}
@@ -180,6 +210,7 @@
           <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Lists</span></button>
           <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run Lists</button>
           <button class="btn btn-danger hidden" id="btn-stop" onclick="stopSync()">Stop</button>
+          <span class="next-sync-badge hidden" id="next-sync-badge" title="Time until the next background sync"><span class="next-sync-dot"></span><span id="next-sync-text">Next sync —</span></span>
           <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
         </div>
         <div class="panel hidden" id="activity-panel">
@@ -199,6 +230,8 @@
         </div>
         <div class="panel">
           <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
+          <div id="provider-progress" class="hidden"></div>
+          <div id="dry-run-preview-container" class="hidden"></div>
           <div id="results-body"><div class="empty">No sync results yet. Save a profile in Settings and the server will keep it synced automatically.</div></div>
         </div>
         <div class="panel" id="unresolved-panel" style="display:none">
@@ -506,7 +539,13 @@
     </div>
   </footer>
 
-  <div class="toast" id="toast"></div>
+  <div class="toast" id="toast">
+    <div class="toast-message" id="toast-message"></div>
+    <div class="toast-hint hidden" id="toast-hint"></div>
+    <div class="toast-actions hidden" id="toast-actions">
+      <button type="button" class="toast-action" id="toast-copy">Copy details</button>
+    </div>
+  </div>
 
   <script>
     const CREDS_KEY = 'sync_credentials';
@@ -1196,9 +1235,31 @@
     }
 
     function formatApiError(data, fallback) {
-      if (!data) return fallback;
-      if (Array.isArray(data.details) && data.details.length) return data.details.join(' ');
-      return data.error || fallback;
+      if (!data) return { message: fallback, hint: '', provider: '', status: 0 };
+      let message;
+      if (Array.isArray(data.details) && data.details.length) {
+        message = data.details.join(' ');
+      } else {
+        message = data.error || fallback;
+      }
+      return {
+        message: message,
+        hint: data.hint || '',
+        provider: data.provider || '',
+        status: Number(data.status_code || 0),
+      };
+    }
+
+    function toastErrorArg(data, fallback) {
+      // Legacy callers pass a plain string to showToast. Adapters convert
+      // an error payload into the rich object the toast renderer understands.
+      const info = formatApiError(data, fallback);
+      return {
+        message: info.message,
+        hint: info.hint,
+        provider: info.provider,
+        status: info.status,
+      };
     }
 
     function intervalLabel(seconds) {
@@ -1288,16 +1349,79 @@
       }
     }
 
+    let toastHideTimer = null;
     function showToast(message, isError, isSuccess) {
       const toast = el('toast');
-      toast.textContent = message;
+      const messageNode = el('toast-message');
+      const hintNode = el('toast-hint');
+      const actionsNode = el('toast-actions');
+      const copyBtn = el('toast-copy');
+
+      let text = '';
+      let hint = '';
+      let provider = '';
+      let status = 0;
+      if (message && typeof message === 'object') {
+        text = message.message || '';
+        hint = message.hint || '';
+        provider = message.provider || '';
+        status = Number(message.status || 0);
+      } else {
+        text = String(message || '');
+      }
+
+      messageNode.textContent = text;
+      if (hint) {
+        hintNode.textContent = hint;
+        hintNode.classList.remove('hidden');
+      } else {
+        hintNode.textContent = '';
+        hintNode.classList.add('hidden');
+      }
+
+      const showCopy = isError && (provider || status);
+      if (showCopy) {
+        const details = [
+          provider ? `provider: ${provider}` : '',
+          status ? `status: ${status}` : '',
+          text ? `message: ${text}` : '',
+          hint ? `hint: ${hint}` : '',
+        ].filter(Boolean).join('\n');
+        copyBtn.onclick = () => {
+          const copyTarget = details || text;
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(copyTarget).then(
+              () => { copyBtn.textContent = 'Copied'; setTimeout(() => { copyBtn.textContent = 'Copy details'; }, 1500); },
+              () => { copyBtn.textContent = 'Copy failed'; setTimeout(() => { copyBtn.textContent = 'Copy details'; }, 1500); }
+            );
+          }
+        };
+        actionsNode.classList.remove('hidden');
+      } else {
+        copyBtn.onclick = null;
+        actionsNode.classList.add('hidden');
+      }
+
       toast.className = 'toast show' + (isError ? ' error' : '') + (isSuccess ? ' success' : '');
-      setTimeout(() => { toast.className = 'toast'; }, 3500);
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      const duration = isError && hint ? 6000 : 3500;
+      toastHideTimer = setTimeout(() => {
+        toast.className = 'toast';
+        toastHideTimer = null;
+      }, duration);
+    }
+
+    function flattenStatusMessage(message) {
+      if (message && typeof message === 'object') {
+        const parts = [message.message || '', message.hint || ''].filter(Boolean);
+        return parts.join(' — ');
+      }
+      return String(message || '');
     }
 
     function setSimklAuthStatus(message, isError) {
       const node = el('simkl-auth-status');
-      node.textContent = message;
+      node.textContent = flattenStatusMessage(message);
       node.style.color = isError ? 'var(--red)' : '';
     }
 
@@ -1315,7 +1439,7 @@
 
     function setTraktAuthStatus(message, isError) {
       const node = el('trakt-auth-status');
-      node.textContent = message;
+      node.textContent = flattenStatusMessage(message);
       node.style.color = isError ? 'var(--red)' : '';
     }
 
@@ -1333,7 +1457,7 @@
 
     function setTraktCatalogStatus(message, isError) {
       const node = el('trakt-catalog-status');
-      node.textContent = message;
+      node.textContent = flattenStatusMessage(message);
       node.style.color = isError ? 'var(--red)' : '';
     }
 
@@ -1653,7 +1777,7 @@
 
     function setMdbListStatus(message, isError) {
       const node = el('mdblist-status');
-      node.textContent = message;
+      node.textContent = flattenStatusMessage(message);
       node.style.color = isError ? 'var(--red)' : '';
     }
 
@@ -2113,10 +2237,161 @@
       el('btn-sync-history').disabled = true;
       el('btn-sync-resume').disabled = true;
       updateClearHistoryButtons(false, false);
+      const nextBadge = el('next-sync-badge');
+      if (nextBadge) nextBadge.classList.add('hidden');
+      const providerProgress = el('provider-progress');
+      if (providerProgress) { providerProgress.classList.add('hidden'); providerProgress.innerHTML = ''; }
+      const dryRunPreview = el('dry-run-preview-container');
+      if (dryRunPreview) { dryRunPreview.classList.add('hidden'); dryRunPreview.innerHTML = ''; }
       if (polling) {
         clearInterval(polling);
         polling = null;
       }
+    }
+
+    let nextSyncTicker = null;
+    function formatCountdown(seconds) {
+      seconds = Math.max(0, Math.floor(seconds));
+      if (seconds < 60) return seconds + 's';
+      const m = Math.floor(seconds / 60);
+      if (m < 60) {
+        const s = seconds % 60;
+        return s ? `${m}m ${s}s` : `${m}m`;
+      }
+      const h = Math.floor(m / 60);
+      if (h < 24) {
+        const rem = m % 60;
+        return rem ? `${h}h ${rem}m` : `${h}h`;
+      }
+      return Math.floor(h / 24) + 'd';
+    }
+
+    function updateNextSyncBadge() {
+      const badge = el('next-sync-badge');
+      const text = el('next-sync-text');
+      if (!badge || !text) return;
+      const profile = lastDashboardProfile;
+      if (!profile) {
+        badge.classList.add('hidden');
+        return;
+      }
+      const options = profile.options || {};
+      if (profile.sync_running) {
+        badge.classList.add('hidden');
+        return;
+      }
+      if (options.auto_sync === false) {
+        badge.classList.remove('hidden');
+        badge.classList.remove('soon', 'imminent');
+        badge.classList.add('off');
+        text.textContent = 'Auto sync off';
+        return;
+      }
+      if (!profile.next_sync_at) {
+        badge.classList.add('hidden');
+        return;
+      }
+      const secondsLeft = Math.floor((new Date(profile.next_sync_at).getTime() - Date.now()) / 1000);
+      if (Number.isNaN(secondsLeft)) {
+        badge.classList.add('hidden');
+        return;
+      }
+      badge.classList.remove('hidden', 'off');
+      badge.classList.toggle('imminent', secondsLeft <= 60);
+      badge.classList.toggle('soon', secondsLeft > 60 && secondsLeft <= 600);
+      if (secondsLeft <= 0) {
+        text.textContent = 'Next sync any moment';
+      } else {
+        text.textContent = 'Next sync in ' + formatCountdown(secondsLeft);
+      }
+    }
+
+    function ensureNextSyncTicker() {
+      if (nextSyncTicker) return;
+      nextSyncTicker = setInterval(updateNextSyncBadge, 1000);
+    }
+
+    function renderDryRunPreview(profile, results) {
+      // Find lists that have dry-run preview items (populated on the last dry run).
+      const hasPreview = Array.isArray(results) && results.some(row => Array.isArray(row && row.dry_run_preview) && row.dry_run_preview.length);
+      const container = el('dry-run-preview-container');
+      if (!container) return;
+      if (!hasPreview || (profile && profile.sync_running)) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+      }
+      const totals = results.reduce((acc, row) => {
+        const items = (row && row.dry_run_preview) || [];
+        acc.items += items.length;
+        acc.lists += items.length ? 1 : 0;
+        return acc;
+      }, { items: 0, lists: 0 });
+      const groups = results
+        .filter(row => Array.isArray(row && row.dry_run_preview) && row.dry_run_preview.length)
+        .map(row => {
+          const items = row.dry_run_preview.map(item => {
+            const title = esc(item.title || 'Unknown');
+            const year = item.year ? ` <span style="color:var(--z500)">(${esc(item.year)})</span>` : '';
+            const type = item.media_type ? ` <span style="color:var(--z600)">· ${esc(item.media_type)}</span>` : '';
+            const tmdb = item.tmdb_id ? ` <span style="color:var(--z600)">· tmdb:${esc(item.tmdb_id)}</span>` : '';
+            return `<div class="preview-row">${title}${year}${type}${tmdb}</div>`;
+          }).join('');
+          const shown = row.dry_run_preview.length;
+          const total = Number(row.items_added || 0);
+          const more = total > shown ? ` <span style="color:var(--z500)">(showing first ${shown} of ${total})</span>` : '';
+          return `<div style="margin-bottom:12px"><div style="font-size:12px;color:var(--z300);font-weight:600;margin-bottom:6px">${esc(row.display_name || row.list_name || '')}${more}</div><div class="dry-run-preview-list">${items}</div></div>`;
+        })
+        .join('');
+      container.innerHTML = `<div class="dry-run-preview"><div class="dry-run-preview-header"><span class="pill">Dry Run</span><span>Would add ${totals.items} item${totals.items === 1 ? '' : 's'} across ${totals.lists} list${totals.lists === 1 ? '' : 's'}</span></div>${groups}</div>`;
+      container.classList.remove('hidden');
+    }
+
+    function renderProviderProgress(profile, results) {
+      const node = el('provider-progress');
+      if (!node) return;
+      // Per-provider breakdown only adds value while a sync is running — when idle
+      // the Latest Sync Results table already shows final counts per list.
+      if (!profile || !profile.sync_running || !Array.isArray(results) || !results.length) {
+        node.classList.add('hidden');
+        node.innerHTML = '';
+        return;
+      }
+      const groups = new Map();
+      results.forEach(row => {
+        const key = (row.source_name || 'Other').trim() || 'Other';
+        const agg = groups.get(key) || {
+          name: key,
+          lists: 0,
+          fetched: 0,
+          resolved: 0,
+          added: 0,
+          removed: 0,
+          unresolved: 0,
+          errors: 0,
+        };
+        agg.lists += 1;
+        agg.fetched += row.items_fetched || 0;
+        agg.resolved += row.items_resolved || 0;
+        agg.added += row.items_added || 0;
+        agg.removed += row.items_removed || 0;
+        agg.unresolved += row.items_skipped_unresolved || 0;
+        agg.errors += row.error_count || 0;
+        groups.set(key, agg);
+      });
+      const sorted = Array.from(groups.values()).sort((a, b) => a.name.localeCompare(b.name));
+      const rowsHtml = sorted.map(group => {
+        const denom = group.fetched || 1;
+        const pct = group.fetched ? Math.min(100, Math.round((group.resolved / denom) * 100)) : 0;
+        const doneClass = group.fetched && group.resolved >= group.fetched ? ' done' : '';
+        return `<div class="provider-progress-row">
+          <div class="provider-progress-label"><span class="dot"></span>${esc(group.name)}<span class="catalog-note" style="margin:0;color:var(--z600)">· ${group.lists} list${group.lists === 1 ? '' : 's'}</span></div>
+          <div class="provider-progress-bar"><div class="fill${doneClass}" style="width:${pct}%"></div></div>
+          <div class="provider-progress-stats"><span>${group.resolved}/${group.fetched}</span> · <span class="added">+${group.added}</span>${group.unresolved > 0 ? ` · <span class="c-orange">${group.unresolved} unres</span>` : ''}${group.errors > 0 ? ` · <span class="c-red">${group.errors} err</span>` : ''}</div>
+        </div>`;
+      }).join('');
+      node.innerHTML = `<div class="provider-progress"><div class="provider-progress-title">Live progress by source</div>${rowsHtml}</div>`;
+      node.classList.remove('hidden');
     }
 
     function renderDashboard(profile) {
@@ -2166,6 +2441,8 @@
       `;
 
       renderActivityPanel(profile);
+      renderProviderProgress(profile, results);
+      renderDryRunPreview(profile, results);
 
       // Wire Issues card to open the unresolved panel
       const issuesCard = el('card-issues');
@@ -2276,6 +2553,8 @@
       el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Lists';
       if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
       else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; fetchUnresolved(); }
+      updateNextSyncBadge();
+      ensureNextSyncTicker();
     }
 
     // ── Unresolved items panel ─────────────────────────────────────────────────
