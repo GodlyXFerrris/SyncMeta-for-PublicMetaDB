@@ -88,10 +88,10 @@ class SyncStats:
     pmdb_metrics: dict[str, int] = field(default_factory=dict)
 
 
-def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
+def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason: str = "") -> dict:
     """Extract a compact, serialisable record for an item that could not be resolved."""
     ids = item.get("ids") or {}
-    return {
+    summary = {
         "title": item.get("title") or "Unknown",
         "year": item.get("year"),
         "media_type": item.get("media_type"),
@@ -105,16 +105,18 @@ def _unresolved_item_summary(item: dict, list_name: str = "") -> dict:
         "anidb_id": item.get("anidb_id") or ids.get("anidb"),
         "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
         "simkl_id": ids.get("simkl"),
-        # Which PMDB list this item belongs to — used by the manual-resolve
-        # endpoint to add the item instantly without waiting for the next sync.
         "list_name": list_name,
-        # Use ItemMatcher._cache_key so this key is byte-for-byte identical to
-        # the key the matcher will generate when it looks this item up on the
-        # next sync.  Previously a hand-rolled copy caused None→"" vs None→"None"
-        # mismatches (Python's f"{None}" == "None", not ""), which meant the
-        # manual_resolution_cache was never hit and items reappeared as unresolved.
         "cache_key": ItemMatcher._cache_key(item),
     }
+    if unresolved_reason:
+        summary["unresolved_reason"] = unresolved_reason
+    if item.get("simkl_type") == "anime":
+        summary.update({
+            "root_episode_offset": item.get("root_episode_offset") or 0,
+            "has_root_ids": bool(item.get("root_anilist_id") or item.get("root_mal_id") or ids.get("root_anilist") or ids.get("root_mal")),
+            "has_anime_ids": bool(item.get("anilist_id") or item.get("mal_id") or ids.get("anilist") or ids.get("mal")),
+        })
+    return summary
 
 
 class SyncService:
@@ -1644,7 +1646,9 @@ class SyncService:
                     stats.unresolved_reason_counts[unresolved_reason] = (
                         int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
                     )
-                    stats.unresolved_items.append(_unresolved_item_summary(item, list_name=stats.list_name))
+                    stats.unresolved_items.append(
+                        _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
+                    )
                 self._publish_progress([stats])
         except SyncCancelled:
             resolve_pool.shutdown(wait=False, cancel_futures=True)

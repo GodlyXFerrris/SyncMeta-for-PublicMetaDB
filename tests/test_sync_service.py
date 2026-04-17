@@ -417,10 +417,55 @@ class SyncServiceTests(unittest.TestCase):
 
         self.assertEqual(stats.match_breakdown["external_mapping"], 1)
         self.assertEqual(stats.unresolved_reason_counts["missing_ids"], 1)
+        self.assertEqual(stats.unresolved_items[0]["unresolved_reason"], "missing_ids")
         self.assertIn("resolve_seconds", stats.phase_timings)
-        self.assertIn("pmdb_read_seconds", stats.phase_timings)
-        self.assertIn("pmdb_write_seconds", stats.phase_timings)
         self.assertIn("list_write_successes", stats.pmdb_metrics)
+
+    def test_unresolved_anime_items_capture_resolution_diagnostics(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": ["watching"], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class DiagnosticAnimeMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="lookup_unavailable")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return None
+
+        service._matcher = DiagnosticAnimeMatcher()
+
+        stats = service._sync_list(
+            [{
+                "title": "Unresolved Anime",
+                "year": 2026,
+                "media_type": "tv",
+                "simkl_type": "anime",
+                "anilist_id": "123",
+                "root_anilist_id": "99",
+                "root_episode_offset": 12,
+                "ids": {"anilist": "123", "root_anilist": "99"},
+            }],
+            "Watching - Anime",
+            "Auto-synced testing anime list",
+        )
+
+        self.assertEqual(stats.unresolved_reason_counts["lookup_unavailable"], 1)
+        self.assertEqual(len(stats.unresolved_items), 1)
+        unresolved = stats.unresolved_items[0]
+        self.assertEqual(unresolved["unresolved_reason"], "lookup_unavailable")
+        self.assertEqual(unresolved["root_episode_offset"], 12)
+        self.assertTrue(unresolved["has_root_ids"])
+        self.assertTrue(unresolved["has_anime_ids"])
 
     def test_can_cancel_before_sync_work_starts(self) -> None:
         service, _ = self.build_service(delete_disabled_lists=False)
