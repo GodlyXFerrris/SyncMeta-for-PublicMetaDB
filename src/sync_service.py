@@ -751,10 +751,11 @@ class SyncService:
         def _validate_and_fix(remapped: dict) -> dict | None:
             """Validate remapped season/episode against known episode counts.
 
-            - If the target season has 0 episodes (placeholder), fall back to S1.
-            - If the episode number exceeds the season's known count, redistribute
-              using cumulative season map so long-running shows like Naruto and
-              One Piece land in the correct season instead of overflowing S1.
+            - Redistribute across known seasons when cumulative counts are reliable.
+            - Refuse unsafe "collapse to season 1" remaps for sequel/root-offset
+              items when PMDB is missing future-season metadata.
+            - Only allow season-1 overflow when the mapping evidence says this is
+              effectively a single-season target.
             Returns a (possibly corrected) remapped dict, or None if unresolvable.
             """
             target_season = int(remapped.get("season") or 1)
@@ -772,8 +773,16 @@ class SyncService:
                     if target_tmdb_id != tmdb_id:
                         out["tmdb_id"] = target_tmdb_id
                     return out
-                if season_ep_count == 0:
-                    return {**remapped, "season": 1, "episode": offset + episode}
+                known_positive_seasons = sorted(sn for sn, cnt in plan.items() if int(cnt or 0) > 0)
+                has_multi_season_evidence = (
+                    offset > 0
+                    or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
+                    or len(known_positive_seasons) > 1
+                )
+                only_season_one_known = known_positive_seasons == [1]
+                if season_ep_count == 0 and only_season_one_known and not has_multi_season_evidence:
+                    return {**remapped, "season": 1, "episode": absolute}
+                return None
             return remapped
 
         # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
@@ -812,8 +821,13 @@ class SyncService:
                 if redistributed:
                     self._anime_history_remap_cache[cache_key] = dict(redistributed)
                     return {**item, **redistributed}
-                # Single-season fallback
-                if list(season_plan_map.keys()) == [1]:
+                known_positive_seasons = sorted(sn for sn, cnt in season_plan_map.items() if int(cnt or 0) > 0)
+                has_multi_season_evidence = (
+                    offset > 0
+                    or bool(item.get("root_anilist_id") or item.get("root_mal_id"))
+                    or len(known_positive_seasons) > 1
+                )
+                if known_positive_seasons == [1] and not has_multi_season_evidence:
                     remapped = {"season": 1, "episode": absolute}
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
