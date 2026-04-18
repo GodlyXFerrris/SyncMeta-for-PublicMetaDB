@@ -209,11 +209,41 @@ class SyncService:
     def _resolve_match(self, item: dict) -> "MatchResult":
         from .matcher import MatchResult
         if hasattr(self._matcher, "resolve_match"):
-            return self._matcher.resolve_match(item)
-        tmdb_id = self._matcher.resolve_tmdb_id(item)
-        if tmdb_id is not None:
-            return MatchResult(tmdb_id=tmdb_id, resolution_kind="external_mapping")
-        return MatchResult(tmdb_id=None, resolution_kind="unresolved")
+            result = self._matcher.resolve_match(item)
+        else:
+            tmdb_id = self._matcher.resolve_tmdb_id(item)
+            if tmdb_id is not None:
+                result = MatchResult(tmdb_id=tmdb_id, resolution_kind="external_mapping")
+            else:
+                result = MatchResult(tmdb_id=None, resolution_kind="unresolved")
+
+        # For anime items, Fribb's direct AniList→TMDB mapping is more reliable
+        # than PMDB's external_mapping, which can collapse a sequel/season into
+        # the franchise root (e.g. Boruto→Naruto, Fate/UBW→Fate/stay night).
+        # If Fribb has a TMDB ID for this AniList entry that differs from what
+        # PMDB returned, prefer Fribb so the correct show lands on the list.
+        if (
+            str(item.get("simkl_type", "")).strip().lower() == "anime"
+            and result.resolution_kind in ("external_mapping", "root_series")
+            and result.tmdb_id is not None
+        ):
+            fribb_tmdb = self._resolve_tmdb_id_via_fribb(item)
+            if fribb_tmdb and fribb_tmdb != result.tmdb_id:
+                return MatchResult(tmdb_id=fribb_tmdb, resolution_kind="direct_tmdb")
+        return result
+
+    def _resolve_tmdb_id_via_fribb(self, item: dict) -> int | None:
+        """Return the TMDB ID from Fribb for this anime item, or None."""
+        try:
+            fribb = self._lookup_fribb_entry(item)
+            if not fribb:
+                return None
+            raw = fribb.get("themoviedb")
+            if raw:
+                return int(raw)
+        except Exception:
+            pass
+        return None
 
     def run(self) -> list[SyncStats]:
         """Execute a full sync cycle. Returns stats per synced list."""
