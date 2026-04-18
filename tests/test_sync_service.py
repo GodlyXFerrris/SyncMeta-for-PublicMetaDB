@@ -2,7 +2,7 @@ import unittest
 
 from src.config import AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
 from src.matcher import MatchResult
-from src.sync_service import SyncCancelled, SyncService
+from src.sync_service import SyncCancelled, SyncService, SyncStats
 
 
 class StubSimklClient:

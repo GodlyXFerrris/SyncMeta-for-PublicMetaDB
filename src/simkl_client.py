@@ -637,6 +637,8 @@ class SimklClient:
         ids = show.get("ids", {}) or {}
         anilist_id = ids.get("anilist")
         mal_id = ids.get("mal")
+        if not anilist_id and not mal_id:
+            return True
         if anilist_id:
             try:
                 if _fribb.lookup_by_anilist(int(anilist_id)) is not None:
