@@ -269,11 +269,21 @@ class SyncService:
             self._publish_progress(all_stats, force=True)
 
             if self._config.trakt.enabled:
-                all_stats.extend(self._sync_trakt())
+                try:
+                    all_stats.extend(self._sync_trakt())
+                except SyncCancelled:
+                    raise
+                except Exception as exc:
+                    logger.error("Trakt sync failed: %s", exc)
                 self._publish_progress(all_stats, force=True)
 
             if self._config.mdblist.enabled:
-                all_stats.extend(self._sync_mdblist())
+                try:
+                    all_stats.extend(self._sync_mdblist())
+                except SyncCancelled:
+                    raise
+                except Exception as exc:
+                    logger.error("MDBList sync failed: %s", exc)
                 self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["lists"] and any([
