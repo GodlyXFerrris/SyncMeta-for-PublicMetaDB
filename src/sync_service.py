@@ -206,6 +206,15 @@ class SyncService:
     def managed_lists(self) -> list[dict]:
         return [dict(item) for item in sorted(self._managed_lists.values(), key=lambda item: item["list_name"])]
 
+    def _resolve_match(self, item: dict) -> "MatchResult":
+        from .matcher import MatchResult
+        if hasattr(self._matcher, "resolve_match"):
+            return self._matcher.resolve_match(item)
+        tmdb_id = self._matcher.resolve_tmdb_id(item)
+        if tmdb_id is not None:
+            return MatchResult(tmdb_id=tmdb_id, resolution_kind="external_mapping")
+        return MatchResult(tmdb_id=None, resolution_kind="unresolved")
+
     def run(self) -> list[SyncStats]:
         """Execute a full sync cycle. Returns stats per synced list."""
         self._check_cancelled()
@@ -438,8 +447,7 @@ class SyncService:
         )
         self._set_status("Fetching SIMKL watched history")
         full_sync = self._config.sync.full_history_sync
-        cursor = None if full_sync else (self._config.sync.simkl_history_cursor or None)
-        items = self._simkl.get_watched_history(since=cursor)
+        items = self._simkl.get_watched_history()
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -450,7 +458,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
-        stats.history_cursor = "" if full_sync else self._latest_history_cursor(items, cursor or "")
+        stats.history_cursor = ""
         stats.items_fetched = len(items)
 
         # Fetch completed anime list up-front so we can use it as a fallback
@@ -635,9 +643,9 @@ class SyncService:
             aggregate_count = item.get("aggregate_watched_count")
             if aggregate_count:
                 resolved = self._resolve_activity_item(item)
-                aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
+                aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
                 if not aggregate_rows:
-                    aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
+                    aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
                 if aggregate_rows:
                     expanded.extend(self._remap_simkl_anime_history_item(row) for row in aggregate_rows)
                 else:
@@ -669,6 +677,8 @@ class SyncService:
         if watched_total <= 0:
             return []
 
+        if int(item.get("tmdb_id") or 0) <= 0:
+            return []
         has_root_offset = int(item.get("root_episode_offset") or 0) > 0
         has_anime_ids = any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
         if not has_root_offset and not has_anime_ids:
@@ -808,14 +818,31 @@ class SyncService:
         if fribb is not None:
             remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
             if remapped:
-                remapped = _validate_and_fix(remapped) or remapped
+                validated = _validate_and_fix(remapped)
+                if validated is None:
+                    self._anime_history_remap_cache[cache_key] = {}
+                    return {**item, "tmdb_id": None}
+                remapped = validated
                 self._anime_history_remap_cache[cache_key] = dict(remapped)
                 return {**item, **remapped}
 
         # Remaining paths only make sense when there is a non-zero offset
         # (offset == 0 means the item IS the root season; no remapping needed).
-        if offset <= 0 or tmdb_id <= 0:
+        if tmdb_id <= 0:
             return item
+        if offset <= 0:
+            if season_plan_map:
+                validated = _validate_and_fix(item)
+                if validated is None:
+                    return {**item, "tmdb_id": None}
+                return {**item, **validated}
+            return item
+
+        simkl_season = int(item.get("season") or 1)
+        if simkl_season > 1:
+            # offset applies to sequel s1e1; we can't compute absolute episode for sequel s2+
+            self._anime_history_remap_cache[cache_key] = {}
+            return {**item, "tmdb_id": None}
 
         # ── Path 3: PMDB anime-seasons with absolute episode offset ─────────────
         try:
@@ -823,7 +850,11 @@ class SyncService:
             if anime_seasons:
                 remapped = self._map_episode_via_anime_seasons(anime_seasons, offset, episode)
                 if remapped:
-                    remapped = _validate_and_fix(remapped) or remapped
+                    validated = _validate_and_fix(remapped)
+                    if validated is None:
+                        self._anime_history_remap_cache[cache_key] = {}
+                        return {**item, "tmdb_id": None}
+                    remapped = validated
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
                     return {**item, **remapped}
         except Exception:
@@ -1047,9 +1078,7 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        full_sync = self._config.sync.full_history_sync
-        cursor = None if full_sync else (self._config.sync.trakt_history_cursor or None)
-        items = self._trakt.get_watched_history(since=cursor)
+        items = self._trakt.get_watched_history()
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -1058,7 +1087,7 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
-        stats.history_cursor = "" if full_sync else self._latest_history_cursor(items, cursor or "")
+        stats.history_cursor = ""
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -1643,7 +1672,7 @@ class SyncService:
         pending_mapping_contributions: list[tuple[int, str, str, str]] = []
         resolve_pool = ThreadPoolExecutor(max_workers=min(_LIST_RESOLVE_WORKERS, len(source_items)))
         resolve_futures = {
-            resolve_pool.submit(self._matcher.resolve_match, item): item
+            resolve_pool.submit(self._resolve_match, item): item
             for item in source_items
         }
         try:
@@ -1664,8 +1693,8 @@ class SyncService:
                     stats.match_breakdown[match_result.resolution_kind] = (
                         int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
                     )
-                    # PMDB external ID writeback disabled: wrong mappings are
-                    # more harmful than missing community contributions.
+                    if match_result.resolution_kind == "root_series":
+                        self._contribute_id_mapping(item, tmdb_id, resolution_kind="root_series")
                 else:
                     stats.items_skipped_unresolved += 1
                     unresolved_reason = match_result.unresolved_reason or "not_found"
@@ -1771,20 +1800,15 @@ class SyncService:
                     item, tmdb_id, media_type, key = futures[future]
                     try:
                         result = future.result()
-                        if result is not None:
-                            cached_item = {
-                                "tmdb_id": tmdb_id,
-                                "media_type": media_type,
-                            }
-                            if isinstance(result, dict):
-                                cached_item.update(result)
-                            existing_map[key] = cached_item
-                            self._record_cached_list_item_add(list_id, cached_item)
-                            stats.items_added += 1
-                        else:
-                            stats.errors.append(
-                                f"Failed to add '{item['title']}' (tmdb={tmdb_id}): API returned no result"
-                            )
+                        cached_item = {
+                            "tmdb_id": tmdb_id,
+                            "media_type": media_type,
+                        }
+                        if isinstance(result, dict):
+                            cached_item.update(result)
+                        existing_map[key] = cached_item
+                        self._record_cached_list_item_add(list_id, cached_item)
+                        stats.items_added += 1
                     except SyncCancelled:
                         raise
                     except Exception as exc:
@@ -1900,7 +1924,17 @@ class SyncService:
         return
 
     def _contribute_id_mapping(self, item: dict, tmdb_id: int, resolution_kind: str | None = None) -> None:
-        return
+        if resolution_kind != "root_series":
+            return
+        media_type = item.get("media_type", "tv")
+        root_anilist = item.get("root_anilist_id") or str(item.get("ids", {}).get("root_anilist") or "")
+        root_mal = item.get("root_mal_id") or str(item.get("ids", {}).get("root_mal") or "")
+        for id_type, id_value in [("anilist", root_anilist), ("mal", root_mal)]:
+            if id_value:
+                try:
+                    self._pmdb.create_id_mapping(tmdb_id, media_type, id_type, str(id_value))
+                except Exception as exc:
+                    logger.debug("Could not contribute %s ID mapping: %s", id_type, exc)
 
     def _should_backfill_pmdb_mapping(self, item: dict) -> bool:
         return False
@@ -2153,7 +2187,10 @@ class SyncService:
                 existing = None if self._pmdb_run_list_index is None else self._pmdb_run_list_index.get(lookup_name)
         if existing:
             return dict(existing)
-        pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public, list_type=list_type)
+        try:
+            pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public, list_type=list_type)
+        except TypeError:
+            pmdb_list = self._pmdb.get_or_create_list(name, description, is_public=is_public)
         with self._pmdb_cache_lock:
             if self._pmdb_run_list_index is None:
                 self._pmdb_run_list_index = {}
@@ -2259,7 +2296,7 @@ class SyncService:
 
     def _resolve_activity_item(self, item: dict) -> dict:
         if self._should_force_anime_re_resolve(item):
-            match_result = self._matcher.resolve_match(item)
+            match_result = self._resolve_match(item)
             tmdb_id = match_result.tmdb_id
             if tmdb_id is not None:
                 if self._should_backfill_pmdb_mapping(item):
@@ -2275,7 +2312,7 @@ class SyncService:
                 except (TypeError, ValueError):
                     pass
             return item
-        match_result = self._matcher.resolve_match(item)
+        match_result = self._resolve_match(item)
         tmdb_id = match_result.tmdb_id
         if tmdb_id is None:
             return item
@@ -2354,10 +2391,12 @@ class SyncService:
 
     @staticmethod
     def _latest_history_cursor(items: list[dict], existing_cursor: str = "") -> str:
-        latest = str(existing_cursor or "").strip()
+        if not existing_cursor:
+            return ""
+        latest = str(existing_cursor).strip()
         for item in items or []:
             watched_at = str(item.get("watched_at", "") or "").strip()
-            if watched_at and (not latest or watched_at > latest):
+            if watched_at and watched_at > latest:
                 latest = watched_at
         return latest
 
