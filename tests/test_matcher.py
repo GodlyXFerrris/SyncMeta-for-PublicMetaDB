@@ -298,6 +298,45 @@ class ItemMatcherTests(unittest.TestCase):
 
         self.assertEqual(tmdb_id, 68028)
 
+    def test_anime_sequel_can_keep_direct_mapping_even_with_root_ids(self) -> None:
+        client = StubPMDBClient()
+        matcher = ItemMatcher(client)
+
+        def fake_lookup_detailed(id_type: str, ext_id: str, media_type: str):
+            if id_type == "anilist" and ext_id == "177937" and media_type == "tv":
+                return {"tmdb_id": 999999, "status": "hit"}
+            if id_type == "mal" and ext_id == "48675" and media_type == "tv":
+                return {"tmdb_id": 68028, "status": "hit"}
+            if id_type == "anilist" and ext_id == "140960" and media_type == "tv":
+                return {"tmdb_id": 68028, "status": "hit"}
+            return {"tmdb_id": None, "status": "miss"}
+
+        client.lookup_by_external_id_detailed = fake_lookup_detailed  # type: ignore[method-assign]
+
+        result = matcher.resolve_match({
+            "title": "SPY x FAMILY Season 3",
+            "year": 2025,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "tmdb_id": "999999",
+            "anilist_id": "177937",
+            "mal_id": "59027",
+            "root_mal_id": "48675",
+            "root_anilist_id": "140960",
+            "root_title": "SPY x FAMILY",
+            "prefer_root_series": False,
+            "ids": {
+                "tmdb": 999999,
+                "anilist": 177937,
+                "mal": 59027,
+                "root_mal": 48675,
+                "root_anilist": 140960,
+            },
+        })
+
+        self.assertEqual(result.tmdb_id, 999999)
+        self.assertEqual(result.resolution_kind, "external_mapping")
+
     def test_direct_tmdb_still_wins_without_root_preference(self) -> None:
         matcher = ItemMatcher(StubPMDBClient())
 

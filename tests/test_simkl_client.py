@@ -279,7 +279,7 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(normalized["tmdb_id"], "999999")
         self.assertEqual(normalized["root_anilist_id"], "140960")
         self.assertEqual(normalized["root_mal_id"], "48675")
-        self.assertTrue(normalized["prefer_root_series"])
+        self.assertFalse(normalized["prefer_root_series"])
 
     def test_normalize_anime_movie_item_stays_movie_without_root_preference(self) -> None:
         client = RecordingSimklClient()

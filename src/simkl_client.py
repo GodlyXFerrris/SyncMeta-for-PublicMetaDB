@@ -338,7 +338,10 @@ class SimklClient:
             "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
             "root_title": root_title,
             "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
-            "prefer_root_series": bool(root_ids) and media_type == "anime" and pmdb_type == "tv",
+            # Keep root ids for history/remap helpers, but do not force anime list
+            # entries onto the franchise root. Distinct sequel titles like Naruto
+            # Shippuden or Fate variants should remain separate PMDB entries.
+            "prefer_root_series": False,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
