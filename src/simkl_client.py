@@ -235,6 +235,7 @@ class SimklClient:
         ids = media.get("ids", {})
         root_ids: dict[str, str] = {}
         root_title = None
+        movie_like_anime = media_type == "anime" and self._is_movie_like_anime_entry(entry, media)
 
         # Known SIMKL anime_type values for real anime productions.
         # Non-anime content that ends up in a user's anime list (e.g. Western
@@ -299,7 +300,7 @@ class SimklClient:
             # SIMKL sometimes misclassifies anime movies as TV/special, so if
             # Fribb says Movie we always trust it over SIMKL's own type fields.
             fribb_type = str(fribb_entry.get("type", "")).strip().lower() if fribb_entry else ""
-            if fribb_type == "movie":
+            if fribb_type == "movie" or movie_like_anime:
                 pmdb_type = "movie"
             else:
                 effective_type = anime_type or generic_type or fribb_type
@@ -314,12 +315,15 @@ class SimklClient:
                     except (TypeError, ValueError):
                         ep_count = None
                     pmdb_type = "movie" if ep_count == 1 else "tv"
+            if pmdb_type == "tv" and self._should_resolve_anime_root_for_list_entry(entry, media, ids):
+                root_ids = self._resolve_anime_root_ids(ids)
+                root_title = root_ids.get("root_title")
+                if root_ids.get("root_anilist"):
+                    ids["root_anilist"] = root_ids["root_anilist"]
+                if root_ids.get("root_mal"):
+                    ids["root_mal"] = root_ids["root_mal"]
         else:
             pmdb_type = "tv"  # Shows map to "tv"
-
-        # Root IDs are resolved lazily by the matcher only when direct lookup
-        # fails, avoiding AniList API calls for every item up front.
-        root_ids: dict[str, str] = {}
 
         return {
             "title": media.get("title", "Unknown"),
@@ -334,12 +338,40 @@ class SimklClient:
             "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
             "root_title": root_title,
             "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+            "prefer_root_series": bool(root_ids) and media_type == "anime" and pmdb_type == "tv",
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
             "status": entry.get("status"),
             "added_at": entry.get("added_to_watchlist_at"),
         }
+
+    @staticmethod
+    def _has_anime_identity(ids: dict) -> bool:
+        return bool(ids.get("anilist") or ids.get("mal") or ids.get("anidb"))
+
+    @classmethod
+    def _should_resolve_anime_root_for_list_entry(cls, entry: dict, media: dict, ids: dict) -> bool:
+        if not ids.get("tmdb"):
+            return True
+        title = str(media.get("title") or entry.get("title") or "").strip()
+        return cls._looks_like_seasoned_anime_title(title)
+
+    @staticmethod
+    def _looks_like_seasoned_anime_title(title: str) -> bool:
+        normalized = title.lower()
+        patterns = (
+            r"\bseason\s+\d+\b",
+            r"\bpart\s+\d+\b",
+            r"\bcour\s+\d+\b",
+            r"\b\d+(st|nd|rd|th)\s+(season|year|part|cour)\b",
+            r"\bii\b|\biii\b|\biv\b|\bv\b",
+        )
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
+    @classmethod
+    def _is_movie_like_anime_entry(cls, entry: dict, show: dict) -> bool:
+        return cls._is_movie_like_anime_history(entry, show)
 
     def _resolve_anime_root_ids(self, ids: dict) -> dict[str, str]:
         anilist_id = ids.get("anilist")

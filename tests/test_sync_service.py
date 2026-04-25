@@ -3,6 +3,7 @@ import unittest
 from src.config import AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
 from src.matcher import MatchResult
 from src.sync_service import SyncCancelled, SyncService, SyncStats
+from src.trakt_client import TraktAuthenticationError
 
 
 class StubSimklClient:
@@ -190,6 +191,11 @@ class StubRepeatedWatchTraktClient(StubTraktClient):
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-02T12:00:00Z", "title": "Watched Movie"},
         ]
+
+
+class StubUnauthorizedTraktClient(StubTraktClient):
+    def get_playback_progress(self) -> list[dict]:
+        raise TraktAuthenticationError("Trakt token expired, reconnect Trakt.")
 
 
 class StubMdbListClient:
@@ -1515,6 +1521,37 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_added, 0)
         self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(resume_stats.items_skipped_duplicate, 2)
+
+    def test_trakt_resume_auth_error_is_reported_as_result_error(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=[],
+                trakt_sync_resume_progress=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.access_token = "expired-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config, sync_modes={"lists": False, "history": False, "resume": True})
+        service._trakt = StubUnauthorizedTraktClient()
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
+        self.assertEqual(resume_stats.items_fetched, 0)
+        self.assertEqual(resume_stats.errors, ["Trakt token expired, reconnect Trakt."])
         self.assertEqual(pmdb.resume_batches, [])
 
 

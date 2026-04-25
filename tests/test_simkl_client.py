@@ -239,8 +239,29 @@ class SimklClientTests(unittest.TestCase):
         self.assertEqual(grouped["anime"][0]["anilist_id"], "44")
 
     def test_normalize_anime_item_returns_direct_ids_without_root_walk(self) -> None:
-        # Root IDs are no longer pre-populated during normalization; the matcher
-        # resolves them lazily via anime_root_resolver when direct lookup fails.
+        # Plain root-season anime keeps its direct ids; sequel/part titles get
+        # separate root ids through the prefer_root_series path.
+        client = RecordingSimklClient()
+
+        normalized = client._normalize_item(
+            {
+                "show": {
+                    "title": "Naruto",
+                    "year": 2025,
+                    "anime_type": "tv",
+                    "ids": {"tmdb": 46260, "anilist": 20, "mal": 20},
+                },
+                "status": "watching",
+            },
+            "anime",
+        )
+
+        self.assertEqual(normalized["anilist_id"], "20")
+        self.assertEqual(normalized["mal_id"], "20")
+        self.assertIsNone(normalized["root_anilist_id"])
+        self.assertIsNone(normalized["root_mal_id"])
+
+    def test_normalize_seasoned_anime_item_resolves_root_even_with_tmdb(self) -> None:
         client = RecordingSimklClient()
 
         normalized = client._normalize_item(
@@ -248,18 +269,54 @@ class SimklClientTests(unittest.TestCase):
                 "show": {
                     "title": "SPY x FAMILY Season 3",
                     "year": 2025,
-                    "anime_type": "tv",
-                    "ids": {"anilist": 177937, "mal": 59027},
+                    "ids": {"tmdb": 999999, "anilist": 177937, "mal": 59027},
                 },
                 "status": "watching",
             },
             "anime",
         )
 
-        self.assertEqual(normalized["anilist_id"], "177937")
-        self.assertEqual(normalized["mal_id"], "59027")
-        self.assertIsNone(normalized["root_anilist_id"])
-        self.assertIsNone(normalized["root_mal_id"])
+        self.assertEqual(normalized["tmdb_id"], "999999")
+        self.assertEqual(normalized["root_anilist_id"], "140960")
+        self.assertEqual(normalized["root_mal_id"], "48675")
+        self.assertTrue(normalized["prefer_root_series"])
+
+    def test_normalize_anime_movie_item_stays_movie_without_root_preference(self) -> None:
+        client = RecordingSimklClient()
+
+        normalized = client._normalize_item(
+            {
+                "show": {
+                    "title": "Cosmic Princess Kaguya!",
+                    "year": 2026,
+                    "ids": {"tmdb": 1575337, "anilist": 999},
+                },
+                "anime_type": "movie",
+                "status": "completed",
+            },
+            "anime",
+        )
+
+        self.assertEqual(normalized["media_type"], "movie")
+        self.assertEqual(normalized["tmdb_id"], "1575337")
+        self.assertFalse(normalized["prefer_root_series"])
+
+    def test_normalize_anime_item_skips_entries_without_anime_ids(self) -> None:
+        client = RecordingSimklClient()
+
+        normalized = client._normalize_item(
+            {
+                "show": {
+                    "title": "Soccer Aid",
+                    "year": 2006,
+                    "ids": {"tmdb": 872058},
+                },
+                "status": "completed",
+            },
+            "anime",
+        )
+
+        self.assertIsNone(normalized)
 
     def test_get_watched_history_parses_movies_shows_and_anime(self) -> None:
         client = RecordingSimklClient()

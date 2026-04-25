@@ -14,7 +14,7 @@ from .matcher import ItemMatcher
 from .mdblist_client import MdbListClient
 from .publicmetadb_client import PublicMetaDBClient
 from .simkl_client import SimklClient
-from .trakt_client import TraktClient
+from .trakt_client import TraktAuthenticationError, TraktClient
 
 logger = logging.getLogger(__name__)
 
@@ -1118,7 +1118,11 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt watched history")
-        items = self._trakt.get_watched_history()
+        try:
+            items = self._trakt.get_watched_history()
+        except TraktAuthenticationError as exc:
+            stats.errors.append(str(exc))
+            return stats
 
         try:
             existing_items = self._pmdb.get_watched_history()
@@ -1173,7 +1177,11 @@ class SyncService:
             source_name="Trakt",
         )
         self._set_status("Fetching Trakt playback progress")
-        items = self._trakt.get_playback_progress()
+        try:
+            items = self._trakt.get_playback_progress()
+        except TraktAuthenticationError as exc:
+            stats.errors.append(str(exc))
+            return stats
         stats.items_fetched = len(items)
 
         normalized_items: list[dict] = []

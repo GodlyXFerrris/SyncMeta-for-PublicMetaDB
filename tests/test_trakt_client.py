@@ -1,10 +1,31 @@
 import unittest
 
 from src.config import TraktConfig
-from src.trakt_client import TraktClient
+from src.trakt_client import TraktAuthenticationError, TraktClient
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, text: str = "") -> None:
+        self.status_code = status_code
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        raise AssertionError("401 responses should be converted before raise_for_status")
+
+
+class FakeSession:
+    def request(self, method: str, url: str, timeout: int = 30, **kwargs) -> FakeResponse:
+        return FakeResponse(401, "unauthorized")
 
 
 class TraktClientTests(unittest.TestCase):
+    def test_401_raises_reconnect_error(self) -> None:
+        client = TraktClient(TraktConfig(base_url="https://api.trakt.tv"))
+        client._session = FakeSession()
+
+        with self.assertRaisesRegex(TraktAuthenticationError, "Trakt token expired, reconnect Trakt"):
+            client._get("/sync/playback/movies")
+
     def test_normalize_movie_watchlist_entry(self) -> None:
         client = TraktClient(TraktConfig())
 

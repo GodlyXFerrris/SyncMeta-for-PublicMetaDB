@@ -1,0 +1,170 @@
+# SyncMeta Project Memory
+
+This file is a compact working memory for future code changes. Keep it current when behavior or architecture changes.
+
+## Project Shape
+
+- Docker-first Flask web app. Main entrypoint is `web.py`.
+- No CLI entrypoint is supported anymore.
+- Main UI is a single template: `templates/index.html`.
+- Core sync orchestration lives in `src/sync_service.py`.
+- Persistent multi-user state lives in JSON through `src/profile_store.py`.
+- Source/API clients:
+  - `src/simkl_client.py`
+  - `src/anilist_client.py`
+  - `src/trakt_client.py`
+  - `src/mdblist_client.py`
+  - `src/publicmetadb_client.py`
+- Matching external ids to PMDB/TMDB ids lives in `src/matcher.py`.
+
+## Storage And Secrets
+
+- Profile store path is controlled by `PROFILE_STORE_FILE`, normally `/app/data/profiles.json`.
+- Encryption key is either `SYNCMETA_MASTER_KEY` or generated/persisted as `/app/data/profiles.key`.
+- Never commit `data/profiles.key`.
+- Profile passwords are hashed.
+- Source credentials are encrypted at rest and are overwrite-only in the UI.
+- Saved secrets should not be returned raw to the browser.
+
+## Web Flow
+
+- Browser auth uses server-side sessions.
+- Optional site-wide gate is controlled by `SITE_ACCESS_PASSWORD`.
+- Important routes in `web.py`:
+  - `/api/profile/save`
+  - `/api/profile/status`
+  - `/api/profile/sync`
+  - `/api/profile/sync/stop`
+  - `/api/profile/activity/sync`
+  - `/api/profile/activity/history/clear`
+  - `/api/simkl/pin/start`
+  - `/api/simkl/pin/check`
+  - `/api/trakt/device/start`
+  - `/api/trakt/device/check`
+  - `/api/trakt/catalogs`
+  - `/api/mdblist/lists`
+
+## Scheduler
+
+- Scheduler is inside `web.py` and polls every 5 seconds.
+- Disable with `DISABLE_PROFILE_SCHEDULER=1`.
+- Automatic background sync applies to list sync.
+- Trakt resume progress can auto-run when enabled; current default interval is 10 minutes in `profile_store.py`.
+- Watch history is manual-only.
+- One sync per profile is claimed at a time through `ProfileStore`.
+
+## Sync Modes
+
+- `lists`: normal list sync.
+- `history`: manual watch history import.
+- `resume`: resume/progress sync.
+- Manual dashboard buttons save the profile first, but should not refresh source pickers or start unrelated sync modes.
+- Activity-only syncs should not overwrite `last_results`; they update `activity_results`.
+- Running syncs expose `sync_live_results` so the dashboard can update progress while work is still running.
+
+## List Sync Behavior
+
+- `SyncService._sync_list()` resolves source items, creates/loads a PMDB list, adds missing items, optionally removes stale items.
+- `remove_missing` removes items no longer in the source.
+- `delete_disabled_lists` deletes SyncMeta-managed PMDB lists that are no longer selected.
+- Managed list metadata is stored in profile state so dashboard delete can unselect the matching source selection.
+- If two sources want the same PMDB display name, `SyncService` creates a collision-safe actual name.
+
+## Source Defaults And Visibility
+
+- SIMKL and AniList selections default empty until linked/user-selected.
+- Linked defaults should not re-enable themselves after the user clears all statuses.
+- Visibility defaults:
+  - SIMKL private
+  - AniList private
+  - Trakt personal private
+  - Trakt public public
+  - MDBList public
+
+## SIMKL Notes
+
+- SIMKL list endpoints use `/sync/all-items/{type}/{status}`.
+- Type mapping:
+  - SyncMeta `shows` -> SIMKL `tv`
+  - SyncMeta `movies` -> SIMKL `movie`
+  - SyncMeta `anime` -> SIMKL `anime`
+- Status mapping includes `plantowatch -> plan to watch` and `hold -> on hold`.
+- SIMKL anime is the trickiest area:
+  - Anime movies must be treated as PMDB movies, not fake one-episode TV.
+  - Season 2+ anime often needs root-series mapping through AniList/MAL.
+  - Some PMDB anime metadata merges sequel seasons into one TV season.
+  - Some SIMKL anime payloads only expose aggregate watched counts.
+  - Avoid expensive AniList root lookups when direct TMDB mapping is enough.
+  - AniList 429s should fail fast/cool down so SIMKL sync can keep moving and Stop can respond.
+  - Anime list entries without anime-specific ids should be skipped to avoid non-anime pollution.
+  - Season/part anime list entries can set `prefer_root_series` so PMDB matching favors the root anime.
+
+## Trakt Notes
+
+- Device auth is used in the web UI.
+- `401 Unauthorized` usually means expired/revoked/bad token, not rate limiting.
+- Rate limit would normally be `429`.
+- Trakt supports:
+  - split movie/show watchlist
+  - default catalogs
+  - liked lists
+  - personal created lists
+  - discover/public lists
+  - watch history import
+  - resume progress sync
+
+## MDBList Notes
+
+- Supports account lists and public-list search.
+- Public search may need the HTML/toplists fallback if the API path returns nothing.
+
+## PublicMetaDB Notes
+
+- Lists use `/api/external/lists`.
+- List item delete uses `/api/external/lists/:listId/items/:itemId`.
+- Watched history uses `/api/external/watched`.
+- Resume uses `/api/external/resume` and batch save.
+- PMDB watched-history clearing must keep reloading page 1 until empty because page snapshots can shift while deleting.
+
+## UI Notes
+
+- `templates/index.html` is dense and stateful; prefer small, targeted edits.
+- Dashboard sections:
+  - summary cards
+  - Activity Sync
+  - Latest Sync Results
+  - Sync History
+- Latest Sync Results is paginated at 25 rows per page.
+- Sync History displays only the newest 25 runs.
+- Mobile tables should allow horizontal scroll.
+- Service connection dots show connected state based on credentials, not selected lists.
+
+## Tests
+
+- Standard command:
+  - `python -m unittest discover -v`
+- Focused tests by area:
+  - Web/UI routes: `python -m unittest tests.test_web -v`
+  - Sync behavior: `python -m unittest tests.test_sync_service -v`
+  - Profiles/storage: `python -m unittest tests.test_profile_store -v`
+  - SIMKL parsing: `python -m unittest tests.test_simkl_client -v`
+  - Trakt parsing: `python -m unittest tests.test_trakt_client -v`
+  - PMDB client: `python -m unittest tests.test_publicmetadb_client -v`
+- For template JavaScript checks, extract the dashboard script and run `node --check`.
+
+## Git And Deployment
+
+- Main working repo used for pushes has been:
+  - `C:\Users\justi\Documents\Dev\SyncMeta-for-PublicMetaDB-publish`
+- Keep `main` and `dev` aligned when requested.
+- Do not include local secret files.
+- VPS update pattern:
+  - `git pull`
+  - `docker compose up -d --build`
+  - hard refresh browser if UI still looks old.
+
+## Current Caution
+
+- As of this memory update, the worktree has an untracked `data/profiles.key`.
+- Also check for local modifications before starting new work:
+  - `git status --short`

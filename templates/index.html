@@ -313,7 +313,7 @@
                   <div class="provider-guide-list">
                     <div>1. Open <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">SIMKL Developer Settings</a>.</div>
                     <div>2. Create app or open existing app.</div>
-                    <div>3. If SIMKL asks for <strong>Redirect URL</strong>, use site root URL below.</div>
+                    <div>3. If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.</div>
                   </div>
                   <div class="form-row" style="margin-top:10px;margin-bottom:0">
                     <label>SIMKL Redirect URL</label>
@@ -350,7 +350,7 @@
                   <div class="provider-guide-title">Trakt App Setup</div>
                   <div class="provider-guide-list">
                     <div>1. Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">Trakt API app settings</a>.</div>
-                    <div>2. Create app with <strong>Redirect URI</strong> set to site root URL below.</div>
+                    <div>2. If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.</div>
                     <div>3. Copy Client ID and Client Secret here. SyncMeta still uses device auth for login.</div>
                   </div>
                   <div class="form-row" style="margin-top:10px;margin-bottom:0">
@@ -465,19 +465,19 @@
           </div>
           <div class="form-section full">
             <h3>SIMKL Lists</h3>
-            <p class="desc">Choose which SIMKL statuses should sync for each media type.</p>
+            <p class="desc">choose exactly which movie, show, and anime statuses should sync from SIMKL.</p>
             <div class="status-groups" id="simkl-status-groups"></div>
           </div>
           <div class="form-section full">
             <h3>AniList Lists</h3>
-            <p class="desc">Choose which AniList anime statuses should sync into PublicMetaDB.</p>
+            <p class="desc">choose which anime lists should sync into PublicMetaDB.</p>
             <div class="status-group">
               <div class="pill-row" id="anilist-status-list"></div>
             </div>
           </div>
           <div class="form-section full">
             <h3>Trakt Catalogs</h3>
-            <p class="desc">Choose what should sync from Trakt. Default covers split movie/show watchlists plus recommendations, My Lists loads your created and liked lists, and Discover lets you search public Trakt lists.</p>
+            <p class="desc">Choose what should sync from Trakt. Default covers split movie/show watchlists plus recommendations, My Lists loads personal created lists, liked lists, and selected public Trakt lists, and Discover lets you search public Trakt lists.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
               <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
@@ -501,7 +501,7 @@
           </div>
           <div class="form-section full">
             <h3>MDBList Lists</h3>
-            <p class="desc">Choose personal MDBList lists from My Lists, or search public MDBList lists in Discover.</p>
+            <p class="desc">Choose personal or public-style catalog lists from MDBList. Use My Lists for your account, or search public MDBList lists in Discover.</p>
             <div class="catalog-tabs">
               <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
               <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>

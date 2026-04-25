@@ -1300,12 +1300,11 @@ def api_profile_list_delete():
             existing = pmdb_client.find_list_by_name(list_name)
             if existing:
                 pmdb_client.delete_list(str(existing.get("id", "")).strip())
-        # Remove only the managed-list tracking entry so the next sync
-        # recreates the PMDB list from scratch.  Do NOT touch credentials /
-        # selected_statuses — the list source stays active in Settings and
-        # will be re-synced on the next run.
+        # Also unselect the source entry so the deleted PMDB list is not
+        # recreated during the next list sync.
+        updated_credentials = _remove_managed_selection(profile, managed_entry)
         updated_profile = _profile_store.delete_managed_list_by_id(
-            profile_id, list_name, profile.get("credentials")
+            profile_id, list_name, updated_credentials
         )
     except Exception as exc:
         logger.exception("Failed to delete managed list %s for profile %s", list_name, profile_id[:8])

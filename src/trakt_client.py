@@ -48,6 +48,10 @@ DEFAULT_CATALOGS = {
 }
 
 
+class TraktAuthenticationError(RuntimeError):
+    """Raised when Trakt rejects the saved access token."""
+
+
 class TraktClient:
     """Client for the Trakt API."""
 
@@ -95,6 +99,8 @@ class TraktClient:
         self._check_cancelled()
         response = self._session.request(method, url, timeout=REQUEST_TIMEOUT, **kwargs)
         self._check_cancelled()
+        if response.status_code == 401:
+            raise TraktAuthenticationError("Trakt token expired, reconnect Trakt.")
         response.raise_for_status()
         return response
 

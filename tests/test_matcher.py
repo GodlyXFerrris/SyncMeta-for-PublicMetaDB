@@ -273,6 +273,44 @@ class ItemMatcherTests(unittest.TestCase):
         self.assertEqual(result.tmdb_id, 65930)
         self.assertEqual(result.resolution_kind, "external_mapping")
 
+    def test_prefer_root_series_uses_root_before_direct_tmdb(self) -> None:
+        matcher = ItemMatcher(StubPMDBClient())
+
+        tmdb_id = matcher.resolve_tmdb_id({
+            "title": "SPY x FAMILY Season 3",
+            "year": 2025,
+            "media_type": "tv",
+            "tmdb_id": "999999",
+            "mal_id": "59027",
+            "anilist_id": "177937",
+            "root_mal_id": "48675",
+            "root_anilist_id": "140960",
+            "root_title": "SPY x FAMILY",
+            "prefer_root_series": True,
+            "ids": {
+                "tmdb": 999999,
+                "mal": 59027,
+                "anilist": 177937,
+                "root_mal": 48675,
+                "root_anilist": 140960,
+            },
+        })
+
+        self.assertEqual(tmdb_id, 68028)
+
+    def test_direct_tmdb_still_wins_without_root_preference(self) -> None:
+        matcher = ItemMatcher(StubPMDBClient())
+
+        tmdb_id = matcher.resolve_tmdb_id({
+            "title": "Anime Movie",
+            "media_type": "movie",
+            "tmdb_id": "1575337",
+            "root_mal_id": "48675",
+            "ids": {"tmdb": 1575337, "root_mal": 48675},
+        })
+
+        self.assertEqual(tmdb_id, 1575337)
+
 
 if __name__ == "__main__":
     unittest.main()
