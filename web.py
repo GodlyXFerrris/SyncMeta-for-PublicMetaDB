@@ -379,6 +379,22 @@ def _current_public_profile(include_credentials: bool = False) -> dict | None:
         return None
 
 
+def _public_profile_by_request_id(profile_id: object) -> dict | None:
+    """Return read-only dashboard state for a known profile UUID.
+
+    This intentionally never includes credentials. It lets the dashboard recover
+    after a lost in-memory session while a background sync is still running.
+    Mutating endpoints still require a valid server-side session.
+    """
+    profile_id = str(profile_id or "").strip()
+    if not profile_id:
+        return None
+    try:
+        return _profile_store.get_profile_by_id(profile_id, include_credentials=False)
+    except (KeyError, ValueError):
+        return None
+
+
 def _current_private_profile() -> dict | None:
     profile_id = _current_profile_id()
     if not profile_id:
@@ -1265,6 +1281,9 @@ def api_profile_status():
     body = request.get_json(silent=True) or {}
     include_credentials = bool(body.get("include_credentials", False))
     profile = _current_public_profile(include_credentials=include_credentials)
+    if not profile:
+        if not include_credentials:
+            profile = _public_profile_by_request_id(body.get("profile_id"))
     if not profile:
         return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 

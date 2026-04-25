@@ -386,6 +386,48 @@ class WebTests(unittest.TestCase):
         self.assertTrue(status_data["profile"]["credentials"]["simkl"]["access_token_saved"])
         self.assertNotIn("access_token", status_data["profile"]["credentials"]["simkl"])
 
+    def test_status_can_recover_readonly_profile_from_uuid_without_session(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {"api_key": "", "selected_lists": []},
+            "pmdb": {"api_key": "pmdb-secret"},
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 600,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        response = self.client.post("/api/profile/status", json={
+            "profile_id": profile["profile_id"],
+            "include_credentials": False,
+        })
+        data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["profile"]["profile_id"], profile["profile_id"])
+        self.assertNotIn("credentials", data["profile"])
+
     def test_delete_profile_endpoint_removes_signed_in_profile(self) -> None:
         profile = web._profile_store.create_profile("secret", {
             "simkl": {
