@@ -1,6 +1,6 @@
 import unittest
 
-from src.config import AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
+from src.config import AniListConfig, AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
 from src.matcher import MatchResult
 from src.sync_service import SyncCancelled, SyncService, SyncStats
 from src.trakt_client import TraktAuthenticationError
@@ -433,6 +433,103 @@ class SyncServiceTests(unittest.TestCase):
         self.assertNotIn(("mal", "34566"), contributed)
         self.assertIn(("anilist", "20"), contributed)
         self.assertIn(("mal", "1735"), contributed)
+
+    def test_anime_list_resolution_uses_direct_fribb_entry_not_root_fallback(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": ["watching"], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+
+        class WrongRootMatcher:
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=20, resolution_kind="external_mapping")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 20
+
+        lookups: list[bool] = []
+
+        def fake_lookup_fribb(item: dict, allow_root_fallback: bool = True) -> dict | None:
+            lookups.append(allow_root_fallback)
+            if allow_root_fallback:
+                return {"themoviedb": "20"}
+            return {"themoviedb": "65930"}
+
+        service._matcher = WrongRootMatcher()
+        service._lookup_fribb_entry = fake_lookup_fribb  # type: ignore[method-assign]
+
+        result = service._resolve_match({
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "97938",
+            "root_anilist_id": "20",
+            "mal_id": "34566",
+            "root_mal_id": "1735",
+            "ids": {
+                "anilist": "97938",
+                "root_anilist": "20",
+                "mal": "34566",
+                "root_mal": "1735",
+            },
+        })
+
+        self.assertEqual(result.tmdb_id, 65930)
+        self.assertEqual(result.resolution_kind, "direct_tmdb")
+        self.assertEqual(lookups, [False])
+
+    def test_anilist_list_resolution_uses_direct_fribb_entry_not_root_fallback(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": [], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                anilist=AniListConfig(username="demo", selected_statuses=["COMPLETED"]),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+
+        class WrongRootMatcher:
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=20, resolution_kind="external_mapping")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 20
+
+        lookups: list[bool] = []
+
+        def fake_lookup_fribb(item: dict, allow_root_fallback: bool = True) -> dict | None:
+            lookups.append(allow_root_fallback)
+            if allow_root_fallback:
+                return {"themoviedb": "20"}
+            return {"themoviedb": "65930"}
+
+        service._matcher = WrongRootMatcher()
+        service._lookup_fribb_entry = fake_lookup_fribb  # type: ignore[method-assign]
+
+        result = service._resolve_match({
+            "title": "Boruto: Naruto Next Generations",
+            "year": 2017,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "97938",
+            "root_anilist_id": "20",
+            "mal_id": "34566",
+            "root_mal_id": "1735",
+            "ids": {
+                "anilist": "97938",
+                "root_anilist": "20",
+                "mal": "34566",
+                "root_mal": "1735",
+            },
+        })
+
+        self.assertEqual(result.tmdb_id, 65930)
+        self.assertEqual(result.resolution_kind, "direct_tmdb")
+        self.assertEqual(lookups, [False])
 
     def test_sync_list_tracks_unresolved_reasons_and_phase_metrics(self) -> None:
         service = SyncService(

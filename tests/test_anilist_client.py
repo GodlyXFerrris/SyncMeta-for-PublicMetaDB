@@ -176,6 +176,9 @@ class AniListClientTests(unittest.TestCase):
         client = AniListClient(AniListConfig(username="tester"))
 
         class _Resp:
+            status_code = 404
+            headers: dict[str, str] = {}
+
             def raise_for_status(self) -> None:
                 raise requests.HTTPError("404 Client Error: Not Found for url: https://graphql.anilist.co/")
 

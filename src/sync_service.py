@@ -233,9 +233,15 @@ class SyncService:
         return result
 
     def _resolve_tmdb_id_via_fribb(self, item: dict) -> int | None:
-        """Return the TMDB ID from Fribb for this anime item, or None."""
+        """Return the direct-entry TMDB ID from Fribb for this anime item.
+
+        For list identity we must not fall back to franchise-root AniList/MAL
+        IDs here. Otherwise sequel entries like Naruto Shippuden, Boruto, or
+        Fate variants can be "corrected" back onto the root series and then get
+        deduped away in PMDB.
+        """
         try:
-            fribb = self._lookup_fribb_entry(item)
+            fribb = self._lookup_fribb_entry(item, allow_root_fallback=False)
             if not fribb:
                 return None
             raw = fribb.get("themoviedb")
@@ -945,13 +951,21 @@ class SyncService:
             cumulative += ep_count
         return None
 
-    def _lookup_fribb_entry(self, item: dict) -> dict | None:
-        """Return the Fribb anime-lists entry for this SIMKL item, or None."""
+    def _lookup_fribb_entry(self, item: dict, allow_root_fallback: bool = True) -> dict | None:
+        """Return the Fribb anime-lists entry for this anime item, or None.
+
+        Direct AniList/MAL IDs should be preferred for list identity so sequel
+        shows stay distinct. Root-ID fallback is still useful for history/remap
+        flows where we need franchise-level season topology.
+        """
         from . import fribb_client
         ids = item.get("ids") or {}
 
-        for id_key in ("anilist_id", "root_anilist_id"):
-            raw = item.get(id_key) or ids.get("anilist") or ids.get("root_anilist")
+        anilist_candidates = [item.get("anilist_id"), ids.get("anilist")]
+        if allow_root_fallback:
+            anilist_candidates.extend([item.get("root_anilist_id"), ids.get("root_anilist")])
+
+        for raw in anilist_candidates:
             if raw:
                 try:
                     cache_key = ("anilist", str(int(raw)))
@@ -965,8 +979,11 @@ class SyncService:
                 except (TypeError, ValueError):
                     pass
 
-        for id_key in ("mal_id", "root_mal_id"):
-            raw = item.get(id_key) or ids.get("mal") or ids.get("root_mal")
+        mal_candidates = [item.get("mal_id"), ids.get("mal")]
+        if allow_root_fallback:
+            mal_candidates.extend([item.get("root_mal_id"), ids.get("root_mal")])
+
+        for raw in mal_candidates:
             if raw:
                 try:
                     cache_key = ("mal", str(int(raw)))
