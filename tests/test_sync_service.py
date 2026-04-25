@@ -50,6 +50,7 @@ class StubPMDBClient:
     def __init__(self) -> None:
         self.deleted_lists: list[str] = []
         self.deleted_watched: list[str] = []
+        self.removed_list_items: list[tuple[str, str]] = []
         self.created_lists: list[dict] = []
         self.added_items: list[dict] = []
         self.created_mappings: list[dict] = []
@@ -59,6 +60,7 @@ class StubPMDBClient:
         self.resume_points: list[dict] = []
         self.resume_batches: list[list[dict]] = []
         self.list_item_reads = 0
+        self.list_items_by_id: dict[str, list[dict]] = {}
 
     def get_or_create_list(self, name: str, description: str, is_public: bool = False) -> dict:
         self.created_lists.append({
@@ -69,7 +71,7 @@ class StubPMDBClient:
 
     def get_list_items(self, list_id: str) -> list[dict]:
         self.list_item_reads += 1
-        return []
+        return list(self.list_items_by_id.get(str(list_id), []))
 
     def add_item_to_list(self, list_id: str, tmdb_id: int, media_type: str) -> None:
         self.added_items.append({
@@ -91,6 +93,13 @@ class StubPMDBClient:
     def get_anime_seasons(self, tmdb_id: int) -> list[dict]:
         self.anime_seasons_calls.append(int(tmdb_id))
         return list(self.anime_seasons_by_tmdb.get(int(tmdb_id), []))
+
+    def remove_item_from_list(self, list_id: str, item_id: str) -> None:
+        self.removed_list_items.append((str(list_id), str(item_id)))
+        self.list_items_by_id[str(list_id)] = [
+            item for item in self.list_items_by_id.get(str(list_id), [])
+            if str(item.get("id", "")) != str(item_id)
+        ]
 
     def delete_list(self, list_id: str) -> bool:
         self.deleted_lists.append(list_id)
@@ -1502,6 +1511,108 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(pmdb.created_lists, [])
         self.assertEqual(pmdb.deleted_lists, [])
         self.assertEqual(len(pmdb.watched), 2)
+
+    def test_pmdb_native_watchlist_reconciles_removed_and_added_items(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["movies"],
+            ),
+        )
+        config.simkl.access_token = "simkl-token"
+        config.sync.simkl_sync_to_pmdb_watchlist = True
+
+        service = SyncService(config, sync_modes={"lists": True, "history": False, "resume": False})
+        pmdb = StubPMDBClient()
+        pmdb.list_items_by_id["pmdb-active"] = [
+            {"id": "keep-item", "tmdb_id": 101, "media_type": "movie"},
+            {"id": "remove-item", "tmdb_id": 999, "media_type": "movie"},
+        ]
+        service._pmdb = pmdb
+
+        class WatchlistSimklClient(StubSimklClient):
+            def get_status(self, status_key: str, media_types: list[str]) -> dict[str, list[dict]]:
+                if status_key == "plantowatch":
+                    return {
+                        "movies": [
+                            {"title": "Keep", "media_type": "movie", "tmdb_id": 101},
+                            {"title": "Add", "media_type": "movie", "tmdb_id": 202},
+                        ]
+                    }
+                return {media_type: [] for media_type in media_types}
+
+        class DirectMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 2, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=int(item["tmdb_id"]), resolution_kind="direct_tmdb")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return int(item["tmdb_id"])
+
+        service._simkl = WatchlistSimklClient()
+        service._matcher = DirectMatcher()
+
+        results = service.run()
+
+        watchlist_stats = next(item for item in results if item.display_name == "PMDB Watchlist")
+        self.assertEqual(watchlist_stats.items_added, 1)
+        self.assertEqual(watchlist_stats.items_removed, 1)
+        self.assertEqual(pmdb.added_items[-1]["tmdb_id"], 202)
+        self.assertEqual(pmdb.removed_list_items, [("pmdb-active", "remove-item")])
+
+    def test_pmdb_native_watchlist_clears_when_sources_return_no_items(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["movies"],
+            ),
+        )
+        config.simkl.access_token = "simkl-token"
+        config.sync.simkl_sync_to_pmdb_watchlist = True
+
+        service = SyncService(config, sync_modes={"lists": True, "history": False, "resume": False})
+        pmdb = StubPMDBClient()
+        pmdb.list_items_by_id["pmdb-active"] = [
+            {"id": "stale-1", "tmdb_id": 777, "media_type": "movie"},
+            {"id": "stale-2", "tmdb_id": 778, "media_type": "movie"},
+        ]
+        service._pmdb = pmdb
+
+        class EmptyWatchlistSimklClient(StubSimklClient):
+            def get_status(self, status_key: str, media_types: list[str]) -> dict[str, list[dict]]:
+                return {media_type: [] for media_type in media_types}
+
+        service._simkl = EmptyWatchlistSimklClient()
+        service._matcher = StubMatcher()
+
+        results = service.run()
+
+        watchlist_stats = next(item for item in results if item.display_name == "PMDB Watchlist")
+        self.assertEqual(watchlist_stats.items_fetched, 0)
+        self.assertEqual(watchlist_stats.items_added, 0)
+        self.assertEqual(watchlist_stats.items_removed, 2)
+        self.assertEqual(
+            pmdb.removed_list_items,
+            [("pmdb-active", "stale-1"), ("pmdb-active", "stale-2")],
+        )
 
     def test_trakt_watched_history_skips_already_watched_title_even_with_new_timestamp(self) -> None:
         config = AppConfig(

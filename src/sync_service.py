@@ -373,9 +373,6 @@ class SyncService:
             items = self._anilist_root_client.get_status("PLANNING") or []
             all_items.extend(items)
 
-        if not all_items:
-            return None
-
         return self._sync_list(
             all_items,
             "Watchlist",
@@ -384,6 +381,8 @@ class SyncService:
             source_name="Combined",
             is_public=False,
             list_type="watchlist",
+            force_remove_missing=True,
+            allow_empty_sync=True,
         )
 
     def _sync_simkl(self) -> list[SyncStats]:
@@ -1707,6 +1706,8 @@ class SyncService:
         is_public: bool = False,
         selection: dict | None = None,
         list_type: str = "custom",
+        force_remove_missing: bool = False,
+        allow_empty_sync: bool = False,
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         actual_list_name = self._resolve_managed_list_name(list_name, source_name or "", selection)
@@ -1720,7 +1721,9 @@ class SyncService:
         self._set_status(f"Processing {actual_list_name}")
         logger.info("  ┌ '%s'  (%d source items)", actual_list_name, len(source_items))
 
-        if not source_items:
+        should_remove_missing = self._config.sync.remove_missing or force_remove_missing
+
+        if not source_items and not allow_empty_sync:
             logger.debug("  │ No items, skipping '%s'", actual_list_name)
             self._publish_progress([stats], force=True)
             return stats
@@ -1735,46 +1738,47 @@ class SyncService:
         pmdb_stats_before = pmdb_stats_snapshot() if callable(pmdb_stats_snapshot) else {}
         resolved: list[dict] = []
         pending_mapping_contributions: list[tuple[int, str, str, str]] = []
-        resolve_pool = ThreadPoolExecutor(max_workers=min(_LIST_RESOLVE_WORKERS, len(source_items)))
-        resolve_futures = {
-            resolve_pool.submit(self._resolve_match, item): item
-            for item in source_items
-        }
-        try:
-            for future in self._iter_completed_futures(resolve_futures):
-                self._check_cancelled()
-                item = resolve_futures[future]
-                try:
-                    match_result = future.result()
-                except SyncCancelled:
-                    raise
-                except Exception:
-                    stats.items_skipped_unresolved += 1
-                    continue
-                tmdb_id = match_result.tmdb_id
-                if tmdb_id is not None:
-                    resolved.append({**item, "resolved_tmdb_id": tmdb_id})
-                    stats.items_resolved += 1
-                    stats.match_breakdown[match_result.resolution_kind] = (
-                        int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
-                    )
-                    if match_result.resolution_kind == "root_series":
-                        self._contribute_id_mapping(item, tmdb_id, resolution_kind="root_series")
-                else:
-                    stats.items_skipped_unresolved += 1
-                    unresolved_reason = match_result.unresolved_reason or "not_found"
-                    stats.unresolved_reason_counts[unresolved_reason] = (
-                        int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
-                    )
-                    stats.unresolved_items.append(
-                        _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
-                    )
-                self._publish_progress([stats])
-        except SyncCancelled:
-            resolve_pool.shutdown(wait=False, cancel_futures=True)
-            raise
-        finally:
-            resolve_pool.shutdown(wait=False)
+        if source_items:
+            resolve_pool = ThreadPoolExecutor(max_workers=min(_LIST_RESOLVE_WORKERS, len(source_items)))
+            resolve_futures = {
+                resolve_pool.submit(self._resolve_match, item): item
+                for item in source_items
+            }
+            try:
+                for future in self._iter_completed_futures(resolve_futures):
+                    self._check_cancelled()
+                    item = resolve_futures[future]
+                    try:
+                        match_result = future.result()
+                    except SyncCancelled:
+                        raise
+                    except Exception:
+                        stats.items_skipped_unresolved += 1
+                        continue
+                    tmdb_id = match_result.tmdb_id
+                    if tmdb_id is not None:
+                        resolved.append({**item, "resolved_tmdb_id": tmdb_id})
+                        stats.items_resolved += 1
+                        stats.match_breakdown[match_result.resolution_kind] = (
+                            int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
+                        )
+                        if match_result.resolution_kind == "root_series":
+                            self._contribute_id_mapping(item, tmdb_id, resolution_kind="root_series")
+                    else:
+                        stats.items_skipped_unresolved += 1
+                        unresolved_reason = match_result.unresolved_reason or "not_found"
+                        stats.unresolved_reason_counts[unresolved_reason] = (
+                            int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
+                        )
+                        stats.unresolved_items.append(
+                            _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
+                        )
+                    self._publish_progress([stats])
+            except SyncCancelled:
+                resolve_pool.shutdown(wait=False, cancel_futures=True)
+                raise
+            finally:
+                resolve_pool.shutdown(wait=False)
         resolve_elapsed = time.perf_counter() - resolve_started
         matcher_stats_after = (
             stats_snapshot() if callable(stats_snapshot) else {"lookups": 0, "cache_hits": 0, "failed_cache_hits": 0}
@@ -1885,7 +1889,7 @@ class SyncService:
             finally:
                 pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
-        if self._config.sync.remove_missing:
+        if should_remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
             stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
             self._publish_progress([stats], force=True)
