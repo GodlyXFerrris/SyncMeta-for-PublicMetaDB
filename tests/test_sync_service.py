@@ -62,10 +62,11 @@ class StubPMDBClient:
         self.list_item_reads = 0
         self.list_items_by_id: dict[str, list[dict]] = {}
 
-    def get_or_create_list(self, name: str, description: str, is_public: bool = False) -> dict:
+    def get_or_create_list(self, name: str, description: str, is_public: bool = False, list_type: str = "custom") -> dict:
         self.created_lists.append({
             "name": name,
             "is_public": is_public,
+            "list_type": list_type,
         })
         return {"id": "pmdb-active", "name": name}
 

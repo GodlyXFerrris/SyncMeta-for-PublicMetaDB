@@ -216,7 +216,7 @@ class ItemMatcher:
         if result.tmdb_id is not None:
             if result.resolution_kind == "direct_tmdb":
                 self._stats["direct_hits"] += 1
-            elif result.resolution_kind == "external_mapping":
+            elif result.resolution_kind in {"external_mapping", "fribb_exact"}:
                 self._stats["mapping_hits"] += 1
             elif result.resolution_kind == "root_series":
                 self._stats["root_hits"] += 1
@@ -262,6 +262,13 @@ class ItemMatcher:
                 with self._lock:
                     self._record_match_stat(root_result)
                 return root_result
+
+        if is_anime:
+            fribb_result = self._try_exact_anime_fribb_lookup(item)
+            if fribb_result.tmdb_id:
+                with self._lock:
+                    self._record_match_stat(fribb_result)
+                return fribb_result
 
         # Do NOT collapse anime list identity to the franchise root up front.
         # Root-chain lookups are useful for history remapping, but for title/list
@@ -371,6 +378,52 @@ class ItemMatcher:
             resolution_kind="unresolved",
             unresolved_reason="lookup_unavailable" if lookup_unavailable else "not_found",
         )
+
+    def _try_exact_anime_fribb_lookup(self, item: dict) -> MatchResult:
+        """Use exact AniList/MAL anime-lists mappings before broader fallback logic."""
+        from . import fribb_client
+
+        ids = item.get("ids", {})
+        entry = None
+
+        raw_anilist = item.get("anilist_id") or ids.get("anilist")
+        if raw_anilist:
+            try:
+                entry = fribb_client.lookup_by_anilist(int(raw_anilist))
+            except (TypeError, ValueError):
+                entry = None
+
+        if entry is None:
+            raw_mal = item.get("mal_id") or ids.get("mal")
+            if raw_mal:
+                try:
+                    entry = fribb_client.lookup_by_mal(int(raw_mal))
+                except (TypeError, ValueError):
+                    entry = None
+
+        if not isinstance(entry, dict):
+            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+
+        tmdb_raw = entry.get("themoviedb")
+        try:
+            tmdb_id = int(tmdb_raw) if tmdb_raw else None
+        except (TypeError, ValueError):
+            tmdb_id = None
+        if not tmdb_id:
+            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+
+        fribb_type = str(entry.get("type") or "").strip().lower()
+        expected_media_type = "movie" if fribb_type == "movie" else "tv"
+        if str(item.get("media_type") or "").strip().lower() != expected_media_type:
+            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+
+        logger.debug(
+            "Resolved anime '%s' via exact Fribb mapping (%s -> %d)",
+            item.get("title", "Unknown"),
+            raw_anilist or item.get("mal_id") or ids.get("mal"),
+            tmdb_id,
+        )
+        return MatchResult(tmdb_id=tmdb_id, resolution_kind="fribb_exact")
 
     def _can_accept_anime_direct_tmdb(self, item: dict) -> bool:
         """Allow raw TMDB only after the anime identity is verified."""

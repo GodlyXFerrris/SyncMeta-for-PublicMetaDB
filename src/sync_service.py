@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 
 from .anilist_client import AniListClient
 from .config import AniListConfig, AppConfig
-from .matcher import ItemMatcher
+from .matcher import ItemMatcher, MatchResult
 from .mdblist_client import MdbListClient
 from .publicmetadb_client import PublicMetaDBClient
 from .simkl_client import SimklClient

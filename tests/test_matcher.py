@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.matcher import ItemMatcher
 
@@ -189,6 +190,69 @@ class ItemMatcherTests(unittest.TestCase):
 
         self.assertEqual(result.tmdb_id, 1575337)
         self.assertEqual(result.resolution_kind, "direct_tmdb")
+
+    def test_anime_sequel_keeps_exact_mapping_instead_of_root_series(self) -> None:
+        client = StubPMDBClient()
+
+        def fake_lookup(id_type: str, id_value: str, media_type: str) -> int | None:
+            client.calls.append((id_type, id_value, media_type))
+            if (id_type, id_value, media_type) == ("anilist", "1735", "tv"):
+                return 31910
+            if (id_type, id_value, media_type) == ("anilist", "20", "tv"):
+                return 46260
+            return None
+
+        client.lookup_by_external_id = fake_lookup  # type: ignore[method-assign]
+        matcher = ItemMatcher(
+            client,
+            anime_root_resolver=lambda anilist_id, mal_id: {
+                "root": {"id": 20, "idMal": 20},
+                "episode_offset": 0,
+            },
+        )
+
+        result = matcher.resolve_match({
+            "title": "Naruto Shippuden",
+            "year": 2007,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "1735",
+            "ids": {"anilist": "1735"},
+        })
+
+        self.assertEqual(result.tmdb_id, 31910)
+        self.assertEqual(result.resolution_kind, "external_mapping")
+        self.assertEqual(client.calls[0], ("anilist", "1735", "tv"))
+
+    @patch("src.fribb_client.lookup_by_anilist")
+    def test_anime_prefers_exact_fribb_mapping_over_bad_external_match(self, lookup_by_anilist) -> None:
+        lookup_by_anilist.return_value = {
+            "anilist_id": 1735,
+            "themoviedb": "31910",
+            "type": "TV",
+        }
+
+        client = StubPMDBClient()
+
+        def fake_lookup(id_type: str, id_value: str, media_type: str) -> int | None:
+            client.calls.append((id_type, id_value, media_type))
+            return 154634
+
+        client.lookup_by_external_id = fake_lookup  # type: ignore[method-assign]
+        matcher = ItemMatcher(client)
+
+        result = matcher.resolve_match({
+            "title": "Naruto Shippuden",
+            "year": 2007,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "1735",
+            "ids": {"anilist": "1735"},
+        })
+
+        self.assertEqual(result.tmdb_id, 31910)
+        self.assertEqual(result.resolution_kind, "fribb_exact")
+        self.assertEqual(client.calls, [])
 
 
     def test_cache_key_includes_anilist_id_so_stale_entries_are_invalidated(self) -> None:
