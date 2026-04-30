@@ -3199,7 +3199,7 @@
     }
 
     async function resetProfilePassword() {
-      const profileId = (el('profile-uuid').value || sessionProfileId || '').trim();
+      const profileId = (el('profile-id').value || sessionProfileId || '').trim();
       const newPassword = el('profile-new-password').value;
 
       if (!profileId) {
@@ -3222,7 +3222,7 @@
         }
 
         sessionProfileId = result.data.profile && result.data.profile.profile_id ? result.data.profile.profile_id : profileId;
-        el('profile-uuid').value = sessionProfileId;
+        el('profile-id').value = sessionProfileId;
         el('profile-password').value = newPassword;
         el('profile-new-password').value = '';
         if (result.data.profile) {
