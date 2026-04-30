@@ -137,6 +137,43 @@ class WebTests(unittest.TestCase):
         self.assertEqual(api_blocked.status_code, 401)
         self.assertEqual(api_blocked.get_json()["error"], "Site password required")
 
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 43200,
+            "media_types": ["shows", "movies", "anime"],
+        })
+
+        reset_response = self.client.post("/api/profile/password/reset", json={
+            "profile_id": profile["profile_id"],
+            "new_password": "new-secret",
+        })
+        self.assertEqual(reset_response.status_code, 200)
+
         wrong = self.client.post("/access", data={"password": "wrong"})
         self.assertEqual(wrong.status_code, 200)
         self.assertIn("Wrong site password.", wrong.get_data(as_text=True))

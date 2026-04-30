@@ -885,7 +885,7 @@ def _before_request() -> None:
         return
     # Profile login and creation must always be reachable so users can
     # authenticate before they have a site-access cookie.
-    allowed_paths = {"/access", "/api/profile/login", "/api/profile/save"}
+    allowed_paths = {"/access", "/api/profile/login", "/api/profile/save", "/api/profile/password/reset"}
     if request.path in allowed_paths or request.path.startswith("/static/"):
         return
     if _has_site_access():
