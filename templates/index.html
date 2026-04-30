@@ -654,6 +654,7 @@
     let draftSaveTimer = null;
     let credentialsHydrated = false;
     let lastStatusRenderKey = '';
+    let profileDraftDirty = false;
 
     function el(id) { return document.getElementById(id); }
 
@@ -982,7 +983,8 @@
       };
     }
 
-    function saveDraft() {
+    function saveDraft(markDirty) {
+      if (markDirty !== false) profileDraftDirty = true;
       saveJson(CREDS_KEY, gatherDraftCreds());
       saveJson(OPTIONS_KEY, gatherOptions());
     }
@@ -1092,6 +1094,17 @@
       const flash = el('save-flash');
       flash.classList.add('show');
       setTimeout(() => flash.classList.remove('show'), 2000);
+    }
+
+    function clearDraftDirty() {
+      profileDraftDirty = false;
+    }
+
+    async function ensureProfileReadyForRun() {
+      if (sessionProfileId && !profileDraftDirty) {
+        return lastDashboardProfile || { profile_id: sessionProfileId };
+      }
+      return saveProfile(false, false);
     }
 
     function updateDots() {
@@ -2940,6 +2953,7 @@
         const profile = result.data.profile;
         populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         renderDashboard(profile);
+        clearDraftDirty();
         flashSaved();
         if (shouldRefreshSources && profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
@@ -2973,7 +2987,8 @@
         const profile = result.data.profile;
         populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         renderDashboard(profile);
-        saveDraft();
+        saveDraft(false);
+        clearDraftDirty();
         if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
@@ -3042,7 +3057,7 @@
     }
 
     async function triggerSync(dryRun) {
-      const savedProfile = await saveProfile(false, false);
+      const savedProfile = await ensureProfileReadyForRun();
       if (!savedProfile) return;
 
       try {
@@ -3063,7 +3078,7 @@
     }
 
     async function triggerActivitySync(mode) {
-      const savedProfile = await saveProfile(false, false);
+      const savedProfile = await ensureProfileReadyForRun();
       if (!savedProfile) return;
 
       try {
@@ -3195,6 +3210,7 @@
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
+      clearDraftDirty();
       showToast('Logged out.', false, true);
     }
 
@@ -3229,7 +3245,8 @@
           populateForm(result.data.profile.credentials, result.data.profile.options, { profile_id: result.data.profile.profile_id });
           renderDashboard(result.data.profile);
         }
-        saveDraft();
+        saveDraft(false);
+        clearDraftDirty();
         showToast('Profile password updated.', false, true);
       } catch {
         showToast('Network error while resetting profile password.', true, false);
@@ -3273,6 +3290,7 @@
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
+      clearDraftDirty();
       showToast('Profile data deleted.', false, true);
     }
 
@@ -3300,7 +3318,8 @@
         pendingDeleteListName = '';
         if (profile) {
           populateForm(profile.credentials || gatherDraftCreds(), profile.options || gatherOptions(), profile);
-          saveDraft();
+          saveDraft(false);
+          clearDraftDirty();
           renderDashboard(profile);
           if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && (profile.credentials.trakt.access_token_saved || el('trakt-access-token').value.trim())) {
             refreshTraktLists(true);
