@@ -519,7 +519,6 @@ class WebTests(unittest.TestCase):
         self.assertEqual(login_response.status_code, 200)
 
         reset_response = self.client.post("/api/profile/password/reset", json={
-            "current_password": "secret",
             "new_password": "new-secret",
         })
         reset_data = reset_response.get_json()
@@ -539,7 +538,7 @@ class WebTests(unittest.TestCase):
         })
         self.assertEqual(relogin_new.status_code, 200)
 
-    def test_reset_profile_password_rejects_wrong_current_password(self) -> None:
+    def test_reset_profile_password_accepts_profile_uuid_without_signed_in_session(self) -> None:
         profile = web._profile_store.create_profile("secret", {
             "simkl": {
                 "client_id": "",
@@ -571,20 +570,35 @@ class WebTests(unittest.TestCase):
             "media_types": ["shows", "movies", "anime"],
         })
 
-        login_response = self.client.post("/api/profile/login", json={
-            "profile_id": profile["profile_id"],
-            "password": "secret",
-        })
-        self.assertEqual(login_response.status_code, 200)
-
         reset_response = self.client.post("/api/profile/password/reset", json={
-            "current_password": "wrong-secret",
+            "profile_id": profile["profile_id"],
             "new_password": "new-secret",
         })
         reset_data = reset_response.get_json()
 
-        self.assertEqual(reset_response.status_code, 401)
-        self.assertEqual(reset_data["error"], "Current profile password is invalid")
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_data["profile"]["profile_id"], profile["profile_id"])
+
+        relogin_old = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(relogin_old.status_code, 401)
+
+        relogin_new = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "new-secret",
+        })
+        self.assertEqual(relogin_new.status_code, 200)
+
+    def test_reset_profile_password_requires_uuid_when_not_signed_in(self) -> None:
+        reset_response = self.client.post("/api/profile/password/reset", json={
+            "new_password": "new-secret",
+        })
+        reset_data = reset_response.get_json()
+
+        self.assertEqual(reset_response.status_code, 400)
+        self.assertEqual(reset_data["error"], "Profile UUID is required")
 
     def test_stop_sync_endpoint_marks_profile_as_stopping(self) -> None:
         profile = web._profile_store.create_profile("secret", {

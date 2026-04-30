@@ -288,18 +288,18 @@
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
               <div class="hint">Needed to save profile first time and sign back in later.</div>
             </div>
-            <div class="form-row">
-              <label>New Profile Password</label>
-              <input type="password" id="profile-new-password" placeholder="Only fill this to reset your profile password" autocomplete="off">
-              <div class="hint">While signed in: enter current password above, new password here, then click <strong>Reset Password</strong>.</div>
-            </div>
-            <div class="actions-bar" style="margin-top:4px">
-              <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
-              <button class="btn" onclick="loadProfile()">Load Profile</button>
-              <button class="btn" onclick="resetProfilePassword()">Reset Password</button>
-              <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
-              <span class="save-flash" id="save-flash">Saved</span>
-            </div>
+              <div class="form-row">
+                <label>New Profile Password</label>
+                <input type="password" id="profile-new-password" placeholder="Only fill this to reset your profile password" autocomplete="off">
+                <div class="hint">Use your profile UUID plus a new password here to reset access. If you are already signed in, that works too.</div>
+              </div>
+              <div class="actions-bar" style="margin-top:4px">
+                <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+                <button class="btn" onclick="loadProfile()">Load Profile</button>
+                <button class="btn btn-danger" onclick="resetProfilePassword()">Reset Password</button>
+                <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
+                <span class="save-flash" id="save-flash">Saved</span>
+              </div>
           </div>
           <div class="settings-columns">
             <div class="settings-stack settings-stack-left">
@@ -3199,30 +3199,21 @@
     }
 
     async function resetProfilePassword() {
-      if (!sessionProfileId) {
-        showToast('Sign into a profile first.', true, false);
-        return;
-      }
-
-      const currentPassword = el('profile-password').value;
+      const profileId = (el('profile-uuid').value || sessionProfileId || '').trim();
       const newPassword = el('profile-new-password').value;
 
-      if (!currentPassword) {
-        showToast('Enter your current profile password first.', true, false);
+      if (!profileId) {
+        showToast('Enter your profile UUID first.', true, false);
         return;
       }
       if (!newPassword) {
         showToast('Enter a new profile password first.', true, false);
         return;
       }
-      if (newPassword === currentPassword) {
-        showToast('Use a different new password.', true, false);
-        return;
-      }
 
       try {
         const result = await apiPost('/api/profile/password/reset', {
-          current_password: currentPassword,
+          profile_id: profileId,
           new_password: newPassword,
         });
         if (!result.ok) {
@@ -3230,6 +3221,8 @@
           return;
         }
 
+        sessionProfileId = result.data.profile && result.data.profile.profile_id ? result.data.profile.profile_id : profileId;
+        el('profile-uuid').value = sessionProfileId;
         el('profile-password').value = newPassword;
         el('profile-new-password').value = '';
         if (result.data.profile) {

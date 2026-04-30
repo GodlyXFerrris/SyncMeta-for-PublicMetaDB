@@ -1137,12 +1137,15 @@ class ProfileStore:
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 
-    def reset_profile_password_by_id(self, profile_id: str, current_password: str, new_password: str) -> dict:
+    def reset_profile_password_by_id(self, profile_id: str, new_password: str) -> dict:
         if not new_password:
             raise ValueError("New profile password is required")
 
         with self._lock:
-            profile = self._authenticate_locked(profile_id, current_password)
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles.get(normalized_id)
+            if profile is None:
+                raise KeyError(profile_id)
             profile["password_hash"] = generate_password_hash(new_password, method="pbkdf2:sha256", salt_length=16)
             profile["updated_at"] = utc_now_iso()
             self._save_locked()
