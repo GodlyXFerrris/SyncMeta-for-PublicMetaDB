@@ -279,9 +279,15 @@
               <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
               <div class="hint">Needed to save profile first time and sign back in later.</div>
             </div>
+            <div class="form-row">
+              <label>New Profile Password</label>
+              <input type="password" id="profile-new-password" placeholder="Only fill this to reset your profile password" autocomplete="off">
+              <div class="hint">While signed in: enter current password above, new password here, then click <strong>Reset Password</strong>.</div>
+            </div>
             <div class="actions-bar" style="margin-top:4px">
               <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
               <button class="btn" onclick="loadProfile()">Load Profile</button>
+              <button class="btn" onclick="resetProfilePassword()">Reset Password</button>
               <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
               <span class="save-flash" id="save-flash">Saved</span>
             </div>
@@ -3110,6 +3116,51 @@
       credentialsHydrated = false;
       lastStatusRenderKey = '';
       showToast('Logged out.', false, true);
+    }
+
+    async function resetProfilePassword() {
+      if (!sessionProfileId) {
+        showToast('Sign into a profile first.', true, false);
+        return;
+      }
+
+      const currentPassword = el('profile-password').value;
+      const newPassword = el('profile-new-password').value;
+
+      if (!currentPassword) {
+        showToast('Enter your current profile password first.', true, false);
+        return;
+      }
+      if (!newPassword) {
+        showToast('Enter a new profile password first.', true, false);
+        return;
+      }
+      if (newPassword === currentPassword) {
+        showToast('Use a different new password.', true, false);
+        return;
+      }
+
+      try {
+        const result = await apiPost('/api/profile/password/reset', {
+          current_password: currentPassword,
+          new_password: newPassword,
+        });
+        if (!result.ok) {
+          showToast(formatApiError(result.data, 'Unable to reset profile password.'), true, false);
+          return;
+        }
+
+        el('profile-password').value = newPassword;
+        el('profile-new-password').value = '';
+        if (result.data.profile) {
+          populateForm(result.data.profile.credentials, result.data.profile.options, { profile_id: result.data.profile.profile_id });
+          renderDashboard(result.data.profile);
+        }
+        saveDraft();
+        showToast('Profile password updated.', false, true);
+      } catch {
+        showToast('Network error while resetting profile password.', true, false);
+      }
     }
 
     async function deleteProfileData() {

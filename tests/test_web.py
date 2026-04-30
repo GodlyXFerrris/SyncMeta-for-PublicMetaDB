@@ -480,6 +480,112 @@ class WebTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             web._profile_store.get_private_profile_by_id(profile["profile_id"])
 
+    def test_reset_profile_password_updates_password_for_signed_in_profile(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 43200,
+            "media_types": ["shows", "movies", "anime"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        reset_response = self.client.post("/api/profile/password/reset", json={
+            "current_password": "secret",
+            "new_password": "new-secret",
+        })
+        reset_data = reset_response.get_json()
+
+        self.assertEqual(reset_response.status_code, 200)
+        self.assertEqual(reset_data["profile"]["profile_id"], profile["profile_id"])
+
+        relogin_old = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(relogin_old.status_code, 401)
+
+        relogin_new = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "new-secret",
+        })
+        self.assertEqual(relogin_new.status_code, 200)
+
+    def test_reset_profile_password_rejects_wrong_current_password(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 43200,
+            "media_types": ["shows", "movies", "anime"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        reset_response = self.client.post("/api/profile/password/reset", json={
+            "current_password": "wrong-secret",
+            "new_password": "new-secret",
+        })
+        reset_data = reset_response.get_json()
+
+        self.assertEqual(reset_response.status_code, 401)
+        self.assertEqual(reset_data["error"], "Current profile password is invalid")
+
     def test_stop_sync_endpoint_marks_profile_as_stopping(self) -> None:
         profile = web._profile_store.create_profile("secret", {
             "simkl": {

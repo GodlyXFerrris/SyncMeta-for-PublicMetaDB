@@ -1065,6 +1065,17 @@ class ProfileStore:
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
 
+    def reset_profile_password_by_id(self, profile_id: str, current_password: str, new_password: str) -> dict:
+        if not new_password:
+            raise ValueError("New profile password is required")
+
+        with self._lock:
+            profile = self._authenticate_locked(profile_id, current_password)
+            profile["password_hash"] = generate_password_hash(new_password, method="pbkdf2:sha256", salt_length=16)
+            profile["updated_at"] = utc_now_iso()
+            self._save_locked()
+            return self._public_profile(profile, include_credentials=True)
+
     def claim_profile_for_sync(self, profile_id: str, password: str, sync_modes: dict | None = None) -> dict:
         with self._lock:
             profile = self._authenticate_locked(profile_id, password)

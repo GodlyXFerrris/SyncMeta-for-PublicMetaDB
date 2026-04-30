@@ -971,6 +971,28 @@ def api_profile_logout():
     return _clear_session_cookie(make_response(jsonify({"status": "logged_out"})))
 
 
+@app.route("/api/profile/password/reset", methods=["POST"])
+def api_profile_password_reset():
+    body = request.get_json(silent=True) or {}
+    current_password = str(body.get("current_password", ""))
+    new_password = str(body.get("new_password", ""))
+    profile_id = _current_profile_id()
+
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+
+    try:
+        profile = _profile_store.reset_profile_password_by_id(profile_id, current_password, new_password)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    except PermissionError:
+        return _json_error("Current profile password is invalid", 401)
+    except ValueError as exc:
+        return _json_error(str(exc), 400)
+
+    return _profile_response(profile, include_credentials=True)
+
+
 @app.route("/api/profile/delete", methods=["POST"])
 def api_profile_delete():
     body = request.get_json(silent=True) or {}
