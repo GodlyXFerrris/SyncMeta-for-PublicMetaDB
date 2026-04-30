@@ -67,6 +67,32 @@ def _normalize_activity_results(raw_results: dict | None) -> dict:
     return normalized
 
 
+def _normalize_sync_job_snapshot(raw_snapshot: dict | None) -> dict:
+    if not isinstance(raw_snapshot, dict):
+        return {
+            "job_id": "",
+            "phase": "idle",
+            "provider": "",
+            "current_list": "",
+            "started_at": None,
+            "updated_at": None,
+            "stopped_at": None,
+            "results": [],
+            "totals": {},
+        }
+    return {
+        "job_id": str(raw_snapshot.get("job_id", "") or "").strip(),
+        "phase": str(raw_snapshot.get("phase", "idle") or "idle").strip(),
+        "provider": str(raw_snapshot.get("provider", "") or "").strip(),
+        "current_list": str(raw_snapshot.get("current_list", "") or "").strip(),
+        "started_at": raw_snapshot.get("started_at"),
+        "updated_at": raw_snapshot.get("updated_at"),
+        "stopped_at": raw_snapshot.get("stopped_at"),
+        "results": copy.deepcopy(raw_snapshot.get("results", [])) if isinstance(raw_snapshot.get("results"), list) else [],
+        "totals": copy.deepcopy(raw_snapshot.get("totals", {})) if isinstance(raw_snapshot.get("totals"), dict) else {},
+    }
+
+
 def _normalize_activity_state(raw_state: dict | None) -> dict:
     if not isinstance(raw_state, dict):
         return {
@@ -616,6 +642,15 @@ class ProfileStore:
             "activity_results": _normalize_activity_results(raw_profile.get("activity_results")),
             "activity_state": _normalize_activity_state(raw_profile.get("activity_state")),
             "managed_lists": _normalize_managed_lists(raw_profile.get("managed_lists", [])),
+            "anime_manual_overrides": copy.deepcopy(raw_profile.get("anime_manual_overrides", {})) if isinstance(raw_profile.get("anime_manual_overrides"), dict) else {},
+            "anime_review_decisions": copy.deepcopy(raw_profile.get("anime_review_decisions", {})) if isinstance(raw_profile.get("anime_review_decisions"), dict) else {},
+            "last_sync_job_snapshot": _normalize_sync_job_snapshot(raw_profile.get("last_sync_job_snapshot")),
+            "sync_job_id": str(raw_profile.get("sync_job_id", "") or "").strip(),
+            "unresolved_items": copy.deepcopy(raw_profile.get("unresolved_items", [])) if isinstance(raw_profile.get("unresolved_items"), list) else [],
+            "resolution_cache": copy.deepcopy(raw_profile.get("resolution_cache", {})) if isinstance(raw_profile.get("resolution_cache"), dict) else {},
+            "failed_resolution_cache": copy.deepcopy(raw_profile.get("failed_resolution_cache", {})) if isinstance(raw_profile.get("failed_resolution_cache"), dict) else {},
+            "manual_resolution_cache": copy.deepcopy(raw_profile.get("manual_resolution_cache", {})) if isinstance(raw_profile.get("manual_resolution_cache"), dict) else {},
+            "manual_list_additions": copy.deepcopy(raw_profile.get("manual_list_additions", {})) if isinstance(raw_profile.get("manual_list_additions"), dict) else {},
         }
 
     def _save_locked(self) -> None:
@@ -654,6 +689,15 @@ class ProfileStore:
             "activity_results": copy.deepcopy(profile.get("activity_results", {})),
             "activity_state": copy.deepcopy(profile.get("activity_state", {})),
             "managed_lists": copy.deepcopy(profile.get("managed_lists", [])),
+            "anime_manual_overrides": copy.deepcopy(profile.get("anime_manual_overrides", {})),
+            "anime_review_decisions": copy.deepcopy(profile.get("anime_review_decisions", {})),
+            "last_sync_job_snapshot": copy.deepcopy(profile.get("last_sync_job_snapshot", {})),
+            "sync_job_id": profile.get("sync_job_id"),
+            "unresolved_items": copy.deepcopy(profile.get("unresolved_items", [])),
+            "resolution_cache": copy.deepcopy(profile.get("resolution_cache", {})),
+            "failed_resolution_cache": copy.deepcopy(profile.get("failed_resolution_cache", {})),
+            "manual_resolution_cache": copy.deepcopy(profile.get("manual_resolution_cache", {})),
+            "manual_list_additions": copy.deepcopy(profile.get("manual_list_additions", {})),
         }
 
     def _load_credentials(self, raw_profile: dict) -> dict:
@@ -846,6 +890,25 @@ class ProfileStore:
             "activity_results": copy.deepcopy(profile.get("activity_results", {})),
             "activity_state": copy.deepcopy(profile.get("activity_state", {})),
             "options": copy.deepcopy(profile.get("options", {})),
+            "last_sync_job_snapshot": copy.deepcopy(profile.get("last_sync_job_snapshot", {})),
+            "sync_job_id": profile.get("sync_job_id"),
+            "anime_review_summary": {
+                "manual_overrides": len(profile.get("anime_manual_overrides", {})),
+                "reviewed": len(profile.get("anime_review_decisions", {})),
+                "unresolved_anime": len([
+                    item for item in unresolved_items
+                    if str(item.get("simkl_type", "")).strip().lower() == "anime"
+                ]),
+                "ambiguous_anime": len([
+                    item for item in unresolved_items
+                    if str(item.get("simkl_type", "")).strip().lower() == "anime"
+                    and str(item.get("match_confidence", "")).strip().lower() == "ambiguous"
+                ]),
+                "remapped_anime": len([
+                    row for row in profile.get("last_results", [])
+                    if isinstance(row, dict) and int((row.get("match_breakdown") or {}).get("root_series", 0) or 0) > 0
+                ]),
+            },
         }
         if include_credentials:
             result["credentials"] = public_credentials(profile.get("credentials", {}))
@@ -972,6 +1035,15 @@ class ProfileStore:
             "activity_results": {},
             "activity_state": _normalize_activity_state(None),
             "managed_lists": [],
+            "anime_manual_overrides": {},
+            "anime_review_decisions": {},
+            "last_sync_job_snapshot": _normalize_sync_job_snapshot(None),
+            "sync_job_id": "",
+            "unresolved_items": [],
+            "resolution_cache": {},
+            "failed_resolution_cache": {},
+            "manual_resolution_cache": {},
+            "manual_list_additions": {},
         }
 
         with self._lock:
@@ -1089,6 +1161,18 @@ class ProfileStore:
             profile["sync_started_at"] = now
             profile["sync_updated_at"] = now
             profile["sync_live_results"] = []
+            profile["sync_job_id"] = str(uuid.uuid4())
+            profile["last_sync_job_snapshot"] = {
+                "job_id": profile["sync_job_id"],
+                "phase": "queued",
+                "provider": "",
+                "current_list": "",
+                "started_at": now,
+                "updated_at": now,
+                "stopped_at": None,
+                "results": [],
+                "totals": _result_totals([]),
+            }
             self._save_locked()
             claimed = copy.deepcopy(profile)
             claimed["pending_sync_modes"] = self._normalize_sync_modes(sync_modes)
@@ -1107,6 +1191,18 @@ class ProfileStore:
             profile["sync_started_at"] = now
             profile["sync_updated_at"] = now
             profile["sync_live_results"] = []
+            profile["sync_job_id"] = str(uuid.uuid4())
+            profile["last_sync_job_snapshot"] = {
+                "job_id": profile["sync_job_id"],
+                "phase": "queued",
+                "provider": "",
+                "current_list": "",
+                "started_at": now,
+                "updated_at": now,
+                "stopped_at": None,
+                "results": [],
+                "totals": _result_totals([]),
+            }
             self._save_locked()
             claimed = copy.deepcopy(profile)
             claimed["pending_sync_modes"] = self._normalize_sync_modes(sync_modes)
@@ -1146,6 +1242,18 @@ class ProfileStore:
                 profile["sync_started_at"] = now_iso
                 profile["sync_updated_at"] = now_iso
                 profile["sync_live_results"] = []
+                profile["sync_job_id"] = str(uuid.uuid4())
+                profile["last_sync_job_snapshot"] = {
+                    "job_id": profile["sync_job_id"],
+                    "phase": "queued",
+                    "provider": "",
+                    "current_list": "",
+                    "started_at": now_iso,
+                    "updated_at": now_iso,
+                    "stopped_at": None,
+                    "results": [],
+                    "totals": _result_totals([]),
+                }
                 claimed = copy.deepcopy(profile)
                 claimed["pending_sync_modes"] = due_modes
                 due_profiles.append(claimed)
@@ -1207,6 +1315,17 @@ class ProfileStore:
             profile["sync_status"] = "Completed"
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
+            profile["last_sync_job_snapshot"] = {
+                "job_id": profile.get("sync_job_id", ""),
+                "phase": "completed",
+                "provider": "",
+                "current_list": "",
+                "started_at": profile.get("sync_started_at"),
+                "updated_at": now,
+                "stopped_at": now,
+                "results": copy.deepcopy(results),
+                "totals": _result_totals(results),
+            }
 
             self._append_history_entry(profile, now, dry_run, results=results, status="completed")
 
@@ -1233,6 +1352,17 @@ class ProfileStore:
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
             profile["sync_live_results"] = []
+            profile["last_sync_job_snapshot"] = {
+                "job_id": profile.get("sync_job_id", ""),
+                "phase": "failed",
+                "provider": "",
+                "current_list": "",
+                "started_at": profile.get("sync_started_at"),
+                "updated_at": now,
+                "stopped_at": now,
+                "results": [],
+                "totals": {},
+            }
             self._append_history_entry(
                 profile,
                 now,
@@ -1289,6 +1419,18 @@ class ProfileStore:
             # without waiting for the next full sync.
             if resolved_item:
                 self._patch_resolved_stats(profile, resolved_item)
+                if str(resolved_item.get("simkl_type", "")).strip().lower() == "anime":
+                    overrides = dict(profile.get("anime_manual_overrides") or {})
+                    overrides[cache_key] = {
+                        "tmdb_id": tmdb_id,
+                        "title": resolved_item.get("title"),
+                        "media_type": resolved_item.get("media_type"),
+                        "saved_at": utc_now_iso(),
+                    }
+                    profile["anime_manual_overrides"] = overrides
+                    decisions = dict(profile.get("anime_review_decisions") or {})
+                    decisions[cache_key] = "manual_map"
+                    profile["anime_review_decisions"] = decisions
                 # Track manual list addition so the sync worker never removes it.
                 list_name = resolved_item.get("list_name") or ""
                 media_type = resolved_item.get("media_type") or "movie"
@@ -1308,10 +1450,18 @@ class ProfileStore:
         with self._lock:
             normalized_id = self._normalize_profile_id(profile_id)
             profile = self._profiles[normalized_id]
+            dismissed_item = next(
+                (i for i in profile.get("unresolved_items", []) if i.get("cache_key") == cache_key),
+                None,
+            )
             profile["unresolved_items"] = [
                 item for item in profile.get("unresolved_items", [])
                 if item.get("cache_key") != cache_key
             ]
+            if dismissed_item and str(dismissed_item.get("simkl_type", "")).strip().lower() == "anime":
+                decisions = dict(profile.get("anime_review_decisions") or {})
+                decisions[cache_key] = "dismissed"
+                profile["anime_review_decisions"] = decisions
             self._save_locked()
             return copy.deepcopy(profile["unresolved_items"])
 
@@ -1347,6 +1497,11 @@ class ProfileStore:
             profile["updated_at"] = now
             profile["sync_updated_at"] = now
             profile["sync_live_results"] = []
+            snapshot = _normalize_sync_job_snapshot(profile.get("last_sync_job_snapshot"))
+            snapshot["phase"] = "stopped"
+            snapshot["updated_at"] = now
+            snapshot["stopped_at"] = now
+            profile["last_sync_job_snapshot"] = snapshot
             self._append_history_entry(profile, now, dry_run, results=[], status="stopped")
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
             self._save_locked()
@@ -1361,6 +1516,23 @@ class ProfileStore:
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
+            snapshot = _normalize_sync_job_snapshot(profile.get("last_sync_job_snapshot"))
+            snapshot["job_id"] = str(profile.get("sync_job_id", "") or snapshot.get("job_id", ""))
+            snapshot["phase"] = "running"
+            snapshot["updated_at"] = now
+            snapshot["started_at"] = snapshot.get("started_at") or profile.get("sync_started_at") or now
+            snapshot["current_list"] = status
+            provider = ""
+            if "simkl" in status.lower():
+                provider = "SIMKL"
+            elif "anilist" in status.lower():
+                provider = "AniList"
+            elif "trakt" in status.lower():
+                provider = "Trakt"
+            elif "mdblist" in status.lower():
+                provider = "MDBList"
+            snapshot["provider"] = provider
+            profile["last_sync_job_snapshot"] = snapshot
             # No disk save — status is in-memory only; polls read from memory.
             return self._public_profile(profile, include_credentials=True)
 
@@ -1373,6 +1545,14 @@ class ProfileStore:
             profile["sync_updated_at"] = now
             if profile["sync_started_at"] is None:
                 profile["sync_started_at"] = now
+            snapshot = _normalize_sync_job_snapshot(profile.get("last_sync_job_snapshot"))
+            snapshot["job_id"] = str(profile.get("sync_job_id", "") or snapshot.get("job_id", ""))
+            snapshot["phase"] = "running"
+            snapshot["updated_at"] = now
+            snapshot["started_at"] = snapshot.get("started_at") or profile.get("sync_started_at") or now
+            snapshot["results"] = copy.deepcopy(results or [])
+            snapshot["totals"] = _result_totals(results or [])
+            profile["last_sync_job_snapshot"] = snapshot
             # No disk save — progress is in-memory only.
             return self._public_profile(profile, include_credentials=True)
 

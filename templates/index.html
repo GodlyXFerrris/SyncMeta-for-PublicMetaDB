@@ -228,8 +228,17 @@
             <div class="cards activity-cards" id="activity-cards"></div>
           </div>
         </div>
+        <div class="panel" id="anime-health-panel" style="display:none">
+          <div class="panel-header"><span>Anime Health</span><span id="anime-health-summary" class="history-time"></span></div>
+          <div class="panel-body">
+            <div class="cards activity-cards" id="anime-health-cards"></div>
+          </div>
+        </div>
         <div class="panel">
           <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
+          <div class="panel-body" style="padding-bottom:0">
+            <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+          </div>
           <div id="provider-progress" class="hidden"></div>
           <div id="dry-run-preview-container" class="hidden"></div>
           <div id="results-body"><div class="empty">No sync results yet. Save a profile in Settings and the server will keep it synced automatically.</div></div>
@@ -636,6 +645,7 @@
     let lastDashboardProfile = null;
     let lastSiteStats = null;
     let currentResultsPage = 1;
+    let currentResultsFilter = 'all';
     let pendingDeleteListName = '';
     let deletingManagedListName = '';
     let pendingClearWatchHistory = false;
@@ -2401,6 +2411,62 @@
       node.classList.remove('hidden');
     }
 
+    function renderAnimeHealth(profile) {
+      const panel = el('anime-health-panel');
+      const cards = el('anime-health-cards');
+      const summary = el('anime-health-summary');
+      if (!panel || !cards || !summary) return;
+      const health = profile.anime_review_summary || {};
+      const hasAnything = (health.manual_overrides || 0) || (health.reviewed || 0) || (health.unresolved_anime || 0) || (health.ambiguous_anime || 0) || (health.remapped_anime || 0);
+      if (!hasAnything) {
+        panel.style.display = 'none';
+        cards.innerHTML = '';
+        summary.textContent = '';
+        return;
+      }
+      panel.style.display = '';
+      summary.textContent = health.unresolved_anime ? `${health.unresolved_anime} needs review` : 'Healthy';
+      cards.innerHTML = `
+        <div class="card"><div class="card-label">Exact / Verified</div><div class="card-value">${Math.max(0, (profile.last_results || []).reduce((acc, row) => acc + Number((row.match_breakdown || {})['confidence:exact'] || 0) + Number((row.match_breakdown || {})['confidence:verified'] || 0), 0))}</div><div class="card-sub">trusted anime matches</div></div>
+        <div class="card"><div class="card-label">Ambiguous</div><div class="card-value" style="color:${(health.ambiguous_anime || 0) > 0 ? 'var(--orange)' : 'var(--z100)'}">${health.ambiguous_anime || 0}</div><div class="card-sub">held back for safety</div></div>
+        <div class="card"><div class="card-label">Unresolved</div><div class="card-value" style="color:${(health.unresolved_anime || 0) > 0 ? 'var(--orange)' : 'var(--z100)'}">${health.unresolved_anime || 0}</div><div class="card-sub">need mapping help</div></div>
+        <div class="card"><div class="card-label">Manual Overrides</div><div class="card-value">${health.manual_overrides || 0}</div><div class="card-sub">${health.remapped_anime || 0} remapped via root/season help</div></div>
+      `;
+    }
+
+    function filterResultsRows(rows) {
+      if (!Array.isArray(rows)) return [];
+      if (currentResultsFilter === 'anime') return rows.filter(row => ((row.display_name || row.list_name || '').toLowerCase().includes('anime')));
+      if (currentResultsFilter === 'unresolved') return rows.filter(row => Number(row.items_skipped_unresolved || 0) > 0);
+      if (currentResultsFilter === 'ambiguous') return rows.filter(row => Number((row.match_breakdown || {})['confidence:ambiguous'] || 0) > 0 || String(row.unresolved_reason_counts && Object.keys(row.unresolved_reason_counts || {}).join(' ')).includes('ambiguous'));
+      return rows;
+    }
+
+    function renderResultFilters(rows) {
+      const node = el('results-filters');
+      if (!node) return;
+      const filters = [
+        ['all', 'All'],
+        ['anime', 'Anime Only'],
+        ['unresolved', 'Unresolved'],
+        ['ambiguous', 'Ambiguous'],
+      ];
+      const counts = {
+        all: rows.length,
+        anime: rows.filter(row => ((row.display_name || row.list_name || '').toLowerCase().includes('anime'))).length,
+        unresolved: rows.filter(row => Number(row.items_skipped_unresolved || 0) > 0).length,
+        ambiguous: rows.filter(row => Number((row.match_breakdown || {})['confidence:ambiguous'] || 0) > 0).length,
+      };
+      node.innerHTML = filters.map(([key, label]) => `<button class="btn btn-sm ${currentResultsFilter === key ? 'btn-primary' : ''}" type="button" data-results-filter="${key}">${esc(label)}${counts[key] ? ` (${counts[key]})` : ''}</button>`).join('');
+      node.querySelectorAll('[data-results-filter]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          currentResultsFilter = btn.dataset.resultsFilter || 'all';
+          currentResultsPage = 1;
+          renderDashboard(lastDashboardProfile);
+        });
+      });
+    }
+
     function renderDashboard(profile) {
       if (!profile) {
         renderEmptyDashboard('Save a profile in Settings to enable background sync.');
@@ -2449,6 +2515,7 @@
       `;
 
       renderActivityPanel(profile);
+      renderAnimeHealth(profile);
       renderProviderProgress(profile, results);
       renderDryRunPreview(profile, results);
 
@@ -2471,9 +2538,13 @@
       el('results-time').textContent = profile.sync_running
         ? 'Live progress'
         : (profile.last_sync ? new Date(profile.last_sync).toLocaleString() : '');
-      if (!results.length) {
+      const filteredResults = filterResultsRows(results);
+      renderResultFilters(results);
+      if (!filteredResults.length) {
         currentResultsPage = 1;
-        el('results-body').innerHTML = '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>';
+        el('results-body').innerHTML = currentResultsFilter === 'all'
+          ? '<div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div>'
+          : '<div class="empty">No rows match this filter yet.</div>';
       } else {
         const formatResultDiagnostics = (row) => {
           const timings = row.phase_timings || {};
@@ -2499,12 +2570,12 @@
           }
           return notes.filter(Boolean).map(note => `<div class="catalog-note">${esc(note)}</div>`).join('');
         };
-        const totalPages = Math.max(1, Math.ceil(results.length / RESULTS_PAGE_SIZE));
+        const totalPages = Math.max(1, Math.ceil(filteredResults.length / RESULTS_PAGE_SIZE));
         currentResultsPage = Math.min(Math.max(1, currentResultsPage), totalPages);
         const startIndex = (currentResultsPage - 1) * RESULTS_PAGE_SIZE;
-        const pagedResults = results.slice(startIndex, startIndex + RESULTS_PAGE_SIZE);
+        const pagedResults = filteredResults.slice(startIndex, startIndex + RESULTS_PAGE_SIZE);
         const pagerHtml = totalPages > 1
-          ? `<div class="table-pager"><div class="table-pager-actions"><span>Showing ${startIndex + 1}-${startIndex + pagedResults.length} of ${results.length}</span><span>·</span><span>Page ${currentResultsPage} of ${totalPages}</span><button class="btn btn-sm" type="button" id="results-prev-page" ${currentResultsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn btn-sm" type="button" id="results-next-page" ${currentResultsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>`
+          ? `<div class="table-pager"><div class="table-pager-actions"><span>Showing ${startIndex + 1}-${startIndex + pagedResults.length} of ${filteredResults.length}</span><span>·</span><span>Page ${currentResultsPage} of ${totalPages}</span><button class="btn btn-sm" type="button" id="results-prev-page" ${currentResultsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn btn-sm" type="button" id="results-next-page" ${currentResultsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>`
           : '';
         el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${pagedResults.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}${formatResultDiagnostics(row)}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-red' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>${pagerHtml}`;
         document.querySelectorAll('[data-delete-list]').forEach(node => {
@@ -2575,11 +2646,15 @@
         return;
       }
       panel.style.display = '';
+      const animeItems = items.filter(item => String(item.simkl_type || '').toLowerCase() === 'anime');
+      const regularItems = items.filter(item => String(item.simkl_type || '').toLowerCase() !== 'anime');
       const rows = items.map(item => {
         const title = item.title && item.title !== 'Unknown' ? item.title : null;
         const displayTitle = title || (item.simkl_id ? `SIMKL #${item.simkl_id}` : item.mal_id ? `MAL #${item.mal_id}` : item.anilist_id ? `AniList #${item.anilist_id}` : 'Unknown');
         const year = item.year ? ` (${item.year})` : '';
         const listBadge = item.list_name ? `<div class="catalog-note" style="margin-top:2px;font-size:11px">📋 ${esc(item.list_name)}</div>` : '';
+        const reasonBadge = item.anime_conflict_reason ? `<div class="catalog-note" style="margin-top:4px;color:var(--orange)">${esc(item.anime_conflict_reason)}</div>` : '';
+        const confidenceBadge = item.match_confidence && item.match_confidence !== 'unresolved' ? `<div class="catalog-note" style="margin-top:2px">confidence: ${esc(item.match_confidence)}</div>` : '';
 
         // Build external lookup links so the user can find the TMDB ID easily.
         const searchQuery = encodeURIComponent(title || displayTitle);
@@ -2597,6 +2672,8 @@
           <td>
             <div style="font-weight:500">${esc(displayTitle)}<span class="catalog-note">${esc(year)}</span></div>
             ${listBadge}
+            ${reasonBadge}
+            ${confidenceBadge}
             <div style="margin-top:3px;font-size:11px">${idLinks}</div>
           </td>
           <td style="white-space:nowrap">${typeLabel}</td>
@@ -2610,7 +2687,10 @@
           </td>
         </tr>`;
       }).join('');
-      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th style="min-width:220px">Auto / Manual Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+      const summaryHtml = animeItems.length
+        ? `<div class="panel-body" style="padding-top:0;color:var(--z500);font-size:12px">Anime review queue: ${animeItems.length} item${animeItems.length === 1 ? '' : 's'} need franchise-safe review.${regularItems.length ? ` ${regularItems.length} other unresolved item${regularItems.length === 1 ? '' : 's'} too.` : ''}</div>`
+        : '';
+      body.innerHTML = `${summaryHtml}<div class="table-scroll"><table><thead><tr><th>Title</th><th>Type</th><th style="min-width:220px">Auto / Manual Mapping</th></tr></thead><tbody>${rows}</tbody></table></div>`;
       body.querySelectorAll('.unresolved-auto-btn').forEach(btn => {
         btn.addEventListener('click', () => autoResolveUnresolvedItem(btn.closest('tr')));
       });

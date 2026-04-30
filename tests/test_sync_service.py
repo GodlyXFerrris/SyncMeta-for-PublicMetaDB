@@ -489,7 +489,9 @@ class SyncServiceTests(unittest.TestCase):
         })
 
         self.assertEqual(result.tmdb_id, 65930)
-        self.assertEqual(result.resolution_kind, "direct_tmdb")
+        self.assertEqual(result.resolution_kind, "fribb_exact")
+        self.assertEqual(result.match_confidence, "exact")
+        self.assertEqual(result.anime_mapping_source, "fribb_exact")
         self.assertEqual(lookups, [False])
 
     def test_anilist_list_resolution_uses_direct_fribb_entry_not_root_fallback(self) -> None:
@@ -538,7 +540,9 @@ class SyncServiceTests(unittest.TestCase):
         })
 
         self.assertEqual(result.tmdb_id, 65930)
-        self.assertEqual(result.resolution_kind, "direct_tmdb")
+        self.assertEqual(result.resolution_kind, "fribb_exact")
+        self.assertEqual(result.match_confidence, "exact")
+        self.assertEqual(result.anime_mapping_source, "fribb_exact")
         self.assertEqual(lookups, [False])
 
     def test_sync_list_tracks_unresolved_reasons_and_phase_metrics(self) -> None:

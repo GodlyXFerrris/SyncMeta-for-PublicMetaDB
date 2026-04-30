@@ -115,6 +115,8 @@ def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason:
         "simkl_id": ids.get("simkl"),
         "list_name": list_name,
         "cache_key": ItemMatcher._cache_key(item),
+        "anime_resolve_mode": str(item.get("anime_resolve_mode", "") or "").strip(),
+        "anime_identity": dict(item.get("anime_identity", {})) if isinstance(item.get("anime_identity"), dict) else None,
     }
     if unresolved_reason:
         summary["unresolved_reason"] = unresolved_reason
@@ -123,8 +125,26 @@ def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason:
             "root_episode_offset": item.get("root_episode_offset") or 0,
             "has_root_ids": bool(item.get("root_anilist_id") or item.get("root_mal_id") or ids.get("root_anilist") or ids.get("root_mal")),
             "has_anime_ids": bool(item.get("anilist_id") or item.get("mal_id") or ids.get("anilist") or ids.get("mal")),
+            "anime_conflict_reason": _anime_conflict_reason(item, unresolved_reason),
         })
     return summary
+
+
+def _anime_conflict_reason(item: dict, unresolved_reason: str = "") -> str:
+    if str(item.get("simkl_type", "")).strip().lower() != "anime":
+        return ""
+    media_type = str(item.get("media_type", "")).strip().lower()
+    if unresolved_reason == "lookup_unavailable":
+        return "pmdb external mismatch"
+    if unresolved_reason == "missing_ids":
+        return "missing fribb mapping"
+    if media_type == "movie" and any(item.get(key) for key in ("root_anilist_id", "root_mal_id")):
+        return "movie vs tv mismatch"
+    if int(item.get("root_episode_offset") or 0) > 0:
+        return "season split mismatch"
+    if any(item.get(key) for key in ("root_anilist_id", "root_mal_id")):
+        return "root collision"
+    return "missing fribb mapping"
 
 
 class SyncService:
@@ -229,7 +249,13 @@ class SyncService:
         ):
             fribb_tmdb = self._resolve_tmdb_id_via_fribb(item)
             if fribb_tmdb and fribb_tmdb != result.tmdb_id:
-                return MatchResult(tmdb_id=fribb_tmdb, resolution_kind="direct_tmdb")
+                return MatchResult(
+                    tmdb_id=fribb_tmdb,
+                    resolution_kind="fribb_exact",
+                    match_confidence="exact",
+                    anime_mapping_source="fribb_exact",
+                    candidate_tmdb_id=result.tmdb_id,
+                )
         return result
 
     def _resolve_tmdb_id_via_fribb(self, item: dict) -> int | None:
@@ -1757,11 +1783,21 @@ class SyncService:
                         continue
                     tmdb_id = match_result.tmdb_id
                     if tmdb_id is not None:
-                        resolved.append({**item, "resolved_tmdb_id": tmdb_id})
+                        resolved.append({
+                            **item,
+                            "resolved_tmdb_id": tmdb_id,
+                            "match_confidence": match_result.match_confidence,
+                            "anime_mapping_source": match_result.anime_mapping_source,
+                        })
                         stats.items_resolved += 1
                         stats.match_breakdown[match_result.resolution_kind] = (
                             int(stats.match_breakdown.get(match_result.resolution_kind, 0)) + 1
                         )
+                        if match_result.match_confidence:
+                            confidence_key = f"confidence:{match_result.match_confidence}"
+                            stats.match_breakdown[confidence_key] = (
+                                int(stats.match_breakdown.get(confidence_key, 0)) + 1
+                            )
                         if match_result.resolution_kind == "root_series":
                             self._contribute_id_mapping(item, tmdb_id, resolution_kind="root_series")
                     else:
@@ -1770,9 +1806,12 @@ class SyncService:
                         stats.unresolved_reason_counts[unresolved_reason] = (
                             int(stats.unresolved_reason_counts.get(unresolved_reason, 0)) + 1
                         )
-                        stats.unresolved_items.append(
-                            _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
-                        )
+                        unresolved_summary = _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason=unresolved_reason)
+                        unresolved_summary["match_confidence"] = match_result.match_confidence
+                        unresolved_summary["anime_mapping_source"] = match_result.anime_mapping_source
+                        if match_result.candidate_tmdb_id:
+                            unresolved_summary["candidate_tmdb_id"] = match_result.candidate_tmdb_id
+                        stats.unresolved_items.append(unresolved_summary)
                     self._publish_progress([stats])
             except SyncCancelled:
                 resolve_pool.shutdown(wait=False, cancel_futures=True)

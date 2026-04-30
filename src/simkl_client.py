@@ -342,6 +342,17 @@ class SimklClient:
             # entries onto the franchise root. Distinct sequel titles like Naruto
             # Shippuden or Fate variants should remain separate PMDB entries.
             "prefer_root_series": False,
+            "anime_resolve_mode": "list_identity" if media_type == "anime" else "",
+            "anime_identity": self._anime_identity_payload(
+                ids,
+                title=media.get("title", "Unknown"),
+                year=media.get("year"),
+                status=entry.get("status"),
+                resolver_mode="list_identity",
+                media_type=pmdb_type,
+                root_ids=root_ids,
+                fribb_entry=fribb_entry if media_type == "anime" else None,
+            ) if media_type == "anime" else None,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
@@ -443,6 +454,35 @@ class SimklClient:
         if isinstance(title, dict):
             return title.get("english") or title.get("romaji")
         return None
+
+    @staticmethod
+    def _anime_identity_payload(
+        ids: dict,
+        *,
+        title: str,
+        year: int | None,
+        status: str | None = None,
+        resolver_mode: str = "list_identity",
+        media_type: str = "tv",
+        root_ids: dict | None = None,
+        fribb_entry: dict | None = None,
+    ) -> dict:
+        root_ids = root_ids or {}
+        return {
+            "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+            "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+            "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+            "fribb_tmdb_id": str(fribb_entry.get("themoviedb")) if isinstance(fribb_entry, dict) and fribb_entry.get("themoviedb") else None,
+            "fribb_type": str(fribb_entry.get("type") or "").strip().upper() if isinstance(fribb_entry, dict) else "",
+            "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
+            "root_mal_id": str(root_ids["root_mal"]) if root_ids.get("root_mal") else None,
+            "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+            "title": title,
+            "year": year,
+            "source_status": status,
+            "resolver_mode": resolver_mode,
+            "media_type": media_type,
+        }
 
     # ── Activities (for delta sync) ───────────────────────────────
 
@@ -613,6 +653,16 @@ class SimklClient:
             "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
             "root_title": root_title,
             "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+            "anime_resolve_mode": "resume_identity" if media_key == "anime" else "",
+            "anime_identity": self._anime_identity_payload(
+                ids,
+                title=show.get("title", "Unknown"),
+                year=show.get("year"),
+                status=entry.get("status"),
+                resolver_mode="resume_identity",
+                media_type="tv",
+                root_ids=root_ids,
+            ) if media_key == "anime" else None,
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,
@@ -774,6 +824,16 @@ class SimklClient:
                 "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
                 "root_title": root_ids.get("root_title"),
                 "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+                "anime_resolve_mode": "history_identity",
+                "anime_identity": self._anime_identity_payload(
+                    ids,
+                    title=title,
+                    year=show.get("year"),
+                    status=entry.get("status"),
+                    resolver_mode="history_identity",
+                    media_type="movie",
+                    root_ids=root_ids,
+                ),
                 "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
                 "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
                 "ids": ids,
@@ -802,6 +862,16 @@ class SimklClient:
                 "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
                 "root_title": root_ids.get("root_title"),
                 "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+                "anime_resolve_mode": "history_identity" if media_key == "anime" else "",
+                "anime_identity": self._anime_identity_payload(
+                    ids,
+                    title=title,
+                    year=show.get("year"),
+                    status=entry.get("status"),
+                    resolver_mode="history_identity",
+                    media_type="tv",
+                    root_ids=root_ids,
+                ) if media_key == "anime" else None,
                 "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
                 "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
                 "ids": ids,
@@ -1114,6 +1184,16 @@ class SimklClient:
             "root_anilist_id": str(root_ids["root_anilist"]) if root_ids.get("root_anilist") else None,
             "root_title": root_ids.get("root_title"),
             "root_episode_offset": int(root_ids["root_episode_offset"]) if root_ids.get("root_episode_offset") else 0,
+            "anime_resolve_mode": "history_identity",
+            "anime_identity": self._anime_identity_payload(
+                ids,
+                title=show.get("title", "Unknown"),
+                year=show.get("year"),
+                status=entry.get("status"),
+                resolver_mode="history_identity",
+                media_type="tv",
+                root_ids=root_ids,
+            ),
             "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
             "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "ids": ids,

@@ -43,6 +43,9 @@ class MatchResult:
     tmdb_id: int | None
     resolution_kind: str
     unresolved_reason: str | None = None
+    match_confidence: str = "verified"
+    anime_mapping_source: str | None = None
+    candidate_tmdb_id: int | None = None
 
 
 class ItemMatcher:
@@ -255,8 +258,10 @@ class ItemMatcher:
         media_type = item["media_type"]
         is_anime = item.get("simkl_type") == "anime"
         ids = item.get("ids", {})
+        anime_resolve_mode = self._anime_resolve_mode(item)
+        allow_root_series = bool(item.get("allow_root_series")) or anime_resolve_mode in {"history_identity", "resume_identity"}
 
-        if item.get("prefer_root_series"):
+        if item.get("prefer_root_series") or allow_root_series:
             root_result = self._resolve_root_series(item, ids, media_type)
             if root_result.tmdb_id:
                 with self._lock:
@@ -281,7 +286,12 @@ class ItemMatcher:
                 try:
                     tmdb_id = int(tmdb_raw)
                     logger.debug("Resolved '%s' via direct TMDB ID: %d", title, tmdb_id)
-                    result = MatchResult(tmdb_id=tmdb_id, resolution_kind="direct_tmdb")
+                    result = MatchResult(
+                        tmdb_id=tmdb_id,
+                        resolution_kind="direct_tmdb",
+                        match_confidence="verified",
+                        anime_mapping_source="direct_tmdb" if is_anime else None,
+                    )
                     with self._lock:
                         self._record_match_stat(result)
                     return result
@@ -300,14 +310,19 @@ class ItemMatcher:
             tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
                 logger.debug("Resolved '%s' via %s lookup (%s -> %d)", title, id_type, ext_id, tmdb_id)
-                result = MatchResult(tmdb_id=tmdb_id, resolution_kind="external_mapping")
+                result = MatchResult(
+                    tmdb_id=tmdb_id,
+                    resolution_kind="external_mapping",
+                    match_confidence="verified",
+                    anime_mapping_source=id_type if is_anime else None,
+                )
                 with self._lock:
                     self._record_match_stat(result)
                 return result
             if status == "lookup_unavailable":
                 lookup_unavailable = True
 
-        if not is_anime and not item.get("prefer_root_series"):
+        if (not is_anime and not item.get("prefer_root_series")) or (is_anime and allow_root_series):
             root_result = self._resolve_root_series(item, ids, media_type)
             if root_result.tmdb_id:
                 with self._lock:
@@ -322,7 +337,12 @@ class ItemMatcher:
                 try:
                     tmdb_id = int(tmdb_raw)
                     logger.debug("Resolved '%s' via direct TMDB ID: %d", title, tmdb_id)
-                    result = MatchResult(tmdb_id=tmdb_id, resolution_kind="direct_tmdb")
+                    result = MatchResult(
+                        tmdb_id=tmdb_id,
+                        resolution_kind="direct_tmdb",
+                        match_confidence="verified",
+                        anime_mapping_source="direct_tmdb" if is_anime else None,
+                    )
                     with self._lock:
                         self._record_match_stat(result)
                     return result
@@ -335,7 +355,12 @@ class ItemMatcher:
                 )
 
         if not had_lookup_candidate and not item.get("tmdb_id"):
-            result = MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="missing_ids")
+            result = MatchResult(
+                tmdb_id=None,
+                resolution_kind="unresolved",
+                unresolved_reason="missing_ids",
+                match_confidence="unresolved",
+            )
             with self._lock:
                 self._record_match_stat(result)
             return result
@@ -350,6 +375,7 @@ class ItemMatcher:
             tmdb_id=None,
             resolution_kind="unresolved",
             unresolved_reason="lookup_unavailable" if lookup_unavailable else "not_found",
+            match_confidence="unresolved",
         )
         with self._lock:
             self._record_match_stat(result)
@@ -370,13 +396,20 @@ class ItemMatcher:
                     title, id_type, ext_id, tmdb_id,
                     item.get("root_title") or "Unknown",
                 )
-                return MatchResult(tmdb_id=tmdb_id, resolution_kind="root_series")
+                return MatchResult(
+                    tmdb_id=tmdb_id,
+                    resolution_kind="root_series",
+                    match_confidence="verified",
+                    anime_mapping_source="root_chain",
+                )
             if status == "lookup_unavailable":
                 lookup_unavailable = True
         return MatchResult(
             tmdb_id=None,
             resolution_kind="unresolved",
             unresolved_reason="lookup_unavailable" if lookup_unavailable else "not_found",
+            match_confidence="unresolved",
+            anime_mapping_source="root_chain",
         )
 
     def _try_exact_anime_fribb_lookup(self, item: dict) -> MatchResult:
@@ -402,7 +435,13 @@ class ItemMatcher:
                     entry = None
 
         if not isinstance(entry, dict):
-            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+            return MatchResult(
+                tmdb_id=None,
+                resolution_kind="unresolved",
+                unresolved_reason="not_found",
+                match_confidence="unresolved",
+                anime_mapping_source="fribb_exact",
+            )
 
         tmdb_raw = entry.get("themoviedb")
         try:
@@ -410,12 +449,25 @@ class ItemMatcher:
         except (TypeError, ValueError):
             tmdb_id = None
         if not tmdb_id:
-            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+            return MatchResult(
+                tmdb_id=None,
+                resolution_kind="unresolved",
+                unresolved_reason="not_found",
+                match_confidence="unresolved",
+                anime_mapping_source="fribb_exact",
+            )
 
         fribb_type = str(entry.get("type") or "").strip().lower()
         expected_media_type = "movie" if fribb_type == "movie" else "tv"
         if str(item.get("media_type") or "").strip().lower() != expected_media_type:
-            return MatchResult(tmdb_id=None, resolution_kind="unresolved", unresolved_reason="not_found")
+            return MatchResult(
+                tmdb_id=None,
+                resolution_kind="unresolved",
+                unresolved_reason="not_found",
+                match_confidence="ambiguous",
+                anime_mapping_source="fribb_exact",
+                candidate_tmdb_id=tmdb_id,
+            )
 
         logger.debug(
             "Resolved anime '%s' via exact Fribb mapping (%s -> %d)",
@@ -423,7 +475,12 @@ class ItemMatcher:
             raw_anilist or item.get("mal_id") or ids.get("mal"),
             tmdb_id,
         )
-        return MatchResult(tmdb_id=tmdb_id, resolution_kind="fribb_exact")
+        return MatchResult(
+            tmdb_id=tmdb_id,
+            resolution_kind="fribb_exact",
+            match_confidence="exact",
+            anime_mapping_source="fribb_exact",
+        )
 
     def _can_accept_anime_direct_tmdb(self, item: dict) -> bool:
         """Allow raw TMDB only after the anime identity is verified."""
@@ -458,6 +515,15 @@ class ItemMatcher:
         if item.get("simkl_type") == "anime":
             return _ANIME_LOOKUP_CHAIN
         return _DEFAULT_LOOKUP_CHAIN
+
+    @staticmethod
+    def _anime_resolve_mode(item: dict) -> str:
+        mode = str(item.get("anime_resolve_mode") or "").strip().lower()
+        if mode in {"list_identity", "history_identity", "resume_identity"}:
+            return mode
+        if item.get("simkl_type") == "anime":
+            return "list_identity"
+        return "generic"
 
     def _try_anime_root_lookup(self, item: dict, media_type: str) -> MatchResult:
         """Walk the AniList prequel chain and look up the root-series TMDB ID."""
@@ -510,8 +576,10 @@ class ItemMatcher:
     def _cache_key(item: dict) -> str:
         ids = item.get("ids", {})
         anilist_id = item.get("anilist_id") or ids.get("anilist") or ""
+        resolver_mode = str(item.get("anime_resolve_mode") or "")
         return (
             f"{item.get('media_type', '')}:"
+            f"{resolver_mode}:"
             f"{ids.get('simkl', '')}:"
             f"{item.get('imdb_id', '')}:"
             f"{item.get('tmdb_id', '')}:"
