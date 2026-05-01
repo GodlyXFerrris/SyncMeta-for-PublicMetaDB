@@ -507,6 +507,130 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(anime_stats.items_removed, 1)
         self.assertEqual(pmdb.removed_list_items, [("pmdb-active", "stale-ice3")])
 
+    def test_anilist_anime_lists_do_not_preserve_manual_additions(self) -> None:
+        config = AppConfig(
+            anilist=AniListConfig(
+                enabled=True,
+                username="demo",
+                selected_statuses=["completed"],
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+            ),
+        )
+        service = SyncService(
+            config,
+            manual_list_additions={
+                "Completed - Anime": [
+                    {"tmdb_id": 154634, "media_type": "movie"},
+                ]
+            },
+        )
+        pmdb = StubPMDBClient()
+        pmdb.list_items_by_id["pmdb-active"] = [
+            {"id": "stale-ice3", "tmdb_id": 154634, "media_type": "movie"},
+            {"id": "keep-naruto", "tmdb_id": 46260, "media_type": "tv"},
+        ]
+        service._pmdb = pmdb
+
+        class StubAniListClient:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def get_statuses(self, statuses: list[str]) -> dict[str, list[dict]]:
+                return {
+                    "completed": [
+                        {
+                            "title": "Naruto",
+                            "year": 2002,
+                            "media_type": "tv",
+                            "simkl_type": "anime",
+                            "anilist_id": "20",
+                            "ids": {"anilist": "20"},
+                            "anime_resolve_mode": "list_identity",
+                        }
+                    ]
+                }
+
+        class DirectAnimeMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=46260, resolution_kind="fribb_exact", match_confidence="exact")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 46260
+
+        service._matcher = DirectAnimeMatcher()
+
+        from unittest.mock import patch
+        with patch("src.anilist_client.AniListClient", StubAniListClient):
+            results = service.run()
+
+        anime_stats = next(item for item in results if item.source_name == "AniList")
+        self.assertEqual(anime_stats.items_removed, 1)
+        self.assertEqual(pmdb.removed_list_items, [("pmdb-active", "stale-ice3")])
+
+    def test_anime_list_tmdb_collision_is_reported_as_unresolved_not_duplicate(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": ["completed"], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime"]),
+            )
+        )
+        service._pmdb = StubPMDBClient()
+
+        class CollisionMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 2, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=46260, resolution_kind="fribb_exact", match_confidence="exact")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 46260
+
+        service._matcher = CollisionMatcher()
+
+        stats = service._sync_list(
+            [
+                {
+                    "title": "Naruto",
+                    "year": 2002,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "anilist_id": "20",
+                    "mal_id": "20",
+                    "anime_resolve_mode": "list_identity",
+                },
+                {
+                    "title": "Naruto Shippuden",
+                    "year": 2007,
+                    "media_type": "tv",
+                    "simkl_type": "anime",
+                    "anilist_id": "1735",
+                    "mal_id": "1735",
+                    "anime_resolve_mode": "list_identity",
+                },
+            ],
+            "Completed - Anime",
+            "Auto-synced 'Completed' anime from AniList",
+            display_name="Completed - Anime",
+            source_name="AniList",
+            selection={"source": "anilist", "status": "completed"},
+            force_remove_missing=True,
+        )
+
+        self.assertEqual(stats.items_skipped_duplicate, 0)
+        self.assertEqual(stats.items_skipped_unresolved, 1)
+        self.assertTrue(any(item.get("unresolved_reason") == "tmdb_collision" for item in stats.unresolved_items))
+
     def test_anime_list_resolution_uses_direct_fribb_entry_not_root_fallback(self) -> None:
         service = SyncService(
             AppConfig(

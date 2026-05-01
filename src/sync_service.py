@@ -1993,6 +1993,7 @@ class SyncService:
         pmdb_read_elapsed = time.perf_counter() - pmdb_read_started
         stats.phase_timings["pmdb_read_seconds"] = round(pmdb_read_elapsed, 4)
         desired_keys: set[str] = set()
+        desired_key_owners: dict[str, dict] = {}
         pending_adds: list[tuple[dict, int, str, str]] = []
         for item in resolved:
             self._check_cancelled()
@@ -2000,10 +2001,25 @@ class SyncService:
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
-                stats.items_skipped_duplicate += 1
+                existing_owner = desired_key_owners.get(key)
+                if self._is_distinct_anime_list_collision(existing_owner, item):
+                    stats.items_skipped_unresolved += 1
+                    unresolved_summary = _unresolved_item_summary(
+                        item,
+                        list_name=stats.list_name,
+                        unresolved_reason="tmdb_collision",
+                    )
+                    unresolved_summary["match_confidence"] = item.get("match_confidence")
+                    unresolved_summary["anime_mapping_source"] = item.get("anime_mapping_source")
+                    unresolved_summary["candidate_tmdb_id"] = tmdb_id
+                    unresolved_summary["anime_conflict_reason"] = "tmdb_collision"
+                    stats.unresolved_items.append(unresolved_summary)
+                else:
+                    stats.items_skipped_duplicate += 1
                 self._publish_progress([stats])
                 continue
             desired_keys.add(key)
+            desired_key_owners[key] = item
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1
@@ -2012,16 +2028,17 @@ class SyncService:
             pending_adds.append((item, tmdb_id, media_type, key))
 
         # Inject manually-resolved items so remove_missing never evicts them.
-        for manual_entry in self._manual_list_additions.get(actual_list_name, []):
-            m_tmdb_id = manual_entry.get("tmdb_id")
-            m_media_type = manual_entry.get("media_type") or "movie"
-            if not m_tmdb_id:
-                continue
-            m_key = f"{m_tmdb_id}:{m_media_type}"
-            desired_keys.add(m_key)
-            if m_key not in existing_map:
-                synthetic = {"title": f"manual:{m_tmdb_id}", "media_type": m_media_type}
-                pending_adds.append((synthetic, m_tmdb_id, m_media_type, m_key))
+        if self._should_preserve_manual_list_additions(source_name or "", selection):
+            for manual_entry in self._manual_list_additions.get(actual_list_name, []):
+                m_tmdb_id = manual_entry.get("tmdb_id")
+                m_media_type = manual_entry.get("media_type") or "movie"
+                if not m_tmdb_id:
+                    continue
+                m_key = f"{m_tmdb_id}:{m_media_type}"
+                desired_keys.add(m_key)
+                if m_key not in existing_map:
+                    synthetic = {"title": f"manual:{m_tmdb_id}", "media_type": m_media_type}
+                    pending_adds.append((synthetic, m_tmdb_id, m_media_type, m_key))
 
         pmdb_write_started = time.perf_counter()
         if pending_adds:
@@ -2306,6 +2323,41 @@ class SyncService:
         if removed:
             logger.info("  │ Removed %d stale item(s) from list %s", removed, list_id)
         return removed
+
+    @staticmethod
+    def _should_preserve_manual_list_additions(source_name: str, selection: dict | None) -> bool:
+        source = str((selection or {}).get("source") or source_name or "").strip().lower()
+        media_type = str((selection or {}).get("media_type") or "").strip().lower()
+        if source == "anilist":
+            return False
+        if source == "simkl" and media_type == "anime":
+            return False
+        return True
+
+    @staticmethod
+    def _anime_source_identity(item: dict | None) -> tuple | None:
+        if not isinstance(item, dict):
+            return None
+        if str(item.get("simkl_type") or "").strip().lower() != "anime":
+            return None
+        if str(item.get("anime_resolve_mode") or "").strip().lower() != "list_identity":
+            return None
+        return (
+            str(item.get("anilist_id") or ""),
+            str(item.get("mal_id") or ""),
+            str(item.get("anidb_id") or ""),
+            str(item.get("title") or ""),
+            str(item.get("year") or ""),
+            str(item.get("media_type") or ""),
+        )
+
+    @classmethod
+    def _is_distinct_anime_list_collision(cls, left: dict | None, right: dict | None) -> bool:
+        left_id = cls._anime_source_identity(left)
+        right_id = cls._anime_source_identity(right)
+        if not left_id or not right_id:
+            return False
+        return left_id != right_id
 
     @staticmethod
     def _build_existing_map(items: list[dict]) -> dict[str, dict]:
