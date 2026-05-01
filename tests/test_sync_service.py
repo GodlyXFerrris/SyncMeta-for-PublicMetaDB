@@ -576,6 +576,79 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(anime_stats.items_removed, 1)
         self.assertEqual(pmdb.removed_list_items, [("pmdb-active", "stale-ice3")])
 
+    def test_anilist_status_sync_filters_out_movies_from_anime_lists(self) -> None:
+        config = AppConfig(
+            anilist=AniListConfig(
+                enabled=True,
+                username="demo",
+                selected_statuses=["completed"],
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+            ),
+        )
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class StubAniListClient:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def get_statuses(self, statuses: list[str]) -> dict[str, list[dict]]:
+                return {
+                    "completed": [
+                        {
+                            "title": "Naruto",
+                            "year": 2002,
+                            "media_type": "tv",
+                            "simkl_type": "anime",
+                            "anilist_id": "20",
+                            "ids": {"anilist": "20"},
+                            "anime_resolve_mode": "list_identity",
+                        },
+                        {
+                            "title": "Your Name.",
+                            "year": 2016,
+                            "media_type": "movie",
+                            "simkl_type": "anime",
+                            "anilist_id": "21519",
+                            "ids": {"anilist": "21519"},
+                            "anime_resolve_mode": "list_identity",
+                        },
+                    ]
+                }
+
+        class TypeAwareMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                if item["title"] == "Naruto":
+                    return MatchResult(tmdb_id=46260, resolution_kind="fribb_exact", match_confidence="exact")
+                raise AssertionError(f"Movie item should not be synced into anime list: {item['title']}")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                if item["title"] == "Naruto":
+                    return 46260
+                raise AssertionError(f"Movie item should not be synced into anime list: {item['title']}")
+
+        service._matcher = TypeAwareMatcher()
+
+        from unittest.mock import patch
+        with patch("src.anilist_client.AniListClient", StubAniListClient):
+            results = service.run()
+
+        anime_stats = next(item for item in results if item.source_name == "AniList")
+        self.assertEqual(anime_stats.items_fetched, 1)
+        self.assertEqual(anime_stats.items_added, 1)
+        self.assertEqual(len(pmdb.added_items), 1)
+        self.assertEqual(pmdb.added_items[0]["tmdb_id"], 46260)
+
     def test_anime_list_tmdb_collision_is_reported_as_unresolved_not_duplicate(self) -> None:
         service = SyncService(
             AppConfig(

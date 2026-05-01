@@ -1457,11 +1457,16 @@ class SyncService:
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
-            items = fetched_by_status.get(status_key, [])
+            raw_items = fetched_by_status.get(status_key, [])
+            items = [
+                item for item in raw_items
+                if str(item.get("media_type") or "").strip().lower() == "tv"
+            ]
             logger.info(
-                "Loaded AniList %s (%d items)",
+                "Loaded AniList %s (%d/%d episodic anime items)",
                 _STATUS_LABELS.get(status_key, status_key),
                 len(items),
+                len(raw_items),
             )
             all_items_by_status.append((status_key, items))
 
