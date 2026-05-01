@@ -269,6 +269,29 @@ class ItemMatcher:
                 return root_result
 
         if is_anime:
+            # For list_identity: try PMDB external mapping FIRST — it has per-show
+            # accurate TMDB IDs (e.g. Shippuden→1553, Boruto→65334). Fribb often
+            # stores the franchise root TMDB for sequels, causing false duplicates.
+            if anime_resolve_mode == "list_identity":
+                for id_type, item_key in self._lookup_chain_for_item(item):
+                    ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
+                    if not ext_id:
+                        continue
+                    ext_id = str(ext_id)
+                    tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
+                    if tmdb_id:
+                        logger.debug("Resolved anime '%s' via PMDB %s mapping (%s -> %d)", title, id_type, ext_id, tmdb_id)
+                        result = MatchResult(
+                            tmdb_id=tmdb_id,
+                            resolution_kind="external_mapping",
+                            match_confidence="verified",
+                            anime_mapping_source=id_type,
+                        )
+                        with self._lock:
+                            self._record_match_stat(result)
+                        return result
+
+            # Fribb exact lookup — fallback for list_identity, primary for other modes.
             fribb_result = self._try_exact_anime_fribb_lookup(item)
             if fribb_result.tmdb_id:
                 with self._lock:
