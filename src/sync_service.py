@@ -15,6 +15,7 @@ from .mdblist_client import MdbListClient
 from .publicmetadb_client import PublicMetaDBClient
 from .simkl_client import SimklClient
 from .trakt_client import TraktAuthenticationError, TraktClient
+from . import anime_mapping_store
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,9 @@ def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason:
         "cache_key": ItemMatcher._cache_key(item),
         "anime_resolve_mode": str(item.get("anime_resolve_mode", "") or "").strip(),
         "anime_identity": dict(item.get("anime_identity", {})) if isinstance(item.get("anime_identity"), dict) else None,
+        "match_confidence": str(item.get("match_confidence") or "").strip() or None,
+        "anime_mapping_source": str(item.get("anime_mapping_source") or "").strip() or None,
+        "candidate_tmdb_id": item.get("candidate_tmdb_id"),
     }
     if unresolved_reason:
         summary["unresolved_reason"] = unresolved_reason
@@ -715,15 +719,23 @@ class SyncService:
             if aggregate_count:
                 resolved = self._resolve_activity_item(item)
                 aggregate_rows = self._simkl.expand_aggregate_history_item(resolved)
-                if not aggregate_rows:
-                    aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
                 if aggregate_rows:
-                    expanded.extend(self._remap_simkl_anime_history_item(row) for row in aggregate_rows)
+                    expanded.extend({**row, "aggregate_source_expanded": True} for row in aggregate_rows)
                 else:
-                    logger.info(
-                        "Skipping aggregate SIMKL anime history for '%s' because it could not be safely mapped to concrete seasons/episodes",
-                        resolved.get("title", "Unknown"),
-                    )
+                    aggregate_rows = self._expand_simkl_aggregate_anime_item(resolved)
+                    if aggregate_rows:
+                        expanded.extend(
+                            {
+                                **self._remap_simkl_anime_history_item(row),
+                                "aggregate_source_expanded": True,
+                            }
+                            for row in aggregate_rows
+                        )
+                    else:
+                        logger.info(
+                            "Skipping aggregate SIMKL anime history for '%s' because it could not be safely mapped to concrete seasons/episodes",
+                            resolved.get("title", "Unknown"),
+                        )
                 continue
             expanded.append(item)
         return self._dedupe_activity_history_items(expanded)
@@ -781,6 +793,8 @@ class SyncService:
             return item
         if str(item.get("media_type", "")).strip().lower() != "tv":
             return item
+        if item.get("aggregate_source_expanded"):
+            return item
 
         try:
             episode = int(item.get("episode") or 0)
@@ -790,6 +804,19 @@ class SyncService:
             return item
         if episode <= 0:
             return item
+        simkl_season = int(item.get("season") or 1)
+        if offset > 0 and simkl_season > 1:
+            cache_key = (
+                str(item.get("tmdb_id") or ""),
+                str(item.get("anilist_id") or ""),
+                str(item.get("root_anilist_id") or ""),
+                str(item.get("mal_id") or ""),
+                str(item.get("root_mal_id") or ""),
+                offset,
+                episode,
+            )
+            self._anime_history_remap_cache[cache_key] = {"tmdb_id": None}
+            return {**item, "tmdb_id": None}
 
         cache_key = (
             str(item.get("tmdb_id") or ""),
@@ -884,14 +911,24 @@ class SyncService:
                 return None
             return remapped
 
-        # ── Path 1 & 2: Fribb anime-lists ──────────────────────────────────────
-        fribb = self._lookup_fribb_entry(item)
+        # ── Path 1: Anime-Lists XML exact remap ────────────────────────────────
+        xml_remapped = self._remap_via_anime_lists_xml(item, tmdb_id, episode)
+        if xml_remapped:
+            validated = _validate_and_fix(xml_remapped)
+            if validated is None:
+                self._anime_history_remap_cache[cache_key] = {"tmdb_id": None}
+                return {**item, "tmdb_id": None}
+            self._anime_history_remap_cache[cache_key] = dict(validated)
+            return {**item, **validated}
+
+        # ── Path 2 & 3: Fribb anime-lists ──────────────────────────────────────
+        fribb = self._lookup_fribb_entry(item, allow_root_fallback=False)
         if fribb is not None:
             remapped = self._remap_via_fribb(fribb, tmdb_id, episode)
             if remapped:
                 validated = _validate_and_fix(remapped)
                 if validated is None:
-                    self._anime_history_remap_cache[cache_key] = {}
+                    self._anime_history_remap_cache[cache_key] = {"tmdb_id": None}
                     return {**item, "tmdb_id": None}
                 remapped = validated
                 self._anime_history_remap_cache[cache_key] = dict(remapped)
@@ -909,11 +946,6 @@ class SyncService:
                 return {**item, **validated}
             return item
 
-        simkl_season = int(item.get("season") or 1)
-        if simkl_season > 1:
-            # offset applies to sequel s1e1; we can't compute absolute episode for sequel s2+
-            self._anime_history_remap_cache[cache_key] = {}
-            return {**item, "tmdb_id": None}
 
         # ── Path 3: PMDB anime-seasons with absolute episode offset ─────────────
         try:
@@ -923,7 +955,7 @@ class SyncService:
                 if remapped:
                     validated = _validate_and_fix(remapped)
                     if validated is None:
-                        self._anime_history_remap_cache[cache_key] = {}
+                        self._anime_history_remap_cache[cache_key] = {"tmdb_id": None}
                         return {**item, "tmdb_id": None}
                     remapped = validated
                     self._anime_history_remap_cache[cache_key] = dict(remapped)
@@ -985,7 +1017,6 @@ class SyncService:
         """
         from . import fribb_client
         ids = item.get("ids") or {}
-
         anilist_candidates = [item.get("anilist_id"), ids.get("anilist")]
         if allow_root_fallback:
             anilist_candidates.extend([item.get("root_anilist_id"), ids.get("root_anilist")])
@@ -1022,7 +1053,103 @@ class SyncService:
                 except (TypeError, ValueError):
                     pass
 
+        anidb_candidates = [item.get("anidb_id"), ids.get("anidb")]
+        for raw in anidb_candidates:
+            if raw:
+                try:
+                    cache_key = ("anidb", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
+                    entry = fribb_client.lookup_by_anidb(int(raw))
+                    if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
+                        return entry
+                    self._fribb_lookup_cache[cache_key] = None
+                except (TypeError, ValueError):
+                    pass
+
+        simkl_candidates = [ids.get("simkl")]
+        for raw in simkl_candidates:
+            if raw:
+                try:
+                    cache_key = ("simkl", str(int(raw)))
+                    if cache_key in self._fribb_lookup_cache:
+                        return self._fribb_lookup_cache[cache_key]
+                    entry = fribb_client.lookup_by_simkl(int(raw))
+                    if entry:
+                        self._fribb_lookup_cache[cache_key] = entry
+                        return entry
+                    self._fribb_lookup_cache[cache_key] = None
+                except (TypeError, ValueError):
+                    pass
+
+        imdb_candidates = [item.get("imdb_id"), ids.get("imdb")]
+        for raw in imdb_candidates:
+            if raw:
+                cache_key = ("imdb", str(raw))
+                if cache_key in self._fribb_lookup_cache:
+                    return self._fribb_lookup_cache[cache_key]
+                entry = fribb_client.lookup_by_imdb(str(raw))
+                if entry:
+                    self._fribb_lookup_cache[cache_key] = entry
+                    return entry
+                self._fribb_lookup_cache[cache_key] = None
+
         return None
+
+    def _remap_via_anime_lists_xml(self, item: dict, item_tmdb_id: int, episode: int) -> dict | None:
+        anidb_id = item.get("anidb_id") or (item.get("ids") or {}).get("anidb")
+        if not anidb_id:
+            fribb = self._lookup_fribb_entry(item, allow_root_fallback=False)
+            if isinstance(fribb, dict):
+                anidb_id = fribb.get("anidb_id")
+        try:
+            anidb_id_int = int(anidb_id or 0)
+        except (TypeError, ValueError):
+            return None
+        if anidb_id_int <= 0:
+            return None
+
+        anidb_season = 1
+        try:
+            maybe_season = int(item.get("season") or 1)
+            if maybe_season > 0:
+                anidb_season = maybe_season
+        except (TypeError, ValueError):
+            pass
+
+        remapped_tvdb = anime_mapping_store.resolve_tvdb_episode_from_anidb_episode(
+            anidb_id_int,
+            int(episode),
+            anidb_season=anidb_season,
+        )
+        if not remapped_tvdb:
+            return None
+
+        tvdb_id = int(remapped_tvdb["tvdb_id"])
+        tvdb_season = int(remapped_tvdb["tvdb_season"])
+        tvdb_episode = int(remapped_tvdb["tvdb_episode"])
+        tmdb_id = item_tmdb_id
+
+        if tmdb_id <= 0:
+            fribb = self._lookup_fribb_entry(item, allow_root_fallback=False)
+            if isinstance(fribb, dict):
+                try:
+                    tmdb_id = int(fribb.get("themoviedb_id") or fribb.get("themoviedb") or 0)
+                except (TypeError, ValueError):
+                    tmdb_id = 0
+        if tmdb_id <= 0:
+            return None
+
+        anime_seasons = self._get_cached_anime_seasons(tmdb_id)
+        remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode) if anime_seasons else None
+        if remapped:
+            out = {"season": remapped["season"], "episode": remapped["episode"]}
+            if tmdb_id != item_tmdb_id:
+                out["tmdb_id"] = tmdb_id
+            return out
+
+        return {"season": tvdb_season, "episode": tvdb_episode, **({"tmdb_id": tmdb_id} if tmdb_id != item_tmdb_id else {})}
 
     def _remap_via_fribb(self, fribb: dict, item_tmdb_id: int, episode: int) -> dict | None:
         """Use Fribb's TVDB season info + PMDB anime-seasons for accurate remapping.
@@ -2436,6 +2563,7 @@ class SyncService:
         return (
             str(item.get("simkl_type", "")).strip().lower() == "anime"
             and str(item.get("media_type", "")).strip().lower() == "tv"
+            and not (item.get("aggregate_watched_count") and item.get("tmdb_id"))
             and any(item.get(key) for key in ("anilist_id", "root_anilist_id", "mal_id", "root_mal_id"))
         )
 

@@ -13,6 +13,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from .config import AniListConfig
+from . import fribb_client
 
 logger = logging.getLogger(__name__)
 
@@ -427,10 +428,32 @@ class AniListClient:
         anilist_id = media.get("id")
         mal_id = media.get("idMal")
         title = self._media_title(media)
+        fribb_entry = None
+        if anilist_id:
+            try:
+                fribb_entry = fribb_client.lookup_by_anilist(int(anilist_id))
+            except (TypeError, ValueError):
+                fribb_entry = None
+        if fribb_entry is None and mal_id:
+            try:
+                fribb_entry = fribb_client.lookup_by_mal(int(mal_id))
+            except (TypeError, ValueError):
+                fribb_entry = None
         ids = {
             "anilist": anilist_id,
             "mal": mal_id,
         }
+        if isinstance(fribb_entry, dict):
+            if fribb_entry.get("anidb_id"):
+                ids["anidb"] = fribb_entry.get("anidb_id")
+            if fribb_entry.get("tvdb_id"):
+                ids["tvdb"] = fribb_entry.get("tvdb_id")
+            if fribb_entry.get("imdb_id"):
+                ids["imdb"] = fribb_entry.get("imdb_id")
+            if fribb_entry.get("themoviedb_id"):
+                ids["tmdb"] = fribb_entry.get("themoviedb_id")
+            if fribb_entry.get("simkl_id"):
+                ids["simkl"] = fribb_entry.get("simkl_id")
 
         # Root IDs are resolved lazily by the matcher only when direct lookup
         # fails, avoiding an AniList API call for every item up front.
@@ -460,23 +483,23 @@ class AniListClient:
             "year": media.get("seasonYear"),
             "media_type": media_type,
             "simkl_type": "anime",
-            "imdb_id": None,
-            "tmdb_id": None,
+            "imdb_id": ids.get("imdb"),
+            "tmdb_id": str(ids["tmdb"]) if ids.get("tmdb") else None,
             "mal_id": str(mal_id) if mal_id else None,
             "anilist_id": str(anilist_id) if anilist_id else None,
             "root_mal_id": str(root_mal_id) if root_mal_id else None,
             "root_anilist_id": str(root_anilist_id) if root_anilist_id else None,
             "root_title": root_title,
-            "anidb_id": None,
-            "tvdb_id": None,
+            "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+            "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
             "anilist_format": fmt,
             "anime_resolve_mode": "list_identity",
             "anime_identity": {
                 "anilist_id": str(anilist_id) if anilist_id else None,
                 "mal_id": str(mal_id) if mal_id else None,
-                "anidb_id": None,
-                "fribb_tmdb_id": None,
-                "fribb_type": fmt,
+                "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+                "fribb_tmdb_id": str(ids["tmdb"]) if ids.get("tmdb") else None,
+                "fribb_type": str(fribb_entry.get("type") or fmt) if isinstance(fribb_entry, dict) else fmt,
                 "root_anilist_id": None,
                 "root_mal_id": None,
                 "root_episode_offset": 0,

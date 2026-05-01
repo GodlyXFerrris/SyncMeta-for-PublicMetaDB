@@ -510,6 +510,12 @@ def _make_anime_root_resolver(config: AppConfig):
 
 
 def _resolve_unresolved_item_automatically(private_profile: dict, item: dict) -> int | None:
+    candidate_tmdb = item.get("candidate_tmdb_id")
+    try:
+        if candidate_tmdb:
+            return _parse_tmdb_id(candidate_tmdb)
+    except ValueError:
+        pass
     config = _config_from_profile(private_profile, dry_run=False, sync_modes={"lists": True, "history": False, "resume": False})
     pmdb = PublicMetaDBClient(config.pmdb)
     matcher = ItemMatcher(

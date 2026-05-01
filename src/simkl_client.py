@@ -13,6 +13,7 @@ from urllib3.util.retry import Retry
 
 from .config import AniListConfig, SimklConfig
 from . import fribb_client as _fribb
+from . import anime_mapping_store as _anime_maps
 
 logger = logging.getLogger(__name__)
 REQUEST_TIMEOUT = (5, 12)
@@ -56,6 +57,15 @@ SIMKL_HISTORY_STATUS_SCAN_ORDER = [
     SIMKL_STATUS_DROPPED,
     SIMKL_STATUS_PLAN_TO_WATCH,
 ]
+
+
+def _safe_lookup_int(value: object) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 class SimklClient:
@@ -252,6 +262,7 @@ class SimklClient:
             ids_check = media.get("ids", {})
             mal_id = ids_check.get("mal")
             anilist_id = ids_check.get("anilist")
+            fribb_entry = self._lookup_exact_anime_mapping(ids_check, media, entry)
 
             # Gate 1: if anime_type is present it must be a recognised value.
             if anime_type and anime_type not in _VALID_ANIME_TYPES:
@@ -261,39 +272,23 @@ class SimklClient:
                 )
                 return None
 
-            # Gate 2: always require a MAL or AniList ID.
-            # Real anime productions always have at least one of these; non-anime
-            # content that ends up in a user's SIMKL anime list (e.g. Soccer Aid,
-            # Radioresepsjonen, Western cartoons) typically has neither.
-            if not mal_id and not anilist_id:
+            # Gate 2: exact offline anime identity must exist. This also lets us
+            # recover missing AniList/MAL IDs via Fribb's simkl/anidb/imdb links.
+            if fribb_entry is None and not mal_id and not anilist_id:
                 logger.warning(
-                    "Skipping SIMKL anime entry '%s' (%s) — no MAL or AniList ID",
+                    "Skipping SIMKL anime entry '%s' (%s) — no offline anime identity",
                     media.get("title", "Unknown"), media.get("year", ""),
                 )
                 return None
 
-            # Gate 3: verify the entry exists in Fribb anime-lists.
-            # Non-anime content (Popeye, Soccer Aid, Radioresepsjonen, etc.) may
-            # have SIMKL-assigned MAL/AniList IDs that don't correspond to real
-            # anime entries. Check Fribb for whichever ID is present.
-            # Also keep the Fribb entry to use its type for media-type detection.
-            fribb_entry: dict | None = None
-            if anilist_id:
-                try:
-                    fribb_entry = _fribb.lookup_by_anilist(int(anilist_id))
-                except (TypeError, ValueError):
-                    pass
-            if fribb_entry is None and mal_id:
-                try:
-                    fribb_entry = _fribb.lookup_by_mal(int(mal_id))
-                except (TypeError, ValueError):
-                    pass
+            # Gate 3: verify the entry exists in the offline anime map.
             if fribb_entry is None:
                 logger.debug(
-                    "Skipping SIMKL anime entry '%s' — not found in Fribb anime-lists (mal=%s anilist=%s)",
-                    media.get("title", "Unknown"), mal_id, anilist_id,
+                    "Skipping SIMKL anime entry '%s' — not found in offline anime map (mal=%s anilist=%s simkl=%s)",
+                    media.get("title", "Unknown"), mal_id, anilist_id, ids_check.get("simkl"),
                 )
                 return None
+            self._enrich_ids_from_fribb(ids, fribb_entry)
 
             # Determine PMDB media type.
             # Determine media type. Fribb is authoritative for "Movie" —
@@ -359,6 +354,35 @@ class SimklClient:
             "status": entry.get("status"),
             "added_at": entry.get("added_to_watchlist_at"),
         }
+
+    @staticmethod
+    def _enrich_ids_from_fribb(ids: dict, fribb_entry: dict | None) -> None:
+        if not isinstance(fribb_entry, dict):
+            return
+        for target_key, source_key in (
+            ("anilist", "anilist_id"),
+            ("mal", "mal_id"),
+            ("anidb", "anidb_id"),
+            ("simkl", "simkl_id"),
+            ("imdb", "imdb_id"),
+            ("tmdb", "themoviedb_id"),
+            ("tvdb", "tvdb_id"),
+        ):
+            if ids.get(target_key):
+                continue
+            value = fribb_entry.get(source_key)
+            if value:
+                ids[target_key] = value
+
+    def _lookup_exact_anime_mapping(self, ids: dict, media: dict, entry: dict) -> dict | None:
+        return _anime_maps.lookup_fribb(
+            anilist_id=_safe_lookup_int(ids.get("anilist") or entry.get("anilist_id") or media.get("anilist_id")),
+            mal_id=_safe_lookup_int(ids.get("mal") or entry.get("mal_id") or media.get("mal_id")),
+            anidb_id=_safe_lookup_int(ids.get("anidb") or entry.get("anidb_id") or media.get("anidb_id")),
+            simkl_id=_safe_lookup_int(ids.get("simkl") or entry.get("simkl_id") or media.get("simkl_id")),
+            tmdb_id=_safe_lookup_int(ids.get("tmdb") or entry.get("tmdb_id") or media.get("tmdb_id")),
+            imdb_id=str(ids.get("imdb") or entry.get("imdb_id") or media.get("imdb_id") or "").strip() or None,
+        )
 
     @staticmethod
     def _has_anime_identity(ids: dict) -> bool:
@@ -718,24 +742,37 @@ class SimklClient:
 
     @staticmethod
     def _fribb_confirms_anime(show: dict) -> bool:
-        """Return True if the show's MAL or AniList ID is present in Fribb."""
+        """Return True if the show is present in the offline anime map."""
         ids = show.get("ids", {}) or {}
-        anilist_id = ids.get("anilist")
-        mal_id = ids.get("mal")
-        if not anilist_id and not mal_id:
+        entry = _anime_maps.lookup_fribb(
+            anilist_id=_safe_lookup_int(ids.get("anilist")),
+            mal_id=_safe_lookup_int(ids.get("mal")),
+            anidb_id=_safe_lookup_int(ids.get("anidb")),
+            simkl_id=_safe_lookup_int(ids.get("simkl")),
+            tmdb_id=_safe_lookup_int(ids.get("tmdb")),
+            imdb_id=str(ids.get("imdb") or "").strip() or None,
+        )
+        if entry is not None:
             return True
-        if anilist_id:
-            try:
-                if _fribb.lookup_by_anilist(int(anilist_id)) is not None:
-                    return True
-            except (TypeError, ValueError):
-                pass
-        if mal_id:
-            try:
-                if _fribb.lookup_by_mal(int(mal_id)) is not None:
-                    return True
-            except (TypeError, ValueError):
-                pass
+        return bool(ids.get("anilist") or ids.get("mal") or ids.get("anidb"))
+
+    @classmethod
+    def _history_entry_can_be_treated_as_anime(cls, entry: dict, show: dict) -> bool:
+        if cls._fribb_confirms_anime(show):
+            return True
+        ids = show.get("ids", {}) or {}
+        if ids.get("tmdb"):
+            return bool(
+                show.get("anime_type")
+                or entry.get("anime_type")
+                or cls._history_seasons(entry, show)
+                or cls._history_episodes(entry, show)
+                or cls._history_last_watched_episodes(entry, show)
+                or entry.get("watched_episodes_count")
+                or entry.get("total_episodes_count")
+                or entry.get("last_watched_at")
+                or entry.get("last_watched")
+            )
         return False
 
     def _get_show_history_for_status(self, media_key: str, status: str, since: str | None = None) -> list[dict]:
@@ -768,9 +805,9 @@ class SimklClient:
                 continue
             # Apply the same Fribb anime gate used for list sync — skip non-anime
             # content (Soccer Aid, Popeye, etc.) that ended up in the anime history.
-            if media_key == "anime" and not self._fribb_confirms_anime(show):
+            if media_key == "anime" and not self._history_entry_can_be_treated_as_anime(entry, show):
                 logger.debug(
-                    "Skipping SIMKL anime history entry '%s' — not found in Fribb anime-lists",
+                    "Skipping SIMKL anime history entry '%s' — no trusted anime identity",
                     show.get("title", "Unknown"),
                 )
                 continue
@@ -795,6 +832,9 @@ class SimklClient:
         history: list[dict] = []
         seen: set[tuple[int, int]] = set()
         ids = show.get("ids", {}) or {}
+        if media_key == "anime":
+            fribb_entry = self._lookup_exact_anime_mapping(ids, show, entry)
+            self._enrich_ids_from_fribb(ids, fribb_entry)
         title = show.get("title", "Unknown")
         tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
         root_ids = self._resolve_anime_root_ids(ids) if media_key == "anime" else {}
@@ -952,9 +992,12 @@ class SimklClient:
         movie = entry.get("movie")
         show = self._show_payload(entry)
         episode = entry.get("episode")
+        anime_mapping = None
 
         if isinstance(movie, dict):
             ids = movie.get("ids", {}) or {}
+            anime_mapping = self._lookup_exact_anime_mapping(ids, movie, entry)
+            self._enrich_ids_from_fribb(ids, anime_mapping)
             tmdb_id = ids.get("tmdb")
             runtime_minutes = entry.get("runtime") or movie.get("runtime")
             progress = self._playback_progress_percent(entry)
@@ -972,11 +1015,27 @@ class SimklClient:
                 "title": movie.get("title", "Unknown"),
                 "year": movie.get("year"),
                 "imdb_id": ids.get("imdb"),
+                "mal_id": str(ids["mal"]) if ids.get("mal") else None,
+                "anilist_id": str(ids["anilist"]) if ids.get("anilist") else None,
+                "anidb_id": str(ids["anidb"]) if ids.get("anidb") else None,
+                "tvdb_id": str(ids["tvdb"]) if ids.get("tvdb") else None,
+                "anime_resolve_mode": "resume_identity" if anime_mapping else "",
+                "anime_identity": self._anime_identity_payload(
+                    ids,
+                    title=movie.get("title", "Unknown"),
+                    year=movie.get("year"),
+                    resolver_mode="resume_identity",
+                    media_type="movie",
+                    fribb_entry=anime_mapping,
+                ) if anime_mapping else None,
                 "ids": ids,
             }
 
         if isinstance(show, dict) and isinstance(episode, dict):
             show_ids = show.get("ids", {}) or {}
+            if str(entry.get("type") or show.get("type") or show.get("anime_type") or "").strip():
+                anime_mapping = self._lookup_exact_anime_mapping(show_ids, show, entry)
+                self._enrich_ids_from_fribb(show_ids, anime_mapping)
             tmdb_id = show_ids.get("tmdb")
             runtime_minutes = entry.get("runtime") or episode.get("runtime")
             progress = self._playback_progress_percent(entry)
@@ -1002,6 +1061,15 @@ class SimklClient:
                 "anilist_id": str(show_ids["anilist"]) if show_ids.get("anilist") else None,
                 "anidb_id": str(show_ids["anidb"]) if show_ids.get("anidb") else None,
                 "tvdb_id": str(show_ids["tvdb"]) if show_ids.get("tvdb") else None,
+                "anime_resolve_mode": "resume_identity" if anime_mapping else "",
+                "anime_identity": self._anime_identity_payload(
+                    show_ids,
+                    title=show.get("title", "Unknown"),
+                    year=show.get("year"),
+                    resolver_mode="resume_identity",
+                    media_type="tv",
+                    fribb_entry=anime_mapping,
+                ) if anime_mapping else None,
                 "ids": show_ids,
             }
 

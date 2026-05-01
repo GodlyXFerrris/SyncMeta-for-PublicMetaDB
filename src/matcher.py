@@ -419,20 +419,27 @@ class ItemMatcher:
         ids = item.get("ids", {})
         entry = None
 
-        raw_anilist = item.get("anilist_id") or ids.get("anilist")
-        if raw_anilist:
+        lookup_order = (
+            ("anilist", item.get("anilist_id") or ids.get("anilist"), fribb_client.lookup_by_anilist),
+            ("mal", item.get("mal_id") or ids.get("mal"), fribb_client.lookup_by_mal),
+            ("anidb", item.get("anidb_id") or ids.get("anidb"), fribb_client.lookup_by_anidb),
+            ("simkl", ids.get("simkl"), fribb_client.lookup_by_simkl),
+            ("imdb", item.get("imdb_id") or ids.get("imdb"), fribb_client.lookup_by_imdb),
+        )
+        exact_source = None
+        exact_value = None
+        for source_name, raw_value, lookup_fn in lookup_order:
+            if not raw_value:
+                continue
             try:
-                entry = fribb_client.lookup_by_anilist(int(raw_anilist))
+                lookup_value = int(raw_value) if source_name != "imdb" else str(raw_value)
+                entry = lookup_fn(lookup_value)
             except (TypeError, ValueError):
                 entry = None
-
-        if entry is None:
-            raw_mal = item.get("mal_id") or ids.get("mal")
-            if raw_mal:
-                try:
-                    entry = fribb_client.lookup_by_mal(int(raw_mal))
-                except (TypeError, ValueError):
-                    entry = None
+            if entry is not None:
+                exact_source = source_name
+                exact_value = raw_value
+                break
 
         if not isinstance(entry, dict):
             return MatchResult(
@@ -472,22 +479,61 @@ class ItemMatcher:
         logger.debug(
             "Resolved anime '%s' via exact Fribb mapping (%s -> %d)",
             item.get("title", "Unknown"),
-            raw_anilist or item.get("mal_id") or ids.get("mal"),
+            exact_value or item.get("anilist_id") or item.get("mal_id") or ids.get("mal"),
             tmdb_id,
         )
         return MatchResult(
             tmdb_id=tmdb_id,
             resolution_kind="fribb_exact",
             match_confidence="exact",
-            anime_mapping_source="fribb_exact",
+            anime_mapping_source=f"fribb_exact:{exact_source}" if exact_source else "fribb_exact",
         )
 
     def _can_accept_anime_direct_tmdb(self, item: dict) -> bool:
         """Allow raw TMDB only after the anime identity is verified."""
         if item.get("simkl_type") != "anime":
             return True
+        identity_present = bool(
+            item.get("anilist_id")
+            or item.get("mal_id")
+            or item.get("anidb_id")
+            or (item.get("ids") or {}).get("anilist")
+            or (item.get("ids") or {}).get("mal")
+            or (item.get("ids") or {}).get("anidb")
+        )
+        try:
+            tmdb_raw = item.get("tmdb_id")
+            if tmdb_raw:
+                from . import fribb_client
+                exact_match = self._try_exact_anime_fribb_lookup(item)
+                if exact_match.tmdb_id is not None:
+                    return int(tmdb_raw) == int(exact_match.tmdb_id)
+                anilist_id = item.get("anilist_id") or (item.get("ids") or {}).get("anilist")
+                mal_id = item.get("mal_id") or (item.get("ids") or {}).get("mal")
+                anidb_id = item.get("anidb_id") or (item.get("ids") or {}).get("anidb")
+                simkl_id = (item.get("ids") or {}).get("simkl")
+                imdb_id = item.get("imdb_id") or (item.get("ids") or {}).get("imdb")
+                exact_entry = None
+                if anilist_id:
+                    exact_entry = fribb_client.lookup_by_anilist(int(anilist_id))
+                if exact_entry is None and mal_id:
+                    exact_entry = fribb_client.lookup_by_mal(int(mal_id))
+                if exact_entry is None and anidb_id:
+                    exact_entry = fribb_client.lookup_by_anidb(int(anidb_id))
+                if exact_entry is None and simkl_id:
+                    exact_entry = fribb_client.lookup_by_simkl(int(simkl_id))
+                if exact_entry is None and imdb_id:
+                    exact_entry = fribb_client.lookup_by_imdb(str(imdb_id))
+                if exact_entry is not None:
+                    fribb_type = str(exact_entry.get("type") or "").strip().lower()
+                    expected_media_type = "movie" if fribb_type == "movie" else "tv"
+                    item_media_type = str(item.get("media_type") or "").strip().lower()
+                    if item_media_type == expected_media_type:
+                        return fribb_client.validate_tmdb(exact_entry, int(tmdb_raw))
+        except Exception:
+            logger.debug("Anime direct TMDB verification failed; trying softer fallback", exc_info=True)
         if not self._anime_root_resolver:
-            return bool(item.get("anilist_id") or item.get("mal_id"))
+            return identity_present
 
         anilist_id: int | None = None
         mal_id: int | None = None
@@ -497,16 +543,16 @@ class ItemMatcher:
             if item.get("mal_id"):
                 mal_id = int(item["mal_id"])
         except (TypeError, ValueError):
-            return False
+            return identity_present and str(item.get("media_type") or "").strip().lower() == "movie"
 
         if not anilist_id and not mal_id:
-            return False
+            return identity_present and str(item.get("media_type") or "").strip().lower() == "movie"
 
         try:
             root_context = self._anime_root_resolver(anilist_id, mal_id)
         except Exception:
             logger.debug("Anime identity verification failed", exc_info=True)
-            return False
+            return identity_present and str(item.get("media_type") or "").strip().lower() == "movie"
         root = (root_context or {}).get("root") if isinstance(root_context, dict) else None
         return isinstance(root, dict) and bool(root.get("id"))
 

@@ -2668,6 +2668,7 @@
         const listBadge = item.list_name ? `<div class="catalog-note" style="margin-top:2px;font-size:11px">📋 ${esc(item.list_name)}</div>` : '';
         const reasonBadge = item.anime_conflict_reason ? `<div class="catalog-note" style="margin-top:4px;color:var(--orange)">${esc(item.anime_conflict_reason)}</div>` : '';
         const confidenceBadge = item.match_confidence && item.match_confidence !== 'unresolved' ? `<div class="catalog-note" style="margin-top:2px">confidence: ${esc(item.match_confidence)}</div>` : '';
+        const suggestedBadge = item.candidate_tmdb_id ? `<div class="catalog-note" style="margin-top:2px;color:var(--green)">suggested TMDB: ${esc(item.candidate_tmdb_id)}</div>` : '';
 
         // Build external lookup links so the user can find the TMDB ID easily.
         const searchQuery = encodeURIComponent(title || displayTitle);
@@ -2687,13 +2688,14 @@
             ${listBadge}
             ${reasonBadge}
             ${confidenceBadge}
+            ${suggestedBadge}
             <div style="margin-top:3px;font-size:11px">${idLinks}</div>
           </td>
           <td style="white-space:nowrap">${typeLabel}</td>
           <td>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
               <button class="btn btn-sm unresolved-auto-btn" type="button" data-cache-key="${cacheKey}">Auto Map</button>
-              <input type="number" min="1" placeholder="TMDB ID" class="unresolved-tmdb-input" style="width:100px;padding:4px 6px;border:1px solid var(--z700);border-radius:4px;background:var(--z900);color:var(--z100);font-size:12px" />
+              <input type="number" min="1" placeholder="TMDB ID" value="${item.candidate_tmdb_id ? esc(item.candidate_tmdb_id) : ''}" class="unresolved-tmdb-input" style="width:100px;padding:4px 6px;border:1px solid var(--z700);border-radius:4px;background:var(--z900);color:var(--z100);font-size:12px" />
               <button class="btn btn-sm unresolved-resolve-btn" type="button" data-cache-key="${cacheKey}">Map</button>
               <button class="btn btn-sm unresolved-dismiss-btn" type="button" data-cache-key="${cacheKey}" style="color:var(--z500)">Dismiss</button>
             </div>
