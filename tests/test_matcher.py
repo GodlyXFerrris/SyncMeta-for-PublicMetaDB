@@ -254,6 +254,34 @@ class ItemMatcherTests(unittest.TestCase):
         self.assertEqual(result.resolution_kind, "fribb_exact")
         self.assertEqual(client.calls, [])
 
+    @patch("src.fribb_client.lookup_by_anilist")
+    def test_anime_list_identity_blocks_unverified_external_mapping(self, lookup_by_anilist) -> None:
+        lookup_by_anilist.return_value = None
+
+        client = StubPMDBClient()
+
+        def fake_lookup(id_type: str, id_value: str, media_type: str) -> int | None:
+            client.calls.append((id_type, id_value, media_type))
+            return 154634
+
+        client.lookup_by_external_id = fake_lookup  # type: ignore[method-assign]
+        matcher = ItemMatcher(client)
+
+        result = matcher.resolve_match({
+            "title": "ICE 3",
+            "year": 2022,
+            "media_type": "movie",
+            "simkl_type": "anime",
+            "anilist_id": "999001",
+            "ids": {"anilist": "999001"},
+            "anime_resolve_mode": "list_identity",
+        })
+
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.resolution_kind, "unresolved")
+        self.assertEqual(result.unresolved_reason, "missing_anime_mapping")
+        self.assertEqual(client.calls, [])
+
 
     def test_cache_key_includes_anilist_id_so_stale_entries_are_invalidated(self) -> None:
         # Two items that differ only in anilist_id must produce different cache keys

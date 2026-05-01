@@ -485,6 +485,7 @@ class SyncService:
                     display_name=display_name,
                     source_name="SIMKL",
                     is_public=self._config.sync.simkl_visibility == "public",
+                    force_remove_missing=(simkl_type == "anime"),
                     selection={
                         "source": "simkl",
                         "media_type": simkl_type,
@@ -1521,6 +1522,7 @@ class SyncService:
                     display_name=display_name,
                     source_name="AniList",
                     is_public=self._config.sync.anilist_visibility == "public",
+                    force_remove_missing=True,
                     selection={
                         "source": "anilist",
                         "status": status_key,

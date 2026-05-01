@@ -444,6 +444,69 @@ class SyncServiceTests(unittest.TestCase):
         self.assertIn(("anilist", "20"), contributed)
         self.assertIn(("mal", "1735"), contributed)
 
+    def test_anilist_anime_lists_remove_stale_items_even_when_remove_missing_is_off(self) -> None:
+        config = AppConfig(
+            anilist=AniListConfig(
+                enabled=True,
+                username="demo",
+                selected_statuses=["completed"],
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+            ),
+        )
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.list_items_by_id["pmdb-active"] = [
+            {"id": "stale-ice3", "tmdb_id": 154634, "media_type": "movie"},
+            {"id": "keep-naruto", "tmdb_id": 46260, "media_type": "tv"},
+        ]
+        service._pmdb = pmdb
+
+        class StubAniListClient:
+            def __init__(self, *_args, **_kwargs) -> None:
+                pass
+
+            def get_statuses(self, statuses: list[str]) -> dict[str, list[dict]]:
+                self.statuses = statuses
+                return {
+                    "completed": [
+                        {
+                            "title": "Naruto",
+                            "year": 2002,
+                            "media_type": "tv",
+                            "simkl_type": "anime",
+                            "anilist_id": "20",
+                            "ids": {"anilist": "20"},
+                            "anime_resolve_mode": "list_identity",
+                        }
+                    ]
+                }
+
+        class DirectAnimeMatcher:
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=46260, resolution_kind="fribb_exact", match_confidence="exact")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 46260
+
+        service._matcher = DirectAnimeMatcher()
+
+        from unittest.mock import patch
+        with patch("src.anilist_client.AniListClient", StubAniListClient):
+            results = service.run()
+
+        anime_stats = next(item for item in results if item.source_name == "AniList")
+        self.assertEqual(anime_stats.items_removed, 1)
+        self.assertEqual(pmdb.removed_list_items, [("pmdb-active", "stale-ice3")])
+
     def test_anime_list_resolution_uses_direct_fribb_entry_not_root_fallback(self) -> None:
         service = SyncService(
             AppConfig(

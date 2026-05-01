@@ -274,6 +274,18 @@ class ItemMatcher:
                 with self._lock:
                     self._record_match_stat(fribb_result)
                 return fribb_result
+            if anime_resolve_mode == "list_identity":
+                unresolved_reason = fribb_result.unresolved_reason or "missing_anime_mapping"
+                if unresolved_reason == "not_found":
+                    unresolved_reason = "missing_anime_mapping"
+                return MatchResult(
+                    tmdb_id=None,
+                    resolution_kind="unresolved",
+                    unresolved_reason=unresolved_reason,
+                    match_confidence=fribb_result.match_confidence or "unresolved",
+                    anime_mapping_source=fribb_result.anime_mapping_source or "fribb_exact",
+                    candidate_tmdb_id=fribb_result.candidate_tmdb_id,
+                )
 
         # Do NOT collapse anime list identity to the franchise root up front.
         # Root-chain lookups are useful for history remapping, but for title/list
@@ -567,8 +579,6 @@ class ItemMatcher:
         mode = str(item.get("anime_resolve_mode") or "").strip().lower()
         if mode in {"list_identity", "history_identity", "resume_identity"}:
             return mode
-        if item.get("simkl_type") == "anime":
-            return "list_identity"
         return "generic"
 
     def _try_anime_root_lookup(self, item: dict, media_type: str) -> MatchResult:

@@ -262,7 +262,7 @@ class SimklClient:
             ids_check = media.get("ids", {})
             mal_id = ids_check.get("mal")
             anilist_id = ids_check.get("anilist")
-            fribb_entry = self._lookup_exact_anime_mapping(ids_check, media, entry)
+            fribb_entry = self._lookup_exact_anime_mapping(ids_check, media, entry, resolver_mode="list_identity")
 
             # Gate 1: if anime_type is present it must be a recognised value.
             if anime_type and anime_type not in _VALID_ANIME_TYPES:
@@ -374,14 +374,21 @@ class SimklClient:
             if value:
                 ids[target_key] = value
 
-    def _lookup_exact_anime_mapping(self, ids: dict, media: dict, entry: dict) -> dict | None:
+    def _lookup_exact_anime_mapping(
+        self,
+        ids: dict,
+        media: dict,
+        entry: dict,
+        resolver_mode: str = "list_identity",
+    ) -> dict | None:
+        use_soft_ids = resolver_mode in {"history_identity", "resume_identity"}
         return _anime_maps.lookup_fribb(
             anilist_id=_safe_lookup_int(ids.get("anilist") or entry.get("anilist_id") or media.get("anilist_id")),
             mal_id=_safe_lookup_int(ids.get("mal") or entry.get("mal_id") or media.get("mal_id")),
             anidb_id=_safe_lookup_int(ids.get("anidb") or entry.get("anidb_id") or media.get("anidb_id")),
             simkl_id=_safe_lookup_int(ids.get("simkl") or entry.get("simkl_id") or media.get("simkl_id")),
-            tmdb_id=_safe_lookup_int(ids.get("tmdb") or entry.get("tmdb_id") or media.get("tmdb_id")),
-            imdb_id=str(ids.get("imdb") or entry.get("imdb_id") or media.get("imdb_id") or "").strip() or None,
+            tmdb_id=_safe_lookup_int(ids.get("tmdb") or entry.get("tmdb_id") or media.get("tmdb_id")) if use_soft_ids else None,
+            imdb_id=(str(ids.get("imdb") or entry.get("imdb_id") or media.get("imdb_id") or "").strip() or None) if use_soft_ids else None,
         )
 
     @staticmethod
@@ -833,7 +840,7 @@ class SimklClient:
         seen: set[tuple[int, int]] = set()
         ids = show.get("ids", {}) or {}
         if media_key == "anime":
-            fribb_entry = self._lookup_exact_anime_mapping(ids, show, entry)
+            fribb_entry = self._lookup_exact_anime_mapping(ids, show, entry, resolver_mode="history_identity")
             self._enrich_ids_from_fribb(ids, fribb_entry)
         title = show.get("title", "Unknown")
         tmdb_id = int(ids["tmdb"]) if ids.get("tmdb") else None
@@ -996,7 +1003,7 @@ class SimklClient:
 
         if isinstance(movie, dict):
             ids = movie.get("ids", {}) or {}
-            anime_mapping = self._lookup_exact_anime_mapping(ids, movie, entry)
+            anime_mapping = self._lookup_exact_anime_mapping(ids, movie, entry, resolver_mode="resume_identity")
             self._enrich_ids_from_fribb(ids, anime_mapping)
             tmdb_id = ids.get("tmdb")
             runtime_minutes = entry.get("runtime") or movie.get("runtime")
@@ -1034,7 +1041,7 @@ class SimklClient:
         if isinstance(show, dict) and isinstance(episode, dict):
             show_ids = show.get("ids", {}) or {}
             if str(entry.get("type") or show.get("type") or show.get("anime_type") or "").strip():
-                anime_mapping = self._lookup_exact_anime_mapping(show_ids, show, entry)
+                anime_mapping = self._lookup_exact_anime_mapping(show_ids, show, entry, resolver_mode="resume_identity")
                 self._enrich_ids_from_fribb(show_ids, anime_mapping)
             tmdb_id = show_ids.get("tmdb")
             runtime_minutes = entry.get("runtime") or episode.get("runtime")
