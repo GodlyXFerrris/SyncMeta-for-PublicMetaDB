@@ -164,7 +164,33 @@
     .footer-links{display:flex;gap:16px;flex-wrap:wrap}
     .footer-links a{font-size:12px;color:var(--z500);text-decoration:none}
     .footer-links a:hover{color:var(--white)}
-    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}}
+    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}.settings-layout{grid-template-columns:1fr}.settings-sidebar{position:static}.conn-grid{grid-template-columns:1fr}}
+    .settings-layout{display:grid;grid-template-columns:190px 1fr;gap:20px;align-items:start;padding:24px 0 64px}
+    .settings-sidebar{position:sticky;top:72px}
+    .settings-nav{background:var(--z950);border:1px solid var(--z900);border-radius:10px;overflow:hidden}
+    .settings-nav-item{display:flex;align-items:center;gap:9px;width:100%;padding:11px 16px;border:none;border-left:2px solid transparent;background:none;color:var(--z400);font-size:13px;font-weight:500;cursor:pointer;text-align:left;transition:all .15s}
+    .settings-nav-item:hover{color:var(--z100);background:rgba(255,255,255,.03)}
+    .settings-nav-item.active{color:var(--white);background:rgba(124,109,247,.1);border-left-color:var(--accent);font-weight:600}
+    .settings-nav-sep{height:1px;background:var(--z900)}
+    .settings-nav-danger:hover{color:var(--red)}
+    .settings-nav-danger.active{color:var(--red);background:rgba(239,68,68,.08);border-left-color:var(--red)}
+    .settings-tab{display:none}.settings-tab.active{display:block}
+    .settings-page-title{font-size:22px;font-weight:800;color:var(--z100);letter-spacing:-.5px;margin-bottom:4px}
+    .settings-page-desc{font-size:13px;color:var(--z500);margin-bottom:20px;line-height:1.5}
+    .settings-group{background:var(--z950);border:1px solid var(--z900);border-radius:10px;padding:20px;margin-bottom:14px}
+    .settings-group-title{font-size:13px;font-weight:700;color:var(--z100);margin-bottom:4px}
+    .settings-group-desc{font-size:12px;color:var(--z500);margin-bottom:16px;line-height:1.55}
+    .settings-group.danger-zone{border-color:rgba(248,113,113,.25);background:rgba(239,68,68,.04)}
+    .settings-group.danger-zone .settings-group-title{color:var(--red)}
+    .conn-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+    .conn-card{background:var(--z950);border:1px solid var(--z900);border-radius:10px;padding:18px}
+    .conn-card-title{font-size:15px;font-weight:700;color:var(--z100);margin-bottom:4px;display:flex;align-items:center;gap:8px}
+    .conn-card-desc{font-size:12px;color:var(--z500);margin-bottom:14px}
+    .conn-card.full{grid-column:1 / -1;margin-bottom:0}
+    .lists-inner-tabs{display:flex;gap:6px;padding:5px;background:var(--z900);border:1px solid var(--z800);border-radius:10px;margin-bottom:16px}
+    .lists-inner-tab{flex:1;padding:9px 12px;border:none;border-radius:7px;background:transparent;color:var(--z400);font-size:13px;font-weight:600;cursor:pointer;transition:all .15s}
+    .lists-inner-tab.active{background:var(--z800);color:var(--white)}
+    .lists-subtab{display:none}.lists-subtab.active{display:block}
   </style>
 </head>
 <body>
@@ -266,290 +292,363 @@
       </div>
 
       <div id="view-settings" style="display:none">
-        <div class="form-grid">
-          <div class="form-section full">
-            <h3>Profile</h3>
-            <p class="desc">Each profile keeps its own saved tokens, list picks, sync history, and background schedule.</p>
-            <div class="guide-box">
-              <div class="guide-title">Quick Setup</div>
-              <div class="guide-list">
-                <div class="guide-step"><div class="guide-step-num">1</div><div>Enter profile password. Leave UUID empty first time. Click <strong>Save Profile</strong>.</div></div>
-                <div class="guide-step"><div class="guide-step-num">2</div><div>Add PublicMetaDB API key. Then connect any source you want: SIMKL, Trakt, AniList, MDBList.</div></div>
-                <div class="guide-step"><div class="guide-step-num">3</div><div>Choose lists/statuses below. Return dashboard. Click <strong>Sync Lists</strong>.</div></div>
-              </div>
-            </div>
-            <div class="form-row">
-              <label>Profile UUID</label>
-              <input type="text" id="profile-id" class="mono" placeholder="Leave blank to create a new profile" autocomplete="off">
-              <div class="hint">Use this UUID + password to open same profile on another browser or server.</div>
-            </div>
-            <div class="form-row">
-              <label>Profile Password</label>
-              <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
-              <div class="hint">Needed to save profile first time and sign back in later.</div>
-            </div>
-              <div class="form-row">
-                <label>New Profile Password</label>
-                <input type="password" id="profile-new-password" placeholder="Only fill this to reset your profile password" autocomplete="off">
-                <div class="hint">Use your profile UUID plus a new password here to reset access. If you are already signed in, that works too.</div>
-              </div>
-              <div class="actions-bar" style="margin-top:4px">
-                <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
-                <button class="btn" onclick="loadProfile()">Load Profile</button>
-                <button class="btn btn-danger" onclick="resetProfilePassword()">Reset Password</button>
-                <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
-                <span class="save-flash" id="save-flash">Saved</span>
-              </div>
+        <div class="settings-layout">
+
+          <!-- Sidebar nav -->
+          <div class="settings-sidebar">
+            <nav class="settings-nav">
+              <button class="settings-nav-item active" id="snav-profile" onclick="showSettingsTab('profile')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+                Profile
+              </button>
+              <div class="settings-nav-sep"></div>
+              <button class="settings-nav-item" id="snav-connections" onclick="showSettingsTab('connections')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                Connections
+              </button>
+              <button class="settings-nav-item" id="snav-lists" onclick="showSettingsTab('lists')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                Lists
+              </button>
+              <button class="settings-nav-item" id="snav-behavior" onclick="showSettingsTab('behavior')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+                Behavior
+              </button>
+              <div class="settings-nav-sep"></div>
+              <button class="settings-nav-item settings-nav-danger" id="snav-danger" onclick="showSettingsTab('danger')">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Danger Zone
+              </button>
+            </nav>
           </div>
-          <div class="settings-columns">
-            <div class="settings-stack settings-stack-left">
-              <div class="form-section source-card">
-                <h3><span class="dot" id="dot-pmdb"></span> PublicMetaDB</h3>
-                <p class="desc">Destination. All synced lists and activity go here.</p>
-                <div class="form-row"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get API key from PublicMetaDB</a></div></div>
-              </div>
-              <div class="form-section source-card">
-                <h3><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Use for anime list sync direct from AniList.</p>
-                <div class="form-row"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty if anime should come only from SIMKL.</div></div>
-              </div>
-              <div class="form-section source-card">
-                <h3><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Use for custom catalog lists from MDBList.</p>
-                <div class="form-row"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> and copy API key from settings.</div></div>
-              </div>
-            </div>
-            <div class="settings-stack">
-              <div class="form-section source-card">
-                <h3><span class="dot" id="dot-simkl"></span> SIMKL</h3>
-                <p class="desc">Use for movies, shows, anime, watch history, and PIN auth.</p>
-                <div class="provider-guide">
-                  <div class="provider-guide-title">SIMKL App Setup</div>
-                  <div class="provider-guide-list">
-                    <div>1. Open <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">SIMKL Developer Settings</a>.</div>
-                    <div>2. Create app or open existing app.</div>
-                    <div>3. If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.</div>
-                  </div>
-                  <div class="form-row" style="margin-top:10px;margin-bottom:0">
-                    <label>SIMKL Redirect URL</label>
-                    <div class="copy-row">
-                      <input type="text" id="simkl-redirect-url" readonly value="">
-                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('simkl-redirect-url')">Copy</button>
-                    </div>
-                    <div class="mini-note">Standard value: current SyncMeta HTTPS root. Example: <span class="mono">https://syncmeta.example.com/</span></div>
-                  </div>
-                </div>
-                <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"><div class="hint">Paste SIMKL Client ID here.</div></div>
-                <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
-                <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
-                <div class="actions-bar" style="margin-top:0">
-                  <button class="btn btn-sm" id="btn-simkl-auth" onclick="startSimklAuth()">Get SIMKL Token</button>
-                  <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if no token yet.</span>
-                </div>
-                <div class="auth-box hidden" id="simkl-auth-box">
-                  <div class="actions-meta">SIMKL PIN</div>
-                  <div class="auth-code mono" id="simkl-auth-code">-----</div>
-                  <div class="actions-bar" style="margin-top:8px">
-                    <button class="btn btn-sm" type="button" onclick="copySimklCode()">Copy PIN</button>
-                    <button class="btn btn-sm" type="button" onclick="openSimklVerification()">Open SIMKL</button>
-                  </div>
-                  <div class="hint">If SIMKL page does not auto-fill, paste PIN there by hand.</div>
-                </div>
-              </div>
-              <div class="form-section source-card">
-                <h3><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:12px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></h3>
-                <p class="desc">Use for watchlist, liked lists, personal lists, public lists, history, and device auth.</p>
-                <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
-                <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
-                <div class="provider-guide">
-                  <div class="provider-guide-title">Trakt App Setup</div>
-                  <div class="provider-guide-list">
-                    <div>1. Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">Trakt API app settings</a>.</div>
-                    <div>2. If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.</div>
-                    <div>3. Copy Client ID and Client Secret here. SyncMeta still uses device auth for login.</div>
-                  </div>
-                  <div class="form-row" style="margin-top:10px;margin-bottom:0">
-                    <label>Trakt Redirect URI</label>
-                    <div class="copy-row">
-                      <input type="text" id="trakt-redirect-url" readonly value="">
-                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('trakt-redirect-url')">Copy</button>
-                    </div>
-                    <div class="mini-note">Standard value: current SyncMeta HTTPS root. Example: <span class="mono">https://syncmeta.example.com/</span></div>
-                  </div>
-                </div>
-                <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"><div class="hint">Paste Trakt Client ID here.</div></div>
-                <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
-                <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
-                <div class="form-row"><label>Refresh Token</label><input type="password" id="trakt-refresh-token" placeholder="Saved for future refresh support" autocomplete="off"></div>
-                <div class="actions-bar" style="margin-top:0">
-                  <button class="btn btn-sm" id="btn-trakt-auth" onclick="startTraktAuth()">Connect Trakt</button>
-                  <span class="actions-meta" id="trakt-auth-status">Start device auth here if no token yet.</span>
-                </div>
-                <div class="auth-box hidden" id="trakt-auth-box">
-                  <div class="actions-meta">Trakt Code</div>
-                  <div class="auth-code mono" id="trakt-auth-code">-----</div>
-                  <div class="actions-bar" style="margin-top:8px">
-                    <button class="btn btn-sm" type="button" onclick="copyTraktCode()">Copy Code</button>
-                    <button class="btn btn-sm" type="button" onclick="openTraktVerification()">Open Trakt</button>
-                  </div>
-                  <div class="hint">If Trakt page does not auto-fill, paste code there by hand.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="form-section full options-wide">
-            <h3>Options</h3>
-            <div class="options-grid">
-              <div class="options-col">
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
-                <div class="form-row"><label>Update Every (Seconds)</label><input type="number" id="opt-interval-seconds" min="600" step="1" value="43200" onblur="if(parseInt(this.value)<600||!this.value)this.value=600"><div class="hint">Minimum 600 seconds (10 min). Default 43200 (12h). The next automatic sync is scheduled from the end of the previous successful run.</div></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
-                <div class="form-row" style="margin-top:4px;margin-bottom:0">
-                  <label>PMDB Native Watchlist</label>
-                  <div class="hint" style="margin-top:0;margin-bottom:10px">Select which services contribute their "plan to watch" items to your PublicMetaDB native Watchlist. All enabled sources are merged into one watchlist on every list sync.</div>
-                  <div class="toggle-row" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>SIMKL — Plan to Watch</label></div>
-                  <div class="toggle-row" style="margin-bottom:8px"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Trakt — Watchlist</label></div>
-                  <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>AniList — Planning</label></div>
+
+          <!-- Content area -->
+          <div class="settings-content">
+
+            <!-- PROFILE TAB -->
+            <div class="settings-tab active" id="stab-profile">
+              <div class="settings-page-title">Profile</div>
+              <div class="settings-page-desc">Each profile keeps its own saved tokens, list picks, sync history, and background schedule.</div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">Quick Setup</div>
+                <div class="guide-list" style="margin-bottom:20px">
+                  <div class="guide-step"><div class="guide-step-num">1</div><div>Enter a profile password. Leave UUID blank for a new profile. Click <strong>Save Profile</strong>.</div></div>
+                  <div class="guide-step"><div class="guide-step-num">2</div><div>Add your PublicMetaDB API key in <strong>Connections</strong>. Connect SIMKL, Trakt, AniList, or MDBList.</div></div>
+                  <div class="guide-step"><div class="guide-step-num">3</div><div>Pick lists in <strong>Lists</strong>. Return to Dashboard and click <strong>Sync Lists</strong>.</div></div>
                 </div>
                 <div class="form-row">
-                  <label>Watch History Source</label>
+                  <label>Profile UUID</label>
+                  <input type="text" id="profile-id" class="mono" placeholder="Leave blank to create a new profile" autocomplete="off">
+                  <div class="hint">Use this UUID + password to reopen the same profile in another browser or server.</div>
+                </div>
+                <div class="form-row">
+                  <label>Profile Password</label>
+                  <input type="password" id="profile-password" placeholder="Required to save, load, and sync this profile" autocomplete="off">
+                </div>
+                <div class="form-row">
+                  <label>New Profile Password</label>
+                  <input type="password" id="profile-new-password" placeholder="Only fill this to reset your profile password" autocomplete="off">
+                  <div class="hint">Use your profile UUID plus a new password to reset access.</div>
+                </div>
+                <div class="actions-bar" style="margin-top:4px">
+                  <button class="btn btn-primary" onclick="saveProfile()">Save Profile</button>
+                  <button class="btn" onclick="loadProfile()">Load Profile</button>
+                  <button class="btn btn-danger" onclick="resetProfilePassword()">Reset Password</button>
+                  <button class="btn btn-ghost btn-sm" onclick="logoutProfile()">Log Out</button>
+                  <span class="save-flash" id="save-flash">Saved</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- CONNECTIONS TAB -->
+            <div class="settings-tab" id="stab-connections">
+              <div class="settings-page-title">Connections</div>
+              <div class="settings-page-desc">Connect your accounts. PublicMetaDB is required; all others are optional.</div>
+              <div class="conn-card form-section" style="margin-bottom:14px">
+                <div class="conn-card-title"><span class="dot" id="dot-pmdb"></span> PublicMetaDB</div>
+                <div class="conn-card-desc">Destination. All synced lists and activity go here.</div>
+                <div class="form-row" style="margin-bottom:0"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key from PublicMetaDB</a></div></div>
+              </div>
+              <div class="conn-grid">
+                <div class="conn-card form-section">
+                  <div class="conn-card-title"><span class="dot" id="dot-simkl"></span> SIMKL</div>
+                  <div class="conn-card-desc">Movies, shows, anime, watch history, and PIN auth.</div>
+                  <div class="provider-guide">
+                    <div class="provider-guide-title">App Setup</div>
+                    <div class="provider-guide-list">
+                      <div>1. Open <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">SIMKL Developer Settings</a>.</div>
+                      <div>2. Create or open your app. Use the redirect URL below if asked.</div>
+                    </div>
+                    <div class="form-row" style="margin-top:10px;margin-bottom:0">
+                      <label>Redirect URL</label>
+                      <div class="copy-row">
+                        <input type="text" id="simkl-redirect-url" readonly value="">
+                        <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('simkl-redirect-url')">Copy</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"></div>
+                  <div class="form-row"><label>Client Secret</label><input type="password" id="simkl-client-secret" placeholder="Optional" autocomplete="off"></div>
+                  <div class="form-row"><label>Access Token</label><input type="password" id="simkl-access-token" placeholder="From PIN auth or OAuth" autocomplete="off"></div>
+                  <div class="actions-bar" style="margin-top:0">
+                    <button class="btn btn-sm" id="btn-simkl-auth" onclick="startSimklAuth()">Get SIMKL Token</button>
+                    <span class="actions-meta" id="simkl-auth-status">Start PIN auth here if no token yet.</span>
+                  </div>
+                  <div class="auth-box hidden" id="simkl-auth-box">
+                    <div class="actions-meta">SIMKL PIN</div>
+                    <div class="auth-code mono" id="simkl-auth-code">-----</div>
+                    <div class="actions-bar" style="margin-top:8px">
+                      <button class="btn btn-sm" type="button" onclick="copySimklCode()">Copy PIN</button>
+                      <button class="btn btn-sm" type="button" onclick="openSimklVerification()">Open SIMKL</button>
+                    </div>
+                    <div class="hint">If the SIMKL page doesn't auto-fill, paste the PIN manually.</div>
+                  </div>
+                </div>
+                <div class="conn-card form-section">
+                  <div class="conn-card-title"><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
+                  <div class="conn-card-desc">Watchlist, liked lists, personal lists, history, and device auth.</div>
+                  <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
+                  <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
+                  <div class="provider-guide">
+                    <div class="provider-guide-title">App Setup</div>
+                    <div class="provider-guide-list">
+                      <div>1. Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">Trakt API app settings</a>.</div>
+                      <div>2. Use the redirect URL below if asked. Copy Client ID and Secret here.</div>
+                    </div>
+                    <div class="form-row" style="margin-top:10px;margin-bottom:0">
+                      <label>Redirect URI</label>
+                      <div class="copy-row">
+                        <input type="text" id="trakt-redirect-url" readonly value="">
+                        <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('trakt-redirect-url')">Copy</button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"></div>
+                  <div class="form-row"><label>Client Secret</label><input type="password" id="trakt-client-secret" placeholder="Required for device auth" autocomplete="off"></div>
+                  <div class="form-row"><label>Access Token</label><input type="password" id="trakt-access-token" placeholder="Filled after Trakt auth" autocomplete="off"></div>
+                  <div class="form-row"><label>Refresh Token</label><input type="password" id="trakt-refresh-token" placeholder="Saved for future refresh support" autocomplete="off"></div>
+                  <div class="actions-bar" style="margin-top:0">
+                    <button class="btn btn-sm" id="btn-trakt-auth" onclick="startTraktAuth()">Connect Trakt</button>
+                    <span class="actions-meta" id="trakt-auth-status">Start device auth here if no token yet.</span>
+                  </div>
+                  <div class="auth-box hidden" id="trakt-auth-box">
+                    <div class="actions-meta">Trakt Code</div>
+                    <div class="auth-code mono" id="trakt-auth-code">-----</div>
+                    <div class="actions-bar" style="margin-top:8px">
+                      <button class="btn btn-sm" type="button" onclick="copyTraktCode()">Copy Code</button>
+                      <button class="btn btn-sm" type="button" onclick="openTraktVerification()">Open Trakt</button>
+                    </div>
+                    <div class="hint">If the Trakt page doesn't auto-fill, paste the code manually.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="conn-grid" style="margin-bottom:0">
+                <div class="conn-card form-section">
+                  <div class="conn-card-title"><span class="dot" id="dot-anilist"></span> AniList <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
+                  <div class="conn-card-desc">Anime list sync directly from AniList.</div>
+                  <div class="form-row" style="margin-bottom:0"><label>Username</label><input type="text" id="anilist-username" placeholder="Your AniList username" autocomplete="off"><div class="hint">Leave empty if anime should come only from SIMKL.</div></div>
+                </div>
+                <div class="conn-card form-section">
+                  <div class="conn-card-title"><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
+                  <div class="conn-card-desc">Custom catalog lists from MDBList.</div>
+                  <div class="form-row" style="margin-bottom:0"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> and copy the API key from settings.</div></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- LISTS TAB -->
+            <div class="settings-tab" id="stab-lists">
+              <div class="settings-page-title">Lists</div>
+              <div class="settings-page-desc">Choose exactly what to sync from each connected source into PublicMetaDB.</div>
+              <div class="lists-inner-tabs">
+                <button class="lists-inner-tab active" id="ltab-simkl" onclick="showListsSubTab('simkl')">SIMKL</button>
+                <button class="lists-inner-tab" id="ltab-anilist" onclick="showListsSubTab('anilist')">AniList</button>
+                <button class="lists-inner-tab" id="ltab-trakt" onclick="showListsSubTab('trakt')">Trakt</button>
+                <button class="lists-inner-tab" id="ltab-mdblist" onclick="showListsSubTab('mdblist')">MDBList</button>
+              </div>
+              <div class="lists-subtab active" id="lsub-simkl">
+                <div class="settings-group form-section">
+                  <div class="settings-group-title">SIMKL Lists</div>
+                  <div class="settings-group-desc">Choose which movie, show, and anime statuses should sync from SIMKL.</div>
+                  <div class="status-groups" id="simkl-status-groups"></div>
+                </div>
+              </div>
+              <div class="lists-subtab" id="lsub-anilist">
+                <div class="settings-group form-section">
+                  <div class="settings-group-title">AniList Lists</div>
+                  <div class="settings-group-desc">Choose which anime lists should sync into PublicMetaDB.</div>
+                  <div class="status-group">
+                    <div class="pill-row" id="anilist-status-list"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="lists-subtab" id="lsub-trakt">
+                <div class="settings-group form-section">
+                  <div class="settings-group-title">Trakt Catalogs</div>
+                  <div class="settings-group-desc">Default covers watchlists and recommendations. My Lists loads your personal and liked lists. Discover searches public Trakt lists.</div>
+                  <div class="catalog-tabs">
+                    <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
+                    <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
+                    <button class="catalog-tab" type="button" data-trakt-tab="my-lists" onclick="switchTraktTab('my-lists')">My Lists</button>
+                    <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
+                  </div>
+                  <div class="catalog-toolbar">
+                    <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load your personal and liked lists, or search public lists.</span>
+                    <div class="actions-bar" style="margin-top:0">
+                      <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
+                      <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
+                      <button class="btn btn-sm" id="btn-trakt-select-all" type="button" onclick="selectAllVisibleTraktLists()">Select All</button>
+                      <button class="btn btn-sm" id="btn-trakt-deselect-all" type="button" onclick="deselectAllVisibleTraktLists()">Deselect All</button>
+                    </div>
+                  </div>
+                  <div class="catalog-search hidden" id="trakt-discover-search">
+                    <input type="text" id="trakt-discover-query" placeholder="Search public Trakt lists..." autocomplete="off">
+                    <button class="btn btn-sm" type="button" onclick="searchTraktLists()">Search</button>
+                  </div>
+                  <div class="catalog-list" id="trakt-catalog-list"></div>
+                </div>
+              </div>
+              <div class="lists-subtab" id="lsub-mdblist">
+                <div class="settings-group form-section">
+                  <div class="settings-group-title">MDBList Lists</div>
+                  <div class="settings-group-desc">Choose personal or public-style catalog lists from MDBList. Use My Lists for your account, or search public MDBList lists in Discover.</div>
+                  <div class="catalog-tabs">
+                    <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
+                    <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>
+                  </div>
+                  <div class="catalog-toolbar">
+                    <span class="actions-meta" id="mdblist-status">Enter your MDBList API key in Connections, then refresh your lists.</span>
+                    <div class="actions-bar" style="margin-top:0">
+                      <button class="btn btn-sm" id="btn-mdblist-refresh" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
+                      <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
+                      <button class="btn btn-sm" type="button" onclick="deselectAllVisibleMdbListLists()">Deselect All</button>
+                    </div>
+                  </div>
+                  <div class="catalog-search hidden" id="mdblist-discover-search">
+                    <input type="text" id="mdblist-discover-query" placeholder="Search public MDBList lists..." autocomplete="off">
+                    <button class="btn btn-sm" type="button" onclick="searchMdbListLists()">Search</button>
+                  </div>
+                  <div class="catalog-list" id="mdblist-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- BEHAVIOR TAB -->
+            <div class="settings-tab" id="stab-behavior">
+              <div class="settings-page-title">Behavior</div>
+              <div class="settings-page-desc">Control how and when SyncMeta fetches and pushes data.</div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">Background Sync</div>
+                <div class="settings-group-desc">Automatically keep your lists updated on a schedule.</div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
+                <div class="form-row" style="margin-top:12px;margin-bottom:0">
+                  <label>Update Every (Seconds)</label>
+                  <input type="number" id="opt-interval-seconds" min="600" step="1" value="43200" onblur="if(parseInt(this.value)<600||!this.value)this.value=600">
+                  <div class="hint">Minimum 600 s (10 min). Default 43200 s (12 h). Scheduled from end of last successful run.</div>
+                </div>
+              </div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">List Behavior</div>
+                <div class="settings-group-desc">Control what happens to items and lists when sources change.</div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
+                <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
+              </div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">PMDB Native Watchlist</div>
+                <div class="settings-group-desc">Select which services contribute their "plan to watch" items to your PublicMetaDB native Watchlist. All enabled sources are merged on every list sync.</div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>SIMKL — Plan to Watch</label></div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Trakt — Watchlist</label></div>
+                <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>AniList — Planning</label></div>
+              </div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">Watch History</div>
+                <div class="settings-group-desc">Import your watched history into PublicMetaDB. Only adds items not already marked watched. Run manually from the dashboard or on a background schedule.</div>
+                <div class="form-row">
+                  <label>Source</label>
                   <select id="opt-activity-history-source">
                     <option value="off">Off</option>
                     <option value="simkl">SIMKL</option>
                     <option value="trakt">Trakt</option>
                   </select>
-                  <div class="hint">Choose which service should import watched history when you press the dashboard button.</div>
                 </div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-history-sync"><span class="slider"></span></label><label>Sync watch history automatically in the background</label></div>
-                <div class="form-row">
-                  <label>Watch History Update Every (Seconds)</label>
+                <div class="form-row" style="margin-top:12px">
+                  <label>Auto-Sync Every (Seconds)</label>
                   <input type="number" id="opt-history-interval-seconds" min="86400" step="1" value="86400" onblur="if(parseInt(this.value)<86400||!this.value)this.value=86400">
-                  <div class="hint">Minimum 86400 seconds (24h). This only affects automatic watch history sync.</div>
+                  <div class="hint">Minimum 86400 s (24 h). Only affects automatic history sync.</div>
                 </div>
-                <div class="toggle-row hidden" id="opt-simkl-history-anime-only-row"><label class="toggle"><input type="checkbox" id="opt-simkl-history-anime-only"><span class="slider"></span></label><label>Only import SIMKL anime watch history</label></div>
-                <div class="form-row">
-                  <label>Resume Progress Source</label>
+                <div class="toggle-row hidden" id="opt-simkl-history-anime-only-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-simkl-history-anime-only"><span class="slider"></span></label><label>Only import SIMKL anime watch history</label></div>
+              </div>
+              <div class="settings-group form-section">
+                <div class="settings-group-title">Resume Progress</div>
+                <div class="settings-group-desc">Import continue-watching progress. Trakt resume also refreshes automatically every 10 minutes while background sync is on.</div>
+                <div class="form-row" style="margin-bottom:0">
+                  <label>Source</label>
                   <select id="opt-activity-resume-source">
                     <option value="off">Off</option>
                     <option value="trakt">Trakt</option>
                   </select>
-                  <div class="hint">Choose which service should import continue-watching progress. Trakt resume also refreshes automatically every 10 minutes while background sync is on.</div>
                 </div>
-                <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Watch history can run manually from the dashboard button or automatically on the schedule above. Resume progress also refreshes automatically every 10 minutes while background sync is on.</div>
-                <div class="hint">Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
-              <div class="options-col">
+              <div class="settings-group form-section">
+                <div class="settings-group-title">List Visibility</div>
+                <div class="settings-group-desc">Control the default visibility of synced lists in PublicMetaDB for each source.</div>
                 <div class="form-row">
-                  <label>SIMKL Lists Visibility</label>
+                  <label>SIMKL Lists</label>
                   <select id="opt-simkl-visibility">
                     <option value="private">Private</option>
                     <option value="public">Public</option>
                   </select>
-                  <div class="hint">Recommended: private, since these are your personal SIMKL status lists.</div>
+                  <div class="hint">Recommended: private — these are your personal SIMKL status lists.</div>
                 </div>
                 <div class="form-row">
-                  <label>AniList Lists Visibility</label>
+                  <label>AniList Lists</label>
                   <select id="opt-anilist-visibility">
                     <option value="private">Private</option>
                     <option value="public">Public</option>
                   </select>
-                  <div class="hint">Recommended: private, since these reflect your personal AniList activity.</div>
+                  <div class="hint">Recommended: private — these reflect your personal AniList activity.</div>
                 </div>
                 <div class="form-row">
-                  <label>Trakt Personal Lists Visibility</label>
+                  <label>Trakt Personal Lists</label>
                   <select id="opt-trakt-personal-visibility">
                     <option value="private">Private</option>
                     <option value="public">Public</option>
                   </select>
-                  <div class="hint">Applies to Trakt watchlist and default personal-style catalogs like recommendations.</div>
+                  <div class="hint">Applies to your Trakt watchlist and personal-style catalogs.</div>
                 </div>
                 <div class="form-row">
-                  <label>Trakt Public Lists Visibility</label>
+                  <label>Trakt Public Lists</label>
                   <select id="opt-trakt-public-visibility">
                     <option value="public">Public</option>
                     <option value="private">Private</option>
                   </select>
                   <div class="hint">Applies to liked Trakt lists and Discover/public Trakt lists.</div>
                 </div>
-                <div class="form-row">
-                  <label>MDBList Visibility</label>
+                <div class="form-row" style="margin-bottom:0">
+                  <label>MDBList Lists</label>
                   <select id="opt-mdblist-visibility">
                     <option value="public">Public</option>
                     <option value="private">Private</option>
                   </select>
-                  <div class="hint">Recommended: public, since MDBList selections are usually shared/public-style catalogs.</div>
+                  <div class="hint">Recommended: public — MDBList selections are usually shared/public-style catalogs.</div>
                 </div>
               </div>
             </div>
-          </div>
-          <div class="form-section full">
-            <h3>SIMKL Lists</h3>
-            <p class="desc">choose exactly which movie, show, and anime statuses should sync from SIMKL.</p>
-            <div class="status-groups" id="simkl-status-groups"></div>
-          </div>
-          <div class="form-section full">
-            <h3>AniList Lists</h3>
-            <p class="desc">choose which anime lists should sync into PublicMetaDB.</p>
-            <div class="status-group">
-              <div class="pill-row" id="anilist-status-list"></div>
-            </div>
-          </div>
-          <div class="form-section full">
-            <h3>Trakt Catalogs</h3>
-            <p class="desc">Choose what should sync from Trakt. Default covers split movie/show watchlists plus recommendations, My Lists loads personal created lists, liked lists, and selected public Trakt lists, and Discover lets you search public Trakt lists.</p>
-            <div class="catalog-tabs">
-              <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
-              <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
-              <button class="catalog-tab" type="button" data-trakt-tab="my-lists" onclick="switchTraktTab('my-lists')">My Lists</button>
-              <button class="catalog-tab" type="button" data-trakt-tab="discover" onclick="switchTraktTab('discover')">Discover</button>
-            </div>
-            <div class="catalog-toolbar">
-              <span class="actions-meta" id="trakt-catalog-status">Connect Trakt to load your personal and liked lists, or search public lists.</span>
-              <div class="actions-bar" style="margin-top:0">
-                <button class="btn btn-sm hidden" id="btn-trakt-refresh" type="button" onclick="refreshTraktLists()">Refresh My Lists</button>
-                <button class="btn btn-sm hidden" id="btn-trakt-sync-all" type="button" onclick="enableAllLikedTraktLists()">Sync All Liked</button>
-                <button class="btn btn-sm" id="btn-trakt-select-all" type="button" onclick="selectAllVisibleTraktLists()">Select All</button>
-                <button class="btn btn-sm" id="btn-trakt-deselect-all" type="button" onclick="deselectAllVisibleTraktLists()">Deselect All</button>
+
+            <!-- DANGER ZONE TAB -->
+            <div class="settings-tab" id="stab-danger">
+              <div class="settings-page-title">Danger Zone</div>
+              <div class="settings-page-desc">Irreversible actions that affect this profile and its stored data.</div>
+              <div class="settings-group danger-zone form-section">
+                <div class="settings-group-title">Delete Profile</div>
+                <div class="settings-group-desc">Permanently deletes this profile, saved credentials, sync history, and local draft data from this browser. Type <span class="mono">DELETE</span> when asked to confirm.</div>
+                <button class="btn btn-danger" style="width:100%;justify-content:center" type="button" onclick="deleteProfileData()">Delete User Records</button>
               </div>
             </div>
-            <div class="catalog-search hidden" id="trakt-discover-search">
-              <input type="text" id="trakt-discover-query" placeholder="Search public Trakt lists..." autocomplete="off">
-              <button class="btn btn-sm" type="button" onclick="searchTraktLists()">Search</button>
-            </div>
-            <div class="catalog-list" id="trakt-catalog-list"></div>
-          </div>
-          <div class="form-section full">
-            <h3>MDBList Lists</h3>
-            <p class="desc">Choose personal or public-style catalog lists from MDBList. Use My Lists for your account, or search public MDBList lists in Discover.</p>
-            <div class="catalog-tabs">
-              <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
-              <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>
-            </div>
-            <div class="catalog-toolbar">
-              <span class="actions-meta" id="mdblist-status">Enter your MDBList API key, then refresh your lists.</span>
-              <div class="actions-bar" style="margin-top:0">
-                <button class="btn btn-sm" id="btn-mdblist-refresh" type="button" onclick="refreshMdbListLists(false)">Refresh MDBList Lists</button>
-                <button class="btn btn-sm" type="button" onclick="selectAllVisibleMdbListLists()">Select All</button>
-                <button class="btn btn-sm" type="button" onclick="deselectAllVisibleMdbListLists()">Deselect All</button>
-              </div>
-            </div>
-            <div class="catalog-search hidden" id="mdblist-discover-search">
-              <input type="text" id="mdblist-discover-query" placeholder="Search public MDBList lists..." autocomplete="off">
-              <button class="btn btn-sm" type="button" onclick="searchMdbListLists()">Search</button>
-            </div>
-            <div class="catalog-list" id="mdblist-list"></div>
-          </div>
-          <div class="form-section full danger-zone">
-            <h3>Danger Zone</h3>
-            <p class="desc">Irreversible actions that affect this profile and its stored data.</p>
-            <div class="form-row">
-              <button class="btn danger-btn" type="button" onclick="deleteProfileData()">Delete User Records</button>
-              <div class="hint">Permanently deletes this profile, saved credentials, sync history, and local draft data from this browser. Type <span class="mono">DELETE</span> when asked to confirm.</div>
-            </div>
-          </div>
-        </div>
+
+          </div><!-- /settings-content -->
+        </div><!-- /settings-layout -->
       </div>
     </div>
   </div>
@@ -3444,6 +3543,24 @@
         searchTraktLists();
       }
     });
+
+    function showSettingsTab(tab) {
+      document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.settings-nav-item').forEach(n => n.classList.remove('active'));
+      const tabEl = document.getElementById('stab-' + tab);
+      const navEl = document.getElementById('snav-' + tab);
+      if (tabEl) tabEl.classList.add('active');
+      if (navEl) navEl.classList.add('active');
+    }
+
+    function showListsSubTab(tab) {
+      document.querySelectorAll('.lists-subtab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.lists-inner-tab').forEach(n => n.classList.remove('active'));
+      const tabEl = document.getElementById('lsub-' + tab);
+      const navEl = document.getElementById('ltab-' + tab);
+      if (tabEl) tabEl.classList.add('active');
+      if (navEl) navEl.classList.add('active');
+    }
   </script>
 </body>
 </html>
