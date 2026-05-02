@@ -1371,6 +1371,22 @@ class SyncService:
         normalized_items: list[dict] = []
         for item in items:
             self._check_cancelled()
+            # Skip items at ≥80% progress — Trakt marks these as "watched" and
+            # PMDB would normalize them to DROPPED (unsupported) when there is no
+            # next episode.  The user has effectively finished the episode/movie.
+            raw_progress = item.get("progress")
+            if raw_progress is not None:
+                try:
+                    if float(raw_progress) >= 80.0:
+                        stats.items_skipped_duplicate += 1
+                        logger.debug(
+                            "Skip resume for %s (progress=%.0f%% ≥ 80%%)",
+                            item.get("title", "unknown"),
+                            float(raw_progress),
+                        )
+                        continue
+                except (TypeError, ValueError):
+                    pass
             item = self._resolve_activity_item(item)
             key = self._resume_key(item)
             if not key:
