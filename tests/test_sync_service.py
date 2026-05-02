@@ -1682,6 +1682,71 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(stats.items_added, 1)
         self.assertEqual(stats.items_skipped_duplicate, 1)
 
+    def test_write_watched_history_items_recounts_server_side_deduped_writes(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": [], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["anime", "shows"]),
+            )
+        )
+
+        class ServerDedupePMDBClient(StubPMDBClient):
+            def mark_watched(
+                self,
+                tmdb_id: int,
+                media_type: str,
+                season: int | None = None,
+                episode: int | None = None,
+                watched_at: str | None = None,
+                dedupe: bool = False,
+            ) -> dict:
+                existing_key = (
+                    int(tmdb_id),
+                    str(media_type),
+                    int(season) if season is not None else None,
+                    None,
+                )
+                for item in self.watched:
+                    item_key = (
+                        int(item.get("tmdb_id") or 0),
+                        str(item.get("media_type") or ""),
+                        int(item.get("season")) if item.get("season") is not None else None,
+                        None,
+                    )
+                    if item_key == existing_key:
+                        return {"success": True, "deduped": True}
+                item = {
+                    "tmdb_id": tmdb_id,
+                    "media_type": media_type,
+                    "watched_at": watched_at,
+                }
+                if season is not None:
+                    item["season"] = season
+                if episode is not None:
+                    item["episode"] = episode
+                self.watched.append(item)
+                return {"success": True, "item": item}
+
+        pmdb = ServerDedupePMDBClient()
+        service._pmdb = pmdb
+        stats = SyncStats(display_name="Watch History", source_name="Trakt")
+        existing_counts = {}
+
+        service._write_watched_history_items(
+            [
+                {"tmdb_id": 50, "media_type": "tv", "season": 1, "episode": 1, "title": "Demo Episode 1", "watched_at": "2026-04-01T00:00:00Z"},
+                {"tmdb_id": 50, "media_type": "tv", "season": 1, "episode": 2, "title": "Demo Episode 2", "watched_at": "2026-04-02T00:00:00Z"},
+            ],
+            existing_counts,
+            stats,
+            "Writing test history",
+        )
+
+        self.assertEqual(stats.items_added, 1)
+        self.assertEqual(stats.items_skipped_duplicate, 1)
+        self.assertEqual(len(pmdb.watched), 1)
+
     def test_simkl_anime_history_does_not_backfill_pmdb_external_ids(self) -> None:
         class DirectAnimeSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:

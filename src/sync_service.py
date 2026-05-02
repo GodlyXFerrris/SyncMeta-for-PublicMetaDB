@@ -2235,6 +2235,11 @@ class SyncService:
         if not items:
             return
 
+        existing_counts_before = {
+            str(key): int(value or 0)
+            for key, value in (existing_counts or {}).items()
+            if key
+        }
         deduped_items: list[dict] = []
         pending_seen: set[str] = set()
         for item in items:
@@ -2252,6 +2257,7 @@ class SyncService:
 
         total_to_write = len(items)
         written = 0
+        successful_writes = 0
         self._set_status(f"{status_message} (0/{total_to_write} new)")
         pool = ThreadPoolExecutor(max_workers=min(_ACTIVITY_WRITE_WORKERS, len(items)))
         shutdown_wait = True
@@ -2274,8 +2280,9 @@ class SyncService:
                 try:
                     future.result()
                     if key:
-                        existing_counts[key] = 1
+                        existing_counts[key] = int(existing_counts.get(key, 0) or 0) + 1
                     stats.items_added += 1
+                    successful_writes += 1
                     written += 1
                     if written % 10 == 0 or written == total_to_write:
                         self._set_status(f"{status_message} ({written}/{total_to_write} new)")
@@ -2291,6 +2298,32 @@ class SyncService:
             raise
         finally:
             pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
+
+        if not successful_writes:
+            return
+
+        try:
+            refreshed_counts = self._count_watched_history_identities(self._pmdb.get_watched_history())
+        except Exception:
+            logger.warning("Could not verify PMDB watched history totals after write", exc_info=True)
+            return
+
+        actual_added = 0
+        for key in pending_seen:
+            actual_added += max(0, int(refreshed_counts.get(key, 0) or 0) - int(existing_counts_before.get(key, 0) or 0))
+
+        if actual_added < successful_writes:
+            corrected_duplicates = successful_writes - actual_added
+            stats.items_added = max(0, stats.items_added - corrected_duplicates)
+            stats.items_skipped_duplicate += corrected_duplicates
+            logger.info(
+                "Adjusted watched history import stats after PMDB verification: %d write(s) were already present server-side",
+                corrected_duplicates,
+            )
+
+        for key in pending_seen:
+            if key:
+                existing_counts[key] = int(refreshed_counts.get(key, 0) or 0)
 
     def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
         stale_items: list[dict] = []
@@ -2570,6 +2603,15 @@ class SyncService:
         season = item.get("season")
         episode = item.get("episode")
         return f"{tmdb_id}:{media_type}:{season if season is not None else ''}:{episode if episode is not None else ''}"
+
+    def _count_watched_history_identities(self, items: list[dict]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for item in items or []:
+            key = self._watched_identity_key(item)
+            if not key:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+        return counts
 
     @staticmethod
     def _resume_key(item: dict) -> str:

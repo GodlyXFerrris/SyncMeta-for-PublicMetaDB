@@ -2816,7 +2816,7 @@
         ? `<span class="status-inline"><span class="spinner"></span><span>${esc(liveStatus)}</span></span>`
         : esc(watchSubtitle);
       el('activity-cards').innerHTML = [
-          buildActivityCard('Watch History', watchSubtitleLive, watchRow, watchEnabled, 'Imported', 'Fetched', 'Duplicates', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
+          buildActivityCard('Watch History', watchSubtitleLive, watchRow, watchEnabled, 'Imported Unique', 'Fetched', 'Already in PMDB', 'Errors', activityResults.watch_history && activityResults.watch_history.timestamp),
           buildActivityCard('Resume Progress', esc(resumeSubtitle), resumeRow, resumeEnabled, 'Saved', 'Fetched', 'Completed', 'Errors', activityResults.resume_progress && activityResults.resume_progress.timestamp),
         ].join('');
       }
