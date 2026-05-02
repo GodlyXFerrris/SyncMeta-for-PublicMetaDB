@@ -1179,18 +1179,30 @@ class SimklClient:
     def _history_last_watched_episodes(entry: dict, show: dict) -> list[dict]:
         # Only use actual last-watched fields — next_to_watch is the NEXT
         # unwatched episode, not a watched one, so it must NOT be included here.
-        candidates = [
-            entry.get("last_watched_episode"),
-            show.get("last_watched_episode"),
-            entry.get("last_episode"),
-            show.get("last_episode"),
-        ]
+        #
+        # "last_episode" is SIMKL show metadata — the most recently aired episode
+        # of the series (e.g. S15E20 "Carry On" for Supernatural), NOT the last
+        # episode the user watched.  We must only include it when it carries an
+        # explicit watched_at timestamp, which proves the user actually watched it.
+        def _episode_is_user_watched(ep: dict) -> bool:
+            return bool(ep.get("watched_at") or ep.get("last_watched_at"))
+
         episodes: list[dict] = []
-        for candidate in candidates:
+        for candidate in [entry.get("last_watched_episode"), show.get("last_watched_episode")]:
             if isinstance(candidate, dict):
                 episodes.append(candidate)
             elif isinstance(candidate, list):
                 episodes.extend(item for item in candidate if isinstance(item, dict))
+
+        for candidate in [entry.get("last_episode"), show.get("last_episode")]:
+            if isinstance(candidate, dict):
+                if _episode_is_user_watched(candidate):
+                    episodes.append(candidate)
+            elif isinstance(candidate, list):
+                episodes.extend(
+                    item for item in candidate
+                    if isinstance(item, dict) and _episode_is_user_watched(item)
+                )
         return episodes
 
     def _synthesize_episode_history_from_counts(self, entry: dict, show: dict, media_key: str) -> list[dict]:
