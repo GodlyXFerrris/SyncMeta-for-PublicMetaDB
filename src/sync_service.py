@@ -1299,9 +1299,13 @@ class SyncService:
             display_name="Trakt Watch History",
             source_name="Trakt",
         )
+        cursor = self._config.sync.trakt_history_cursor or ""
+        full_sync = self._config.sync.full_history_sync or not cursor
+        since = None if full_sync else cursor
+
         self._set_status("Fetching Trakt watched history")
         try:
-            items = self._trakt.get_watched_history()
+            items = self._trakt.get_watched_history(since=since)
         except TraktAuthenticationError as exc:
             stats.errors.append(str(exc))
             return stats
@@ -1313,7 +1317,17 @@ class SyncService:
             return stats
 
         stats.items_fetched = len(items)
-        stats.history_cursor = ""
+        # Advance the cursor to the latest watched_at seen in this batch so the
+        # next incremental sync only fetches new events from Trakt.
+        if items:
+            latest = max(
+                (str(item.get("watched_at") or "").strip() for item in items),
+                default="",
+            )
+            stats.history_cursor = latest if latest > cursor else cursor
+        else:
+            # Nothing new — keep the existing cursor so we don't regress.
+            stats.history_cursor = cursor
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:

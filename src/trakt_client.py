@@ -217,10 +217,8 @@ class TraktClient:
 
     def get_watched_history(self, since: str | None = None) -> list[dict]:
         history: list[dict] = []
-        history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry))
-        history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry))
-        if since:
-            history = [item for item in history if self._is_history_after(item, since)]
+        history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry, since=since))
+        history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry, since=since))
         return history
 
     def get_playback_progress(self) -> list[dict]:
@@ -229,12 +227,15 @@ class TraktClient:
         progress.extend(self._get_paginated_playback("/sync/playback/episodes", self._normalize_episode_playback_entry))
         return progress
 
-    def _get_paginated_history(self, path: str, normalizer) -> list[dict]:
+    def _get_paginated_history(self, path: str, normalizer, since: str | None = None) -> list[dict]:
         items: list[dict] = []
         page = 1
         while True:
             self._check_cancelled()
-            raw = self._get(path, params={"page": page, "limit": 100, "extended": "full"}) or []
+            params: dict = {"page": page, "limit": 100, "extended": "full"}
+            if since:
+                params["start_at"] = since
+            raw = self._get(path, params=params) or []
             if not raw:
                 break
             for entry in raw:
