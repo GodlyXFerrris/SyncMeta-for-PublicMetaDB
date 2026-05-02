@@ -228,6 +228,11 @@ class StubActivityMatcher:
 
 
 class SyncServiceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        SyncService._shared_anime_seasons_cache.clear()
+        SyncService._shared_fribb_lookup_cache.clear()
+        SyncService._shared_anime_history_remap_cache.clear()
+
     def build_service(self, delete_disabled_lists: bool) -> tuple[SyncService, StubPMDBClient]:
         config = AppConfig(
             simkl=SimklConfig(
@@ -1605,6 +1610,36 @@ class SyncServiceTests(unittest.TestCase):
         )
         self.assertEqual(pmdb.anime_seasons_calls, [9501])
 
+    def test_anime_seasons_cache_is_reused_across_sync_service_instances(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["anime"],
+            ),
+        )
+
+        pmdb = StubPMDBClient()
+        pmdb.anime_seasons_by_tmdb[9501] = [
+            {"season_number": 1, "episode_count": 12, "tmdb_season": 1, "tmdb_episode_start": 1},
+        ]
+
+        service_one = SyncService(config)
+        service_one._pmdb = pmdb
+        service_two = SyncService(config)
+        service_two._pmdb = pmdb
+
+        self.assertEqual(service_one._get_cached_anime_seasons(9501), pmdb.anime_seasons_by_tmdb[9501])
+        self.assertEqual(service_two._get_cached_anime_seasons(9501), pmdb.anime_seasons_by_tmdb[9501])
+        self.assertEqual(pmdb.anime_seasons_calls, [9501])
+
     def test_simkl_history_skips_zero_episode_placeholder_target_seasons(self) -> None:
         class FrierenStyleSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:
@@ -2020,6 +2055,52 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_added, 0)
         self.assertEqual(watched_stats.items_skipped_duplicate, 2)
 
+    def test_trakt_watched_history_fast_skips_existing_items_before_resolution(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.watched = [
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z"},
+            {"tmdb_id": 902, "media_type": "tv", "season": 1, "episode": 2, "watched_at": "2026-04-01T13:00:00Z"},
+        ]
+        service._trakt = StubTraktClient()
+        service._pmdb = pmdb
+
+        resolve_calls = {"count": 0}
+        original_resolve_activity = service._resolve_activity_item
+
+        def counting_resolve(item: dict) -> dict:
+            resolve_calls["count"] += 1
+            return original_resolve_activity(item)
+
+        service._resolve_activity_item = counting_resolve
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(watched_stats.items_skipped_duplicate, 2)
+        self.assertEqual(resolve_calls["count"], 0)
+
     def test_trakt_watched_history_does_not_add_repeat_watches_for_same_title(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
@@ -2054,6 +2135,48 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(watched_stats.items_removed, 0)
         self.assertEqual(pmdb.deleted_watched, [])
+
+    def test_simkl_watched_history_fast_skips_existing_non_anime_items(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="simkl-client",
+                access_token="simkl-token",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies", "anime"],
+                simkl_sync_watched_history=True,
+            ),
+        )
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        pmdb.watched = [
+            {"tmdb_id": 801, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z"},
+            {"tmdb_id": 802, "media_type": "tv", "season": 1, "episode": 3, "watched_at": "2026-04-01T13:00:00Z"},
+        ]
+        service._simkl = StubSimklClient()
+        service._pmdb = pmdb
+
+        resolve_calls = {"count": 0}
+        original_resolve_activity = service._resolve_activity_item
+
+        def counting_resolve(item: dict) -> dict:
+            resolve_calls["count"] += 1
+            return original_resolve_activity(item)
+
+        service._resolve_activity_item = counting_resolve
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+        self.assertEqual(watched_stats.items_added, 0)
+        self.assertEqual(watched_stats.items_skipped_duplicate, 2)
+        self.assertEqual(resolve_calls["count"], 1)
 
     def test_trakt_resume_progress_skips_unchanged_existing_points(self) -> None:
         config = AppConfig(

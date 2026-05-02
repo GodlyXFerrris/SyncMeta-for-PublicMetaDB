@@ -154,6 +154,11 @@ def _anime_conflict_reason(item: dict, unresolved_reason: str = "") -> str:
 class SyncService:
     """Orchestrates one-way sync into PublicMetaDB."""
 
+    _shared_cache_lock = threading.Lock()
+    _shared_fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
+    _shared_anime_seasons_cache: dict[int, list[dict]] = {}
+    _shared_anime_history_remap_cache: dict[tuple, dict | None] = {}
+
     def __init__(
         self,
         config: AppConfig,
@@ -190,10 +195,10 @@ class SyncService:
         self._live_progress_rows: dict[str, dict] = {}
         self._mapping_contribution_lock = threading.Lock()
         self._contributed_mapping_keys: set[tuple[int, str, str, str]] = set()
-        self._fribb_lookup_cache: dict[tuple[str, str], dict | None] = {}
-        self._anime_seasons_cache: dict[int, list[dict]] = {}
+        self._fribb_lookup_cache = self.__class__._shared_fribb_lookup_cache
+        self._anime_seasons_cache = self.__class__._shared_anime_seasons_cache
         self._manual_list_additions: dict[str, list[dict]] = manual_list_additions or {}
-        self._anime_history_remap_cache: dict[tuple, dict | None] = {}
+        self._anime_history_remap_cache = self.__class__._shared_anime_history_remap_cache
         self._pmdb_cache_lock = threading.Lock()
         self._pmdb_run_list_index: dict[str, dict] | None = None
         self._pmdb_list_items_cache: dict[str, list[dict]] = {}
@@ -561,6 +566,8 @@ class SyncService:
             self._check_cancelled()
             if idx % 50 == 0:
                 self._set_status(f"Resolving SIMKL history ({idx}/{total})")
+            if self._fast_skip_existing_history_item(item, existing_counts, source_seen, stats):
+                continue
             item = self._resolve_activity_item(item)
             item = self._remap_simkl_anime_history_item(item)
 
@@ -578,7 +585,7 @@ class SyncService:
                     if val:
                         shows_with_episode_records.add(f"{id_key}:{val}")
 
-            source_seen[key] = source_seen.get(key, 0) + 1
+            self._increment_history_source_seen(source_seen, key)
             # Only add if PMDB has fewer plays than source for this key.
             if existing_counts.get(key, 0) >= source_seen[key]:
                 stats.items_skipped_duplicate += 1
@@ -1211,9 +1218,14 @@ class SyncService:
         tmdb_id = int(tmdb_id)
         if tmdb_id <= 0:
             return []
-        if tmdb_id not in self._anime_seasons_cache:
-            self._anime_seasons_cache[tmdb_id] = list(self._pmdb.get_anime_seasons(tmdb_id))
-        return list(self._anime_seasons_cache[tmdb_id])
+        with self.__class__._shared_cache_lock:
+            cached = self._anime_seasons_cache.get(tmdb_id)
+        if cached is not None:
+            return list(cached)
+        seasons = list(self._pmdb.get_anime_seasons(tmdb_id))
+        with self.__class__._shared_cache_lock:
+            self._anime_seasons_cache[tmdb_id] = list(seasons)
+        return list(seasons)
 
     @staticmethod
     def _map_episode_via_tvdb_season(
@@ -1316,13 +1328,15 @@ class SyncService:
             self._check_cancelled()
             if idx % 50 == 0:
                 self._set_status(f"Resolving Trakt history ({idx}/{total})")
+            if self._fast_skip_existing_history_item(item, existing_counts, source_seen, stats):
+                continue
             item = self._resolve_activity_item(item)
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
                 continue
             stats.items_resolved += 1
-            source_seen[key] = source_seen.get(key, 0) + 1
+            self._increment_history_source_seen(source_seen, key)
             if existing_counts.get(key, 0) >= source_seen[key]:
                 stats.items_skipped_duplicate += 1
                 continue
@@ -2641,6 +2655,42 @@ class SyncService:
             int(existing.get("position_ms", 0) or 0) == int(payload.get("position_ms", 0) or 0)
             and int(existing.get("runtime_ms", 0) or 0) == int(payload.get("runtime_ms", 0) or 0)
         )
+
+    @staticmethod
+    def _increment_history_source_seen(source_seen: dict[str, int], key: str) -> int:
+        next_count = source_seen.get(key, 0) + 1
+        source_seen[key] = next_count
+        return next_count
+
+    def _can_fast_skip_history_item(self, item: dict) -> bool:
+        if not self._watched_identity_key(item):
+            return False
+        if item.get("aggregate_watched_count"):
+            return False
+        if str(item.get("simkl_type", "")).strip().lower() == "anime":
+            return False
+        if self._should_force_anime_re_resolve(item):
+            return False
+        return True
+
+    def _fast_skip_existing_history_item(
+        self,
+        item: dict,
+        existing_counts: dict[str, int],
+        source_seen: dict[str, int],
+        stats: SyncStats,
+    ) -> bool:
+        if not self._can_fast_skip_history_item(item):
+            return False
+        key = self._watched_identity_key(item)
+        if not key:
+            return False
+        seen_count = self._increment_history_source_seen(source_seen, key)
+        if existing_counts.get(key, 0) >= seen_count:
+            stats.items_resolved += 1
+            stats.items_skipped_duplicate += 1
+            return True
+        return False
 
     def _resolve_activity_item(self, item: dict) -> dict:
         if self._should_force_anime_re_resolve(item):

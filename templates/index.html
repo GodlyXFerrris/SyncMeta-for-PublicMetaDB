@@ -655,12 +655,34 @@
     let credentialsHydrated = false;
     let lastStatusRenderKey = '';
     let profileDraftDirty = false;
+    let pollingIntervalMs = 0;
+    let statusFetchInFlight = null;
+    const POLL_RUNNING_MS = 5000;
+    const POLL_IDLE_MS = 30000;
 
     function el(id) { return document.getElementById(id); }
 
     function currentSiteRoot() {
       const origin = window.location.origin || '';
       return origin ? `${origin}/` : '';
+    }
+
+    function setPollingInterval(ms) {
+      const nextMs = Number(ms || 0);
+      if (polling && pollingIntervalMs === nextMs) return;
+      if (polling) {
+        clearInterval(polling);
+        polling = null;
+      }
+      pollingIntervalMs = 0;
+      if (nextMs > 0) {
+        polling = setInterval(() => fetchStatus(false), nextMs);
+        pollingIntervalMs = nextMs;
+      }
+    }
+
+    function refreshPollingForProfile(profile) {
+      setPollingInterval(profile && profile.sync_running ? POLL_RUNNING_MS : POLL_IDLE_MS);
     }
 
     function refreshRedirectUrlHints() {
@@ -2643,8 +2665,8 @@
       el('btn-stop').classList.toggle('hidden', !profile.sync_running);
       el('btn-stop').textContent = stopping ? 'Stopping...' : 'Stop';
       el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Lists';
-      if (profile.sync_running && !polling) polling = setInterval(fetchStatus, 2000);
-      else if (!profile.sync_running && polling) { clearInterval(polling); polling = null; fetchUnresolved(); }
+      refreshPollingForProfile(profile);
+      if (!profile.sync_running) fetchUnresolved();
       updateNextSyncBadge();
       ensureNextSyncTicker();
     }
@@ -3006,17 +3028,27 @@
     }
 
     async function fetchStatus(includeCredentials) {
+      const wantsCredentials = !!includeCredentials;
+      if (!wantsCredentials && statusFetchInFlight) {
+        try {
+          return await statusFetchInFlight;
+        } catch {
+          return lastDashboardProfile || null;
+        }
+      }
+
+      const request = (async () => {
       try {
         const fallbackProfileId = sessionProfileId || el('profile-id').value.trim() || localStorage.getItem(PROFILE_KEY) || '';
         const result = await apiPost('/api/profile/status', {
-          include_credentials: !!includeCredentials,
+          include_credentials: wantsCredentials,
           profile_id: fallbackProfileId,
         });
         if (!result.ok) {
-          if (!includeCredentials && lastDashboardProfile) {
+          if (!wantsCredentials && lastDashboardProfile) {
             return lastDashboardProfile;
           }
-          if (!includeCredentials) renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
+          if (!wantsCredentials) renderEmptyDashboard('Save or load a profile in Settings to enable background sync.');
           return;
         }
         const profile = result.data.profile;
@@ -3025,7 +3057,8 @@
           el('profile-id').value = profile.profile_id;
           localStorage.setItem(PROFILE_KEY, profile.profile_id);
         }
-        if (includeCredentials) {
+        refreshPollingForProfile(profile);
+        if (wantsCredentials) {
           populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
         }
         const renderKey = JSON.stringify({
@@ -3043,19 +3076,29 @@
           profile_id: profile.profile_id || '',
           sync_cancel_requested: !!profile.sync_cancel_requested,
         });
-        if (!includeCredentials && renderKey === lastStatusRenderKey) {
+        if (!wantsCredentials && renderKey === lastStatusRenderKey) {
           return profile;
         }
         lastStatusRenderKey = renderKey;
         renderDashboard(profile);
         return profile;
       } catch {
-        if (!includeCredentials && lastDashboardProfile) {
+        if (!wantsCredentials && lastDashboardProfile) {
           return lastDashboardProfile;
         }
-        if (!includeCredentials) renderEmptyDashboard('Status is temporarily unavailable.');
+        if (!wantsCredentials) renderEmptyDashboard('Status is temporarily unavailable.');
         return null;
+      } finally {
+        if (!wantsCredentials) {
+          statusFetchInFlight = null;
+        }
       }
+      })();
+
+      if (!wantsCredentials) {
+        statusFetchInFlight = request;
+      }
+      return await request;
     }
 
     async function triggerSync(dryRun) {
@@ -3073,7 +3116,7 @@
         showToast(dryRun ? 'List dry run started.' : 'List sync started.', false, true);
         switchView('dashboard');
         fetchStatus();
-        if (!polling) polling = setInterval(fetchStatus, 2000);
+        setPollingInterval(POLL_RUNNING_MS);
       } catch {
         showToast('Network error while starting sync.', true, false);
       }
@@ -3095,7 +3138,7 @@
         pendingClearWatchHistory = false;
         clearingWatchHistory = false;
         fetchStatus();
-        if (!polling) polling = setInterval(fetchStatus, 2000);
+        setPollingInterval(POLL_RUNNING_MS);
       } catch {
         showToast('Network error while starting activity sync.', true, false);
       }
@@ -3181,7 +3224,7 @@
         // Re-render with the server-returned profile so sync_cancel_requested is reflected,
         // then ensure polling is running so we catch the moment sync_running flips to false.
         if (result.data.profile) renderDashboard(result.data.profile);
-        if (!polling) polling = setInterval(fetchStatus, 2000);
+        setPollingInterval(POLL_RUNNING_MS);
         fetchStatus();
       } catch {
         el('btn-stop').disabled = false;
@@ -3213,6 +3256,7 @@
       credentialsHydrated = false;
       lastStatusRenderKey = '';
       clearDraftDirty();
+      setPollingInterval(POLL_IDLE_MS);
       showToast('Logged out.', false, true);
     }
 
@@ -3366,7 +3410,7 @@
       }
     });
 
-    setInterval(fetchStatus, 30000);
+    setPollingInterval(POLL_IDLE_MS);
     document.querySelectorAll('.form-section input').forEach(input => {
       input.addEventListener('input', () => { updateDots(); scheduleSaveDraft(); });
       input.addEventListener('change', () => { updateDots(); scheduleSaveDraft(); });
