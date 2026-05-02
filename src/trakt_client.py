@@ -412,7 +412,8 @@ class TraktClient:
         if not tmdb_id or season is None or number is None:
             return None
         # Season 0 = Trakt specials — PMDB has no S0 concept, skip them.
-        if int(season) == 0:
+        # Episode 0 = pre-season specials/pilots stored as E0 — skip these too.
+        if int(season) == 0 or int(number) == 0:
             return None
         return {
             "tmdb_id": int(tmdb_id),
@@ -464,7 +465,8 @@ class TraktClient:
         if not tmdb_id or runtime in (None, 0) or progress is None or season is None or number is None:
             return None
         # Season 0 = Trakt specials — PMDB has no S0 concept, skip them.
-        if int(season) == 0:
+        # Episode 0 = pre-season specials/pilots stored as E0 — skip these too.
+        if int(season) == 0 or int(number) == 0:
             return None
         runtime_ms = int(float(runtime) * 60_000)
         position_ms = int(round(runtime_ms * (float(progress) / 100.0)))
