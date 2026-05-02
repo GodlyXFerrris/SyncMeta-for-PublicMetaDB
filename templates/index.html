@@ -294,7 +294,7 @@
           <div id="dry-run-preview-container" class="hidden"></div>
           <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
         </div>
-        <div class="panel" id="unresolved-panel" style="display:none">
+        <div class="panel" id="unresolved-panel">
           <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
           <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
         </div>
@@ -2806,11 +2806,11 @@
     function renderUnresolvedPanel(items) {
       const panel = el('unresolved-panel');
       const body = el('unresolved-body');
+      panel.style.display = '';
       if (!items || items.length === 0) {
-        panel.style.display = 'none';
+        body.innerHTML = '<div class="empty">No unresolved items.</div>';
         return;
       }
-      panel.style.display = '';
       const animeItems = items.filter(item => String(item.simkl_type || '').toLowerCase() === 'anime');
       const regularItems = items.filter(item => String(item.simkl_type || '').toLowerCase() !== 'anime');
       const rows = items.map(item => {
