@@ -98,10 +98,14 @@ def _normalize_activity_state(raw_state: dict | None) -> dict:
         return {
             "simkl_history_cursor": "",
             "trakt_history_cursor": "",
+            "simkl_activities_ts": "",
+            "trakt_activities_ts": "",
         }
     return {
         "simkl_history_cursor": str(raw_state.get("simkl_history_cursor", "") or "").strip(),
         "trakt_history_cursor": str(raw_state.get("trakt_history_cursor", "") or "").strip(),
+        "simkl_activities_ts": str(raw_state.get("simkl_activities_ts", "") or "").strip(),
+        "trakt_activities_ts": str(raw_state.get("trakt_activities_ts", "") or "").strip(),
     }
 
 
@@ -874,6 +878,15 @@ class ProfileStore:
                         state["simkl_history_cursor"] = history_cursor
                     if "trakt" in source_name:
                         state["trakt_history_cursor"] = history_cursor
+            # Persist source freshness timestamps regardless of the result type —
+            # any row from a source may carry an updated activities_ts.
+            source_name = str(row.get("source_name", "")).strip().lower()
+            activities_ts = str(row.get("activities_ts", "") or "").strip()
+            if activities_ts:
+                if "simkl" in source_name:
+                    state["simkl_activities_ts"] = activities_ts
+                if "trakt" in source_name:
+                    state["trakt_activities_ts"] = activities_ts
         profile["activity_results"] = merged
         profile["activity_state"] = state
 
@@ -1660,6 +1673,8 @@ class ProfileStore:
             activity_state = _normalize_activity_state(profile.get("activity_state"))
             activity_state["simkl_history_cursor"] = ""
             activity_state["trakt_history_cursor"] = ""
+            activity_state["simkl_activities_ts"] = ""
+            activity_state["trakt_activities_ts"] = ""
             profile["activity_state"] = activity_state
 
             activity_results = copy.deepcopy(profile.get("activity_results", {}))

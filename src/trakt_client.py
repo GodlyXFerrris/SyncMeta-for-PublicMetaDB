@@ -116,6 +116,11 @@ class TraktClient:
     def _post(self, path: str, data: dict) -> dict | list | None:
         return self._request("POST", path, json=data)
 
+    def get_last_activities(self) -> dict:
+        """Return Trakt /sync/last_activities.  Raises on auth/network errors."""
+        data = self._get("/sync/last_activities")
+        return data if isinstance(data, dict) else {}
+
     def request_device_code(self) -> dict:
         data = self._post("/oauth/device/code", {"client_id": self._config.client_id})
         if not data:

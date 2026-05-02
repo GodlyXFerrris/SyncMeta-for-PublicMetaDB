@@ -82,6 +82,7 @@ class SyncStats:
     items_skipped_unresolved: int = 0
     errors: list[str] = field(default_factory=list)
     history_cursor: str = ""
+    activities_ts: str = ""  # last-seen source activities timestamp (for freshness skip)
     unresolved_items: list[dict] = field(default_factory=list)
     phase_timings: dict[str, float] = field(default_factory=dict)
     match_breakdown: dict[str, int] = field(default_factory=dict)
@@ -301,6 +302,30 @@ class SyncService:
         logger.info("   modes: %s", ", ".join(k for k, v in self._sync_modes.items() if v) or "none")
         logger.info("═" * 60)
 
+        # ── Phase 0: Source freshness check ───────────────────────────────────
+        # Fetch each source's last-activities timestamp (one cheap API call per
+        # source).  If it matches the stored value from the previous sync, that
+        # source hasn't changed at all — skip it entirely.  On first run the
+        # stored value is "" so the check always falls through.
+        # full_history_sync overrides the skip for history.
+        force = self._config.sync.full_history_sync
+        simkl_ts = self._fetch_simkl_activities_ts()
+        trakt_ts = self._fetch_trakt_activities_ts()
+        simkl_unchanged = bool(
+            not force
+            and simkl_ts
+            and simkl_ts == self._config.sync.simkl_activities_ts
+        )
+        trakt_unchanged = bool(
+            not force
+            and trakt_ts
+            and trakt_ts == self._config.sync.trakt_activities_ts
+        )
+        if simkl_unchanged:
+            logger.info("SIMKL unchanged since last sync — skipping SIMKL sources")
+        if trakt_unchanged:
+            logger.info("Trakt unchanged since last sync — skipping Trakt sources")
+
         all_stats: list[SyncStats] = []
         if self._sync_modes["lists"]:
             logger.info("── List Sync ──────────────────────────────────────────")
@@ -309,37 +334,46 @@ class SyncService:
                 self._config.anilist.enabled
                 and bool(self._config.anilist.selected_statuses)
             )
-            if anilist_enabled:
-                # Run SIMKL and AniList concurrently — they fetch from independent
-                # APIs and write to distinct PMDB lists so there is no data race.
-                # ItemMatcher already uses a threading.Lock for its shared cache.
-                # NOTE: SyncCancelled must be detected via the future's exception
-                # and re-raised here, not swallowed by the generic except clause.
-                cancelled = False
-                pool = ThreadPoolExecutor(max_workers=2)
-                shutdown_wait = True
+            if not simkl_unchanged:
+                if anilist_enabled:
+                    # Run SIMKL and AniList concurrently — they fetch from independent
+                    # APIs and write to distinct PMDB lists so there is no data race.
+                    # ItemMatcher already uses a threading.Lock for its shared cache.
+                    # NOTE: SyncCancelled must be detected via the future's exception
+                    # and re-raised here, not swallowed by the generic except clause.
+                    cancelled = False
+                    pool = ThreadPoolExecutor(max_workers=2)
+                    shutdown_wait = True
+                    try:
+                        future_simkl = pool.submit(self._sync_simkl)
+                        future_anilist = pool.submit(self._sync_anilist)
+                        for future in self._iter_completed_futures([future_simkl, future_anilist]):
+                            try:
+                                all_stats.extend(future.result())
+                            except SyncCancelled:
+                                cancelled = True
+                            except Exception as exc:
+                                logger.error("Provider sync failed: %s", exc)
+                    except SyncCancelled:
+                        shutdown_wait = False
+                        raise
+                    finally:
+                        pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
+                    if cancelled:
+                        raise SyncCancelled("Sync stopped by user")
+                else:
+                    all_stats.extend(self._sync_simkl())
+            elif anilist_enabled:
+                # SIMKL skipped but AniList still needs to run independently
                 try:
-                    future_simkl = pool.submit(self._sync_simkl)
-                    future_anilist = pool.submit(self._sync_anilist)
-                    for future in self._iter_completed_futures([future_simkl, future_anilist]):
-                        try:
-                            all_stats.extend(future.result())
-                        except SyncCancelled:
-                            cancelled = True
-                        except Exception as exc:
-                            logger.error("Provider sync failed: %s", exc)
+                    all_stats.extend(self._sync_anilist())
                 except SyncCancelled:
-                    shutdown_wait = False
                     raise
-                finally:
-                    pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
-                if cancelled:
-                    raise SyncCancelled("Sync stopped by user")
-            else:
-                all_stats.extend(self._sync_simkl())
+                except Exception as exc:
+                    logger.error("AniList sync failed: %s", exc)
             self._publish_progress(all_stats, force=True)
 
-            if self._config.trakt.enabled:
+            if self._config.trakt.enabled and not trakt_unchanged:
                 try:
                     all_stats.extend(self._sync_trakt())
                 except SyncCancelled:
@@ -371,16 +405,38 @@ class SyncService:
         if self._sync_modes["history"] or self._sync_modes["resume"]:
             logger.info("── Watch History / Resume ─────────────────────────────")
             activity_rows: list[SyncStats] = []
-            if self._config.simkl.access_token:
+            if self._config.simkl.access_token and not simkl_unchanged:
                 activity_rows.extend(self._sync_simkl_activity())
+            elif self._config.simkl.access_token and simkl_unchanged:
+                logger.info("SIMKL history/resume skipped — source unchanged")
             if self._config.trakt.enabled:
-                activity_rows.extend(self._sync_trakt_activity())
+                # Trakt history uses its own cursor; skip flag still applies to
+                # resume progress (no cursor there).
+                activity_rows.extend(self._sync_trakt_activity(trakt_unchanged=trakt_unchanged))
+            # Stamp freshness timestamps before merging so profile_store saves them.
+            for row in activity_rows:
+                if not row.activities_ts:
+                    src = row.source_name.lower()
+                    if "simkl" in src and simkl_ts:
+                        row.activities_ts = simkl_ts
+                    elif "trakt" in src and trakt_ts:
+                        row.activities_ts = trakt_ts
             all_stats.extend(self._merge_activity_stats(activity_rows))
             self._publish_progress(all_stats, force=True)
 
         if self._sync_modes["lists"] and not self._config.sync.dry_run and self._config.sync.delete_disabled_lists:
             desired_names = {stats.list_name for stats in all_stats if stats.list_name}
             self._delete_disabled_lists(desired_names)
+
+        # Stamp freshness timestamps on all stats rows so profile_store can
+        # persist them even if no activity (history/resume) rows were emitted.
+        for row in all_stats:
+            if not row.activities_ts:
+                src = row.source_name.lower()
+                if "simkl" in src and simkl_ts:
+                    row.activities_ts = simkl_ts
+                elif "trakt" in src and trakt_ts:
+                    row.activities_ts = trakt_ts
 
         self._set_status("Finalizing sync results")
         self._log_results(all_stats)
@@ -501,14 +557,17 @@ class SyncService:
 
         return stats
 
-    def _sync_trakt_activity(self) -> list[SyncStats]:
+    def _sync_trakt_activity(self, trakt_unchanged: bool = False) -> list[SyncStats]:
         stats: list[SyncStats] = []
 
         if self._config.sync.trakt_sync_watched_history:
             stats.append(self._sync_trakt_watched_history())
 
-        if self._config.sync.trakt_sync_resume_progress:
+        # Resume progress has no cursor; skip when Trakt unchanged.
+        if self._config.sync.trakt_sync_resume_progress and not trakt_unchanged:
             stats.append(self._sync_trakt_resume_progress())
+        elif self._config.sync.trakt_sync_resume_progress and trakt_unchanged:
+            logger.info("Trakt resume progress skipped — source unchanged")
 
         return stats
 
@@ -1310,15 +1369,8 @@ class SyncService:
             stats.errors.append(str(exc))
             return stats
 
-        try:
-            existing_items = self._pmdb.get_watched_history()
-        except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
-            return stats
-
         stats.items_fetched = len(items)
-        # Advance the cursor to the latest watched_at seen in this batch so the
-        # next incremental sync only fetches new events from Trakt.
+        # Advance the cursor to the latest watched_at seen in this batch.
         if items:
             latest = max(
                 (str(item.get("watched_at") or "").strip() for item in items),
@@ -1326,8 +1378,17 @@ class SyncService:
             )
             stats.history_cursor = latest if latest > cursor else cursor
         else:
-            # Nothing new — keep the existing cursor so we don't regress.
+            # Nothing new — keep existing cursor and return immediately.
+            # Skip the expensive PMDB history fetch when there's nothing to add.
             stats.history_cursor = cursor
+            logger.info("Trakt history: no new events since cursor — skipping PMDB fetch")
+            return stats
+
+        try:
+            existing_items = self._pmdb.get_watched_history()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            return stats
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:
@@ -2817,6 +2878,30 @@ class SyncService:
             aggregate.source_name = " + ".join(sorted(existing_sources))
 
         return [grouped[key] for key in ("watch_history", "resume_progress") if key in grouped]
+
+    def _fetch_simkl_activities_ts(self) -> str:
+        """Return SIMKL's top-level 'all' activities timestamp, or '' on failure."""
+        if not self._config.simkl.access_token:
+            return ""
+        try:
+            data = self._simkl.get_activities() or {}
+            ts = str(data.get("all", "") or "").strip()
+            return ts
+        except Exception as exc:
+            logger.debug("Could not fetch SIMKL activities: %s", exc)
+            return ""
+
+    def _fetch_trakt_activities_ts(self) -> str:
+        """Return Trakt's top-level 'all' last_activities timestamp, or '' on failure."""
+        if not self._config.trakt.enabled:
+            return ""
+        try:
+            data = self._trakt.get_last_activities()
+            ts = str(data.get("all", "") or "").strip()
+            return ts
+        except Exception as exc:
+            logger.debug("Could not fetch Trakt last_activities: %s", exc)
+            return ""
 
     @staticmethod
     def _latest_history_cursor(items: list[dict], existing_cursor: str = "") -> str:

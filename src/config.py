@@ -91,6 +91,8 @@ class SyncConfig:
     trakt_sync_watched_history: bool = False
     simkl_history_cursor: str = ""
     trakt_history_cursor: str = ""
+    simkl_activities_ts: str = ""   # last-seen SIMKL /sync/activities "all" timestamp
+    trakt_activities_ts: str = ""   # last-seen Trakt /sync/last_activities "all" timestamp
     full_history_sync: bool = False  # True = ignore cursor, fetch everything
     trakt_watched_history_interval_seconds: int = 86400
     trakt_sync_full_watch_counts: bool = False
