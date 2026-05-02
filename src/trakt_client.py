@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 from .config import TraktConfig
 
 logger = logging.getLogger(__name__)
-REQUEST_TIMEOUT = (5, 12)
+REQUEST_TIMEOUT = (5, 6)
 
 DEFAULT_CATALOGS = {
     "trending-movies": {
@@ -220,10 +220,10 @@ class TraktClient:
                 items.append(normalized)
         return items
 
-    def get_watched_history(self, since: str | None = None) -> list[dict]:
+    def get_watched_history(self, since: str | None = None, status_callback=None) -> list[dict]:
         history: list[dict] = []
-        history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry, since=since))
-        history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry, since=since))
+        history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry, since=since, status_callback=status_callback, label="movies"))
+        history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry, since=since, status_callback=status_callback, label="episodes"))
         return history
 
     def get_playback_progress(self) -> list[dict]:
@@ -232,11 +232,14 @@ class TraktClient:
         progress.extend(self._get_paginated_playback("/sync/playback/episodes", self._normalize_episode_playback_entry))
         return progress
 
-    def _get_paginated_history(self, path: str, normalizer, since: str | None = None) -> list[dict]:
+    def _get_paginated_history(self, path: str, normalizer, since: str | None = None, status_callback=None, label: str = "") -> list[dict]:
         items: list[dict] = []
         page = 1
         while True:
             self._check_cancelled()
+            if status_callback:
+                desc = label or path.split("/")[-1]
+                status_callback(f"Fetching Trakt history ({desc}: {len(items)} fetched, page {page}…)")
             params: dict = {"page": page, "limit": 100, "extended": "full"}
             if since:
                 params["start_at"] = since

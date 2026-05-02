@@ -16,7 +16,7 @@ from . import fribb_client as _fribb
 from . import anime_mapping_store as _anime_maps
 
 logger = logging.getLogger(__name__)
-REQUEST_TIMEOUT = (5, 12)
+REQUEST_TIMEOUT = (5, 6)
 
 # Status codes from SIMKL that map to our list names
 SIMKL_STATUS_WATCHING = "watching"

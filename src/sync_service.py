@@ -1362,9 +1362,9 @@ class SyncService:
         full_sync = self._config.sync.full_history_sync or not cursor
         since = None if full_sync else cursor
 
-        self._set_status("Fetching Trakt watched history")
+        self._set_status("Fetching Trakt watched history…")
         try:
-            items = self._trakt.get_watched_history(since=since)
+            items = self._trakt.get_watched_history(since=since, status_callback=self._set_status)
         except TraktAuthenticationError as exc:
             stats.errors.append(str(exc))
             return stats
