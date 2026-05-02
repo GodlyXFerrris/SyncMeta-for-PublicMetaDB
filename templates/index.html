@@ -373,18 +373,12 @@
                 <div class="conn-card form-section">
                   <div class="conn-card-title"><span class="dot" id="dot-simkl"></span> SIMKL</div>
                   <div class="conn-card-desc">Movies, shows, anime, watch history, and PIN auth.</div>
-                  <div class="provider-guide">
-                    <div class="provider-guide-title">App Setup</div>
-                    <div class="provider-guide-list">
-                      <div>1. Open <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">SIMKL Developer Settings</a>.</div>
-                      <div>2. Create or open your app. Use the redirect URL below if asked.</div>
-                    </div>
-                    <div class="form-row" style="margin-top:10px;margin-bottom:0">
-                      <label>Redirect URL</label>
-                      <div class="copy-row">
-                        <input type="text" id="simkl-redirect-url" readonly value="">
-                        <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('simkl-redirect-url')">Copy</button>
-                      </div>
+                  <div class="hint" style="margin-bottom:10px">Create an app at <a href="https://simkl.com/settings/developer/" target="_blank" rel="noopener">simkl.com/settings/developer</a>, then paste the credentials below. Use the redirect URL if asked.</div>
+                  <div class="form-row">
+                    <label>Redirect URL</label>
+                    <div class="copy-row">
+                      <input type="text" id="simkl-redirect-url" readonly value="">
+                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('simkl-redirect-url')">Copy</button>
                     </div>
                   </div>
                   <div class="form-row"><label>Client ID</label><input type="text" id="simkl-client-id" placeholder="From simkl.com/settings/developer" autocomplete="off"></div>
@@ -409,18 +403,12 @@
                   <div class="conn-card-desc">Watchlist, liked lists, personal lists, history, and device auth.</div>
                   <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
                   <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
-                  <div class="provider-guide">
-                    <div class="provider-guide-title">App Setup</div>
-                    <div class="provider-guide-list">
-                      <div>1. Open <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">Trakt API app settings</a>.</div>
-                      <div>2. Use the redirect URL below if asked. Copy Client ID and Secret here.</div>
-                    </div>
-                    <div class="form-row" style="margin-top:10px;margin-bottom:0">
-                      <label>Redirect URI</label>
-                      <div class="copy-row">
-                        <input type="text" id="trakt-redirect-url" readonly value="">
-                        <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('trakt-redirect-url')">Copy</button>
-                      </div>
+                  <div class="hint" style="margin-bottom:10px">Create an app at <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">trakt.tv/oauth/applications</a>, then paste the credentials below. Use the redirect URI if asked.</div>
+                  <div class="form-row">
+                    <label>Redirect URI</label>
+                    <div class="copy-row">
+                      <input type="text" id="trakt-redirect-url" readonly value="">
+                      <button class="btn btn-sm" type="button" onclick="copyRedirectUrl('trakt-redirect-url')">Copy</button>
                     </div>
                   </div>
                   <div class="form-row"><label>Client ID</label><input type="text" id="trakt-client-id" placeholder="From Trakt API app settings" autocomplete="off"></div>
@@ -538,18 +526,14 @@
               <div class="settings-page-title">Behavior</div>
               <div class="settings-page-desc">Control how and when SyncMeta fetches and pushes data.</div>
               <div class="settings-group form-section">
-                <div class="settings-group-title">Background Sync</div>
-                <div class="settings-group-desc">Automatically keep your lists updated on a schedule.</div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Keep syncing automatically in the background</label></div>
-                <div class="form-row" style="margin-top:12px;margin-bottom:0">
+                <div class="settings-group-title">List Sync</div>
+                <div class="settings-group-desc">Schedule and behavior for syncing lists from your connected sources into PublicMetaDB.</div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-sync" checked><span class="slider"></span></label><label>Sync lists automatically in the background</label></div>
+                <div class="form-row" style="margin-top:12px">
                   <label>Update Every (Seconds)</label>
                   <input type="number" id="opt-interval-seconds" min="600" step="1" value="43200" onblur="if(parseInt(this.value)<600||!this.value)this.value=600">
                   <div class="hint">Minimum 600 s (10 min). Default 43200 s (12 h). Scheduled from end of last successful run.</div>
                 </div>
-              </div>
-              <div class="settings-group form-section">
-                <div class="settings-group-title">List Behavior</div>
-                <div class="settings-group-desc">Control what happens to items and lists when sources change.</div>
                 <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-remove-missing"><span class="slider"></span></label><label>Remove items no longer in source</label></div>
                 <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-delete-disabled-lists"><span class="slider"></span></label><label>Delete PublicMetaDB lists when disabled in SyncMeta</label></div>
               </div>
