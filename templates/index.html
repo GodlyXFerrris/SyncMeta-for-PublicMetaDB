@@ -164,7 +164,17 @@
     .footer-links{display:flex;gap:16px;flex-wrap:wrap}
     .footer-links a{font-size:12px;color:var(--z500);text-decoration:none}
     .footer-links a:hover{color:var(--white)}
-    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}.settings-layout{grid-template-columns:1fr}.settings-sidebar{position:static}.conn-grid{grid-template-columns:1fr}}
+    .dash-topbar{display:flex;align-items:center;justify-content:space-between;padding:20px 0 16px;gap:12px;flex-wrap:wrap}
+    .dash-topbar-left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;flex-wrap:wrap}
+    .dash-topbar-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+    .dash-grid{display:grid;grid-template-columns:1fr 300px;gap:16px;align-items:start;margin-top:0}
+    .dash-col{display:flex;flex-direction:column}
+    .dash-col .panel{margin-bottom:16px}
+    .dash-col .panel:last-child{margin-bottom:0}
+    .conn-card-pmdb{display:flex;align-items:flex-start;gap:24px}
+    .conn-card-pmdb-meta{min-width:180px;flex-shrink:0}
+    .conn-card-pmdb-field{flex:1;min-width:0}
+    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}.settings-layout{grid-template-columns:1fr}.settings-sidebar{position:static}.conn-grid{grid-template-columns:1fr}.dash-grid{grid-template-columns:1fr}.conn-card-pmdb{flex-direction:column;gap:12px}.conn-card-pmdb-meta{min-width:0}}
     .settings-layout{display:grid;grid-template-columns:190px 1fr;gap:20px;align-items:start;padding:24px 0 64px}
     .settings-sidebar{position:sticky;top:72px}
     .settings-nav{background:transparent;padding:4px}
@@ -234,51 +244,70 @@
   <div class="page">
     <div class="app-section" id="app">
       <div id="view-dashboard" style="display:none">
-        <div class="cards" id="cards"></div>
-        <div class="actions-bar" style="margin-bottom:20px">
-          <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Lists</span></button>
-          <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run Lists</button>
-          <button class="btn btn-danger hidden" id="btn-stop" onclick="stopSync()">Stop</button>
-          <span class="next-sync-badge hidden" id="next-sync-badge" title="Time until the next background sync"><span class="next-sync-dot"></span><span id="next-sync-text">Next sync —</span></span>
-          <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
+        <!-- Top bar: status + actions -->
+        <div class="dash-topbar">
+          <div class="dash-topbar-left">
+            <span class="next-sync-badge off" id="next-sync-badge" title="Time until the next background sync"><span class="next-sync-dot"></span><span id="next-sync-text">Next sync —</span></span>
+            <span class="actions-meta" id="sync-hint">Save a profile in Settings to enable background sync.</span>
+          </div>
+          <div class="dash-topbar-right">
+            <button class="btn btn-primary" id="btn-sync" onclick="triggerSync(false)"><span id="sync-label">Sync Lists</span></button>
+            <button class="btn" id="btn-dry" onclick="triggerSync(true)">Dry Run</button>
+            <button class="btn btn-danger hidden" id="btn-stop" onclick="stopSync()">Stop</button>
+          </div>
         </div>
+
+        <!-- Stat cards -->
+        <div class="cards" id="cards"></div>
+
+        <!-- Activity sync (hidden until configured) -->
         <div class="panel hidden" id="activity-panel">
-            <div class="panel-header">
-              <span>Activity Sync</span>
-              <div class="actions-bar" style="margin-top:0">
-                <button class="btn btn-sm" id="btn-sync-history" type="button" onclick="triggerActivitySync('history')" title="Full sync — fetches all history and adds any missing plays">Sync Watch History</button>
-                <button class="btn btn-sm" id="btn-clear-history-arm" type="button" onclick="armClearWatchHistory()">Clear PMDB History</button>
-                <button class="btn btn-sm btn-danger hidden" id="btn-clear-history-confirm" type="button" onclick="clearWatchHistory()">Confirm Clear</button>
-                <button class="btn btn-sm btn-ghost hidden" id="btn-clear-history-cancel" type="button" onclick="cancelClearWatchHistory()">Cancel</button>
-                <button class="btn btn-sm" id="btn-sync-resume" type="button" onclick="triggerActivitySync('resume')">Sync Resume Progress</button>
-              </div>
+          <div class="panel-header">
+            <span>Activity Sync</span>
+            <div class="actions-bar" style="margin-top:0">
+              <button class="btn btn-sm" id="btn-sync-history" type="button" onclick="triggerActivitySync('history')" title="Full sync — fetches all history and adds any missing plays">Sync Watch History</button>
+              <button class="btn btn-sm" id="btn-clear-history-arm" type="button" onclick="armClearWatchHistory()">Clear PMDB History</button>
+              <button class="btn btn-sm btn-danger hidden" id="btn-clear-history-confirm" type="button" onclick="clearWatchHistory()">Confirm Clear</button>
+              <button class="btn btn-sm btn-ghost hidden" id="btn-clear-history-cancel" type="button" onclick="cancelClearWatchHistory()">Cancel</button>
+              <button class="btn btn-sm" id="btn-sync-resume" type="button" onclick="triggerActivitySync('resume')">Sync Resume Progress</button>
             </div>
+          </div>
           <div class="panel-body">
             <div class="cards activity-cards" id="activity-cards"></div>
           </div>
         </div>
+
+        <!-- Anime health (hidden until relevant) -->
         <div class="panel" id="anime-health-panel" style="display:none">
           <div class="panel-header"><span>Anime Health</span><span id="anime-health-summary" class="history-time"></span></div>
           <div class="panel-body">
             <div class="cards activity-cards" id="anime-health-cards"></div>
           </div>
         </div>
-        <div class="panel">
-          <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
-          <div class="panel-body" style="padding-bottom:0">
-            <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+
+        <!-- 2-col grid: results wide, history sidebar -->
+        <div class="dash-grid">
+          <div class="dash-col">
+            <div class="panel">
+              <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
+              <div class="panel-body" style="padding-bottom:0">
+                <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+              </div>
+              <div id="provider-progress" class="hidden"></div>
+              <div id="dry-run-preview-container" class="hidden"></div>
+              <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
+            </div>
+            <div class="panel" id="unresolved-panel" style="display:none">
+              <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
+              <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
+            </div>
           </div>
-          <div id="provider-progress" class="hidden"></div>
-          <div id="dry-run-preview-container" class="hidden"></div>
-          <div id="results-body"><div class="empty">No sync results yet. Save a profile in Settings and the server will keep it synced automatically.</div></div>
-        </div>
-        <div class="panel" id="unresolved-panel" style="display:none">
-          <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
-          <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header">Sync History</div>
-          <div id="history-body"><div class="empty">No history yet.</div></div>
+          <div class="dash-col">
+            <div class="panel">
+              <div class="panel-header">Sync History</div>
+              <div id="history-body"><div class="empty">No history yet.</div></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -368,9 +397,15 @@
               <div class="settings-page-title">Connections</div>
               <div class="settings-page-desc">Connect your accounts. PublicMetaDB is required; all others are optional.</div>
               <div class="conn-card form-section" style="margin-bottom:14px">
-                <div class="conn-card-title"><span class="dot" id="dot-pmdb"></span> PublicMetaDB</div>
-                <div class="conn-card-desc">Destination. All synced lists and activity go here.</div>
-                <div class="form-row" style="margin-bottom:0"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key from PublicMetaDB</a></div></div>
+                <div class="conn-card-pmdb">
+                  <div class="conn-card-pmdb-meta">
+                    <div class="conn-card-title" style="margin-bottom:4px"><span class="dot" id="dot-pmdb"></span> PublicMetaDB</div>
+                    <div class="conn-card-desc" style="margin-bottom:0">Destination. All synced lists and activity go here.</div>
+                  </div>
+                  <div class="conn-card-pmdb-field">
+                    <div class="form-row" style="margin-bottom:0"><label>API Key</label><input type="password" id="pmdb-api-key" placeholder="pm-..." autocomplete="off"><div class="hint"><a href="https://publicmetadb.com/api-docs" target="_blank" rel="noopener">Get your API key from PublicMetaDB</a></div></div>
+                  </div>
+                </div>
               </div>
               <div class="conn-grid">
                 <div class="conn-card form-section">
