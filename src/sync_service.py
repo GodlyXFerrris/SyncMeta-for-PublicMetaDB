@@ -2242,13 +2242,17 @@ class SyncService:
         }
         deduped_items: list[dict] = []
         pending_seen: set[str] = set()
+        pending_identity_keys: set[str] = set()
         for item in items:
-            key = self._watched_identity_key(item)
+            key = self._watched_write_key(item)
             if key and key in pending_seen:
                 stats.items_skipped_duplicate += 1
                 continue
             if key:
                 pending_seen.add(key)
+            identity_key = self._watched_identity_key(item)
+            if identity_key:
+                pending_identity_keys.add(identity_key)
             deduped_items.append(item)
 
         items = deduped_items
@@ -2309,7 +2313,7 @@ class SyncService:
             return
 
         actual_added = 0
-        for key in pending_seen:
+        for key in pending_identity_keys:
             actual_added += max(0, int(refreshed_counts.get(key, 0) or 0) - int(existing_counts_before.get(key, 0) or 0))
 
         if actual_added < successful_writes:
@@ -2321,7 +2325,7 @@ class SyncService:
                 corrected_duplicates,
             )
 
-        for key in pending_seen:
+        for key in pending_identity_keys:
             if key:
                 existing_counts[key] = int(refreshed_counts.get(key, 0) or 0)
 
@@ -2612,6 +2616,14 @@ class SyncService:
                 continue
             counts[key] = counts.get(key, 0) + 1
         return counts
+
+    @staticmethod
+    def _watched_write_key(item: dict) -> str:
+        identity_key = SyncService._watched_identity_key(item)
+        if not identity_key:
+            return ""
+        watched_at = str(item.get("watched_at") or "").strip()
+        return f"{identity_key}:{watched_at}"
 
     @staticmethod
     def _resume_key(item: dict) -> str:

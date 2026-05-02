@@ -1747,6 +1747,42 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(stats.items_skipped_duplicate, 1)
         self.assertEqual(len(pmdb.watched), 1)
 
+    def test_trakt_watched_history_keeps_distinct_repeat_watches_with_different_timestamps(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_watched_history=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config)
+        pmdb = StubPMDBClient()
+        service._trakt = StubRepeatedWatchTraktClient()
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        watched_stats = next(item for item in results if item.display_name == "Watch History")
+
+        self.assertEqual(watched_stats.items_fetched, 2)
+        self.assertEqual(watched_stats.items_added, 2)
+        self.assertEqual(watched_stats.items_skipped_duplicate, 0)
+        self.assertEqual(len(pmdb.watched), 2)
+
     def test_simkl_anime_history_does_not_backfill_pmdb_external_ids(self) -> None:
         class DirectAnimeSimklClient(StubSimklClient):
             def get_watched_history(self, since: str | None = None) -> list[dict]:
