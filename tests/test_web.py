@@ -56,6 +56,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("personal created lists, liked lists, and selected public Trakt lists", html)
         self.assertIn("personal or public-style catalog lists", html)
         self.assertIn("Watch History Source", html)
+        self.assertIn("Sync watch history automatically in the background", html)
+        self.assertIn("Watch History Update Every (Seconds)", html)
+        self.assertIn("Minimum 86400 seconds (24h)", html)
         self.assertIn("Only import SIMKL anime watch history", html)
         self.assertIn("Resume Progress Source", html)
         self.assertIn("Activity Sync", html)
@@ -63,7 +66,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Watch History", html)
         self.assertIn("Clear PMDB History", html)
         self.assertIn("Sync Resume Progress", html)
-        self.assertIn("Watch history only runs from the dashboard button", html)
+        self.assertIn("Watch history can run manually from the dashboard button or automatically on the schedule above", html)
         self.assertIn("Resume progress also refreshes automatically every 10 minutes while background sync is on", html)
         self.assertIn("Watched history imports only add items that are not already watched in PublicMetaDB", html)
         self.assertIn("RESULTS_PAGE_SIZE = 25", html)
@@ -808,7 +811,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["status"], "started")
         self.assertEqual(data["mode"], "history")
         thread_args = mock_thread.call_args.kwargs["args"]
-        self.assertEqual(thread_args[2], {"lists": False, "history": True, "resume": False})
+        self.assertEqual(thread_args[2], {"lists": False, "history": True, "resume": False, "full_history": True})
 
     @patch("web.PublicMetaDBClient.add_item_to_list")
     @patch("web._resolve_unresolved_item_automatically")

@@ -92,7 +92,7 @@ class SyncConfig:
     simkl_history_cursor: str = ""
     trakt_history_cursor: str = ""
     full_history_sync: bool = False  # True = ignore cursor, fetch everything
-    trakt_watched_history_interval_seconds: int = 43200
+    trakt_watched_history_interval_seconds: int = 86400
     trakt_sync_full_watch_counts: bool = False
     trakt_reconcile_watched_history: bool = False
     trakt_sync_resume_progress: bool = False
@@ -167,8 +167,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.simkl_sync_resume_progress = os.getenv("SIMKL_SYNC_RESUME_PROGRESS", "false").lower() == "true"
     cfg.sync.simkl_resume_use_next_up_fallback = os.getenv("SIMKL_RESUME_USE_NEXT_UP_FALLBACK", "false").lower() == "true"
     cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
-    watched_interval = os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS", "43200")
-    cfg.sync.trakt_watched_history_interval_seconds = int(watched_interval) if watched_interval.isdigit() else 43200
+    watched_interval = os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS", "86400")
+    cfg.sync.trakt_watched_history_interval_seconds = int(watched_interval) if watched_interval.isdigit() else 86400
     cfg.sync.trakt_sync_full_watch_counts = os.getenv("TRAKT_SYNC_FULL_WATCH_COUNTS", "false").lower() == "true"
     cfg.sync.trakt_reconcile_watched_history = os.getenv("TRAKT_RECONCILE_WATCHED_HISTORY", "false").lower() == "true"
     cfg.sync.trakt_sync_resume_progress = os.getenv("TRAKT_SYNC_RESUME_PROGRESS", "false").lower() == "true"

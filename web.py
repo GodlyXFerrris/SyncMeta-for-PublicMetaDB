@@ -225,7 +225,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             trakt_sync_watched_history=modes["history"] and options["activity_history_source"] == "trakt",
             simkl_history_cursor=str(activity_state.get("simkl_history_cursor", "") or "").strip(),
             trakt_history_cursor=str(activity_state.get("trakt_history_cursor", "") or "").strip(),
-            full_history_sync=bool(isinstance(sync_modes, dict) and sync_modes.get("history")),
+            full_history_sync=bool(isinstance(sync_modes, dict) and sync_modes.get("full_history")),
             trakt_watched_history_interval_seconds=options["trakt_watched_history_interval_seconds"],
             trakt_sync_full_watch_counts=False,
             trakt_reconcile_watched_history=False,
@@ -1411,6 +1411,7 @@ def api_profile_activity_sync():
         "lists": False,
         "history": mode == "history",
         "resume": mode == "resume",
+        "full_history": mode == "history",
     }
 
     try:

@@ -75,7 +75,7 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertIn("credentials_encrypted", payload["profiles"][created["profile_id"]])
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
         self.assertEqual(loaded["options"]["interval_seconds"], 600)
-        self.assertEqual(loaded["options"]["trakt_watched_history_interval_seconds"], 43200)
+        self.assertEqual(loaded["options"]["trakt_watched_history_interval_seconds"], 86400)
         self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(loaded["options"]["simkl_visibility"], "private")
         self.assertEqual(loaded["options"]["trakt_public_visibility"], "public")
@@ -97,19 +97,26 @@ class ProfileStoreTests(unittest.TestCase):
         loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
         self.assertFalse(loaded["sync_running"])
 
-    def test_rejects_interval_below_minimum(self) -> None:
-        with self.assertRaises(ValueError):
-            self.store.create_profile("secret", self.credentials, {
-                **self.options,
-                "interval_seconds": MIN_SYNC_INTERVAL_SECONDS - 1,
-            })
+    def test_interval_below_minimum_is_clamped(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "interval_seconds": MIN_SYNC_INTERVAL_SECONDS - 1,
+        })
 
-    def test_rejects_watched_history_interval_below_minimum(self) -> None:
-        with self.assertRaises(ValueError):
-            self.store.create_profile("secret", self.credentials, {
-                **self.options,
-                "trakt_watched_history_interval_seconds": MIN_WATCHED_HISTORY_INTERVAL_SECONDS - 1,
-            })
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+        self.assertEqual(loaded["options"]["interval_seconds"], MIN_SYNC_INTERVAL_SECONDS)
+
+    def test_watched_history_interval_below_minimum_is_clamped(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "trakt_watched_history_interval_seconds": MIN_WATCHED_HISTORY_INTERVAL_SECONDS - 1,
+        })
+
+        loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
+        self.assertEqual(
+            loaded["options"]["trakt_watched_history_interval_seconds"],
+            MIN_WATCHED_HISTORY_INTERVAL_SECONDS,
+        )
 
     def test_manual_dry_run_does_not_advance_schedule(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
@@ -182,6 +189,44 @@ class ProfileStoreTests(unittest.TestCase):
             datetime.now(timezone.utc),
         )
         self.assertEqual(self.store.claim_due_profiles(), [])
+
+    def test_enabling_auto_history_sync_schedules_next_history_run_in_future(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "activity_history_source": "trakt",
+            "auto_history_sync": False,
+        })
+
+        updated = self.store.update_profile(created["profile_id"], "secret", {}, {
+            **self.options,
+            "activity_history_source": "trakt",
+            "auto_history_sync": True,
+            "trakt_watched_history_interval_seconds": 86400,
+        })
+
+        self.assertIsNotNone(updated["next_history_sync_at"])
+        self.assertGreater(
+            datetime.fromisoformat(updated["next_history_sync_at"]),
+            datetime.now(timezone.utc),
+        )
+
+    def test_claim_due_profiles_can_schedule_history_without_list_auto_sync(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "auto_sync": False,
+            "activity_history_source": "trakt",
+            "auto_history_sync": True,
+            "trakt_watched_history_interval_seconds": 86400,
+        })
+        profile = self.store._profiles[created["profile_id"]]
+        profile["next_history_sync_at"] = "2000-01-01T00:00:00+00:00"
+        self.store._save_locked()
+
+        due = self.store.claim_due_profiles()
+
+        self.assertEqual(len(due), 1)
+        self.assertFalse(due[0]["pending_sync_modes"]["lists"])
+        self.assertTrue(due[0]["pending_sync_modes"]["history"])
 
     def test_sync_success_persists_managed_lists(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
@@ -367,14 +412,9 @@ class ProfileStoreTests(unittest.TestCase):
         })
 
         loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
-        due_profiles = self.store.claim_due_profiles()
-
         self.assertIsNone(loaded["next_history_sync_at"])
         self.assertIsNotNone(loaded["next_resume_sync_at"])
-        self.assertEqual(len(due_profiles), 1)
-        self.assertTrue(due_profiles[0]["pending_sync_modes"]["lists"])
-        self.assertFalse(due_profiles[0]["pending_sync_modes"]["history"])
-        self.assertTrue(due_profiles[0]["pending_sync_modes"]["resume"])
+        self.assertEqual(self.store.claim_due_profiles(), [])
 
     def test_normalize_profile_options_drops_legacy_simkl_resume_source(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {

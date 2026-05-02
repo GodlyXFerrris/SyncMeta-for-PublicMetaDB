@@ -20,8 +20,8 @@ DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
 DEFAULT_SYNC_INTERVAL_SECONDS = 43200  # 12 hours
 MIN_SYNC_INTERVAL_SECONDS = 600
 DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 600
-DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
-MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 43200
+DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
+MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MAX_HISTORY_ITEMS = 20
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "COMPLETED_ONA", "COMPLETED_OVA", "COMPLETED_MOVIE"}
@@ -509,9 +509,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         raise ValueError("Trakt watched history interval must be a whole number of seconds") from exc
 
     if watched_history_interval_seconds < MIN_WATCHED_HISTORY_INTERVAL_SECONDS:
-        raise ValueError(
-            f"Trakt watched history interval must be at least {MIN_WATCHED_HISTORY_INTERVAL_SECONDS} seconds"
-        )
+        watched_history_interval_seconds = MIN_WATCHED_HISTORY_INTERVAL_SECONDS
 
     requested_types = raw.get("media_types", DEFAULT_MEDIA_TYPES)
     if not isinstance(requested_types, list):
@@ -544,6 +542,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         "interval_seconds": interval_seconds,
         "activity_history_source": history_source,
         "activity_resume_source": resume_source,
+        "auto_history_sync": bool(raw.get("auto_history_sync", False)),
         "simkl_sync_watched_history": history_source == "simkl",
         "simkl_history_anime_only": bool(raw.get("simkl_history_anime_only", False)),
         "simkl_sync_resume_progress": resume_source == "simkl",
@@ -616,6 +615,11 @@ class ProfileStore:
             next_resume_sync_at = None
         elif not next_resume_sync_at or (parse_iso_datetime(next_resume_sync_at) or utc_now()) <= utc_now():
             next_resume_sync_at = (utc_now() + timedelta(seconds=DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)).isoformat()
+        next_history_sync_at = raw_profile.get("next_history_sync_at")
+        if not options.get("auto_history_sync", False) or options["activity_history_source"] == "off":
+            next_history_sync_at = None
+        elif not next_history_sync_at or (parse_iso_datetime(next_history_sync_at) or utc_now()) <= utc_now():
+            next_history_sync_at = (utc_now() + timedelta(seconds=options["trakt_watched_history_interval_seconds"])).isoformat()
 
         return {
             "profile_id": profile_id,
@@ -636,7 +640,7 @@ class ProfileStore:
             "history": list(raw_profile.get("history", []))[:MAX_HISTORY_ITEMS],
             "next_sync_at": next_sync_at,
             "last_history_sync": raw_profile.get("last_history_sync"),
-            "next_history_sync_at": None,
+            "next_history_sync_at": next_history_sync_at,
             "last_resume_sync": raw_profile.get("last_resume_sync"),
             "next_resume_sync_at": next_resume_sync_at,
             "activity_results": _normalize_activity_results(raw_profile.get("activity_results")),
@@ -722,6 +726,10 @@ class ProfileStore:
         return (utc_now() + timedelta(seconds=DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)).isoformat()
 
     @staticmethod
+    def _next_history_sync_iso(interval_seconds: int) -> str:
+        return (utc_now() + timedelta(seconds=interval_seconds)).isoformat()
+
+    @staticmethod
     def _normalize_sync_modes(sync_modes: dict | None) -> dict[str, bool]:
         raw = sync_modes or {}
         return {
@@ -735,12 +743,18 @@ class ProfileStore:
             return
         options = profile.get("options", {})
         auto_sync = bool(options.get("auto_sync", True))
+        auto_history_sync = bool(options.get("auto_history_sync", False))
         if sync_modes["lists"]:
             profile["last_sync"] = utc_now_iso()
             profile["next_sync_at"] = self._next_sync_iso(options["interval_seconds"]) if auto_sync else None
         if sync_modes["history"]:
             profile["last_history_sync"] = utc_now_iso()
-            profile["next_history_sync_at"] = None
+            if auto_history_sync and options.get("activity_history_source") != "off":
+                profile["next_history_sync_at"] = self._next_history_sync_iso(
+                    options["trakt_watched_history_interval_seconds"]
+                )
+            else:
+                profile["next_history_sync_at"] = None
         if sync_modes["resume"]:
             profile["last_resume_sync"] = utc_now_iso()
             if auto_sync and options.get("activity_resume_source") != "off":
@@ -1025,7 +1039,11 @@ class ProfileStore:
                 else None
             ),
             "last_history_sync": None,
-            "next_history_sync_at": None,
+            "next_history_sync_at": (
+                self._next_history_sync_iso(normalized_options["trakt_watched_history_interval_seconds"])
+                if normalized_options.get("auto_history_sync") and normalized_options["activity_history_source"] != "off"
+                else None
+            ),
             "last_resume_sync": None,
             "next_resume_sync_at": (
                 self._next_resume_sync_iso()
@@ -1081,6 +1099,9 @@ class ProfileStore:
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
                 profile["sync_live_results"] = []
+                previous_auto_history_sync = bool(profile.get("options", {}).get("auto_history_sync", False))
+                previous_history_source = str(profile.get("options", {}).get("activity_history_source", "off") or "off")
+                previous_next_history_sync_at = profile.get("next_history_sync_at")
                 if normalized_options["auto_sync"]:
                     profile["next_sync_at"] = (
                         previous_next_sync_at
@@ -1089,7 +1110,14 @@ class ProfileStore:
                     )
                 else:
                     profile["next_sync_at"] = None
-                profile["next_history_sync_at"] = None
+                if normalized_options.get("auto_history_sync") and normalized_options["activity_history_source"] != "off":
+                    profile["next_history_sync_at"] = (
+                        previous_next_history_sync_at
+                        if previous_auto_history_sync and previous_history_source != "off" and previous_next_history_sync_at
+                        else self._next_history_sync_iso(normalized_options["trakt_watched_history_interval_seconds"])
+                    )
+                else:
+                    profile["next_history_sync_at"] = None
                 if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off":
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
@@ -1117,6 +1145,9 @@ class ProfileStore:
             profile["sync_status"] = "Idle"
             if not profile["sync_running"]:
                 profile["sync_live_results"] = []
+                previous_auto_history_sync = bool(profile.get("options", {}).get("auto_history_sync", False))
+                previous_history_source = str(profile.get("options", {}).get("activity_history_source", "off") or "off")
+                previous_next_history_sync_at = profile.get("next_history_sync_at")
                 if normalized_options["auto_sync"]:
                     profile["next_sync_at"] = (
                         previous_next_sync_at
@@ -1125,7 +1156,14 @@ class ProfileStore:
                     )
                 else:
                     profile["next_sync_at"] = None
-                profile["next_history_sync_at"] = None
+                if normalized_options.get("auto_history_sync") and normalized_options["activity_history_source"] != "off":
+                    profile["next_history_sync_at"] = (
+                        previous_next_history_sync_at
+                        if previous_auto_history_sync and previous_history_source != "off" and previous_next_history_sync_at
+                        else self._next_history_sync_iso(normalized_options["trakt_watched_history_interval_seconds"])
+                    )
+                else:
+                    profile["next_history_sync_at"] = None
                 if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off":
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
@@ -1220,7 +1258,7 @@ class ProfileStore:
                 if profile["sync_running"]:
                     continue
                 options = profile.get("options", {})
-                if not options.get("auto_sync", True):
+                if not options.get("auto_sync", True) and not options.get("auto_history_sync", False):
                     continue
                 due_modes = {
                     "lists": False,
@@ -1228,10 +1266,15 @@ class ProfileStore:
                     "resume": False,
                 }
                 next_sync_at = parse_iso_datetime(profile.get("next_sync_at"))
-                if next_sync_at is None or next_sync_at <= now:
+                if options.get("auto_sync", True) and (next_sync_at is None or next_sync_at <= now):
                     due_modes["lists"] = True
+                next_history_sync_at = parse_iso_datetime(profile.get("next_history_sync_at"))
+                if options.get("auto_history_sync", False) and profile.get("options", {}).get("activity_history_source") != "off" and (
+                    next_history_sync_at is None or next_history_sync_at <= now
+                ):
+                    due_modes["history"] = True
                 next_resume_sync_at = parse_iso_datetime(profile.get("next_resume_sync_at"))
-                if profile.get("options", {}).get("activity_resume_source") != "off" and (
+                if options.get("auto_sync", True) and profile.get("options", {}).get("activity_resume_source") != "off" and (
                     next_resume_sync_at is None or next_resume_sync_at <= now
                 ):
                     due_modes["resume"] = True

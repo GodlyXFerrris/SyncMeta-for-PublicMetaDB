@@ -421,6 +421,12 @@
                   </select>
                   <div class="hint">Choose which service should import watched history when you press the dashboard button.</div>
                 </div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-auto-history-sync"><span class="slider"></span></label><label>Sync watch history automatically in the background</label></div>
+                <div class="form-row">
+                  <label>Watch History Update Every (Seconds)</label>
+                  <input type="number" id="opt-history-interval-seconds" min="86400" step="1" value="86400" onblur="if(parseInt(this.value)<86400||!this.value)this.value=86400">
+                  <div class="hint">Minimum 86400 seconds (24h). This only affects automatic watch history sync.</div>
+                </div>
                 <div class="toggle-row hidden" id="opt-simkl-history-anime-only-row"><label class="toggle"><input type="checkbox" id="opt-simkl-history-anime-only"><span class="slider"></span></label><label>Only import SIMKL anime watch history</label></div>
                 <div class="form-row">
                   <label>Resume Progress Source</label>
@@ -431,7 +437,7 @@
                   <div class="hint">Choose which service should import continue-watching progress. Trakt resume also refreshes automatically every 10 minutes while background sync is on.</div>
                 </div>
                 <div class="hint">Source selections above decide what gets synced. Turn on list deletion if you want SyncMeta to remove its own deselected PublicMetaDB lists on the next real sync.</div>
-                <div class="hint">Watch history only runs from the dashboard button. Resume progress also refreshes automatically every 10 minutes while background sync is on.</div>
+                <div class="hint">Watch history can run manually from the dashboard button or automatically on the schedule above. Resume progress also refreshes automatically every 10 minutes while background sync is on.</div>
                 <div class="hint">Watched history imports only add items that are not already watched in PublicMetaDB.</div>
               </div>
               <div class="options-col">
@@ -955,6 +961,7 @@
 
     function gatherOptions() {
       const intervalSeconds = Math.max(600, parseInt(el('opt-interval-seconds').value || '43200', 10));
+      const historyIntervalSeconds = Math.max(86400, parseInt(el('opt-history-interval-seconds').value || '86400', 10));
       return {
         auto_sync: el('opt-auto-sync').checked,
         interval_seconds: Number.isFinite(intervalSeconds) ? intervalSeconds : 43200,
@@ -964,9 +971,10 @@
         anilist_sync_to_pmdb_watchlist: el('opt-anilist-pmdb-watchlist').checked,
         delete_disabled_lists: el('opt-delete-disabled-lists').checked,
         activity_history_source: el('opt-activity-history-source').value,
+        auto_history_sync: el('opt-auto-history-sync').checked,
         simkl_history_anime_only: el('opt-simkl-history-anime-only').checked,
         activity_resume_source: el('opt-activity-resume-source').value,
-        trakt_watched_history_interval_seconds: 43200,
+        trakt_watched_history_interval_seconds: Number.isFinite(historyIntervalSeconds) ? historyIntervalSeconds : 86400,
         simkl_visibility: el('opt-simkl-visibility').value,
         anilist_visibility: el('opt-anilist-visibility').value,
         trakt_personal_visibility: el('opt-trakt-personal-visibility').value,
@@ -1086,6 +1094,8 @@
       el('opt-anilist-pmdb-watchlist').checked = !!options.anilist_sync_to_pmdb_watchlist;
       el('opt-delete-disabled-lists').checked = !!options.delete_disabled_lists;
       el('opt-activity-history-source').value = options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off'));
+      el('opt-auto-history-sync').checked = !!options.auto_history_sync;
+      el('opt-history-interval-seconds').value = Math.max(86400, options.trakt_watched_history_interval_seconds || 86400);
       el('opt-simkl-history-anime-only').checked = !!options.simkl_history_anime_only;
       el('opt-activity-resume-source').value = options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off');
       el('opt-simkl-visibility').value = options.simkl_visibility || 'private';
@@ -1148,9 +1158,15 @@
       const historySource = el('opt-activity-history-source').value || 'off';
       const animeOnlyRow = el('opt-simkl-history-anime-only-row');
       const animeOnlyInput = el('opt-simkl-history-anime-only');
+      const autoHistoryInput = el('opt-auto-history-sync');
+      const historyIntervalInput = el('opt-history-interval-seconds');
       const showAnimeOnly = historySource === 'simkl';
+      const historyEnabled = historySource !== 'off';
       animeOnlyRow.classList.toggle('hidden', !showAnimeOnly);
       if (!showAnimeOnly) animeOnlyInput.checked = false;
+      autoHistoryInput.disabled = !historyEnabled;
+      historyIntervalInput.disabled = !historyEnabled;
+      if (!historyEnabled) autoHistoryInput.checked = false;
     }
 
     function renderSimklStatuses() {
@@ -2848,7 +2864,11 @@
         ? (options.activity_history_source || (options.simkl_sync_watched_history ? 'simkl' : (options.trakt_sync_watched_history ? 'trakt' : 'off')))
         : (options.activity_resume_source || (options.trakt_sync_resume_progress ? 'trakt' : 'off'));
       if (!source || source === 'off') return 'Run this manually from the button above.';
-      if (mode === 'history') return `${source.toUpperCase()} watched imports`;
+      if (mode === 'history') {
+        return options.auto_history_sync
+          ? `${source.toUpperCase()} watched imports · auto every ${intervalLabel(options.trakt_watched_history_interval_seconds || 86400)}`
+          : `${source.toUpperCase()} watched imports`;
+      }
       return `${source.toUpperCase()} continue watching sync · auto every 10 minutes`;
     }
 
@@ -3251,7 +3271,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', auto_history_sync: false, simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 86400 }, {});
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
@@ -3332,7 +3352,7 @@
         anilist: { selected_statuses: DEFAULT_ANILIST_STATUSES },
         trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
         mdblist: { selected_lists: [] },
-      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 }, {});
+      }, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', auto_history_sync: false, simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 86400 }, {});
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
@@ -3389,7 +3409,7 @@
       trakt: { sync_watchlist: true, sync_watchlist_movies: true, sync_watchlist_shows: true, sync_liked_lists: false, default_catalogs_initialized: false, selected_lists: [] },
       mdblist: { selected_lists: [] },
     });
-    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 43200 });
+    const draftOptions = loadJson(OPTIONS_KEY, { auto_sync: true, interval_seconds: 43200, media_types: ['shows', 'movies', 'anime'], activity_history_source: 'off', auto_history_sync: false, simkl_history_anime_only: false, activity_resume_source: 'off', trakt_watched_history_interval_seconds: 86400 });
     populateForm(draftCreds, draftOptions, {});
     const storedProfileId = localStorage.getItem(PROFILE_KEY);
     if (storedProfileId && !el('profile-id').value.trim()) {
