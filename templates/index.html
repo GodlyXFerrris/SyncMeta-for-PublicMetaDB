@@ -285,29 +285,22 @@
           </div>
         </div>
 
-        <!-- 2-col grid: results wide, history sidebar -->
-        <div class="dash-grid">
-          <div class="dash-col">
-            <div class="panel">
-              <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
-              <div class="panel-body" style="padding-bottom:0">
-                <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
-              </div>
-              <div id="provider-progress" class="hidden"></div>
-              <div id="dry-run-preview-container" class="hidden"></div>
-              <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
-            </div>
-            <div class="panel" id="unresolved-panel" style="display:none">
-              <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
-              <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
-            </div>
+        <div class="panel">
+          <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
+          <div class="panel-body" style="padding-bottom:0">
+            <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
           </div>
-          <div class="dash-col">
-            <div class="panel">
-              <div class="panel-header">Sync History</div>
-              <div id="history-body"><div class="empty">No history yet.</div></div>
-            </div>
-          </div>
+          <div id="provider-progress" class="hidden"></div>
+          <div id="dry-run-preview-container" class="hidden"></div>
+          <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
+        </div>
+        <div class="panel" id="unresolved-panel" style="display:none">
+          <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
+          <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-header">Sync History</div>
+          <div id="history-body"><div class="empty">No history yet.</div></div>
         </div>
       </div>
 
