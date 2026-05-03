@@ -235,6 +235,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             trakt_activities_ts=str(activity_state.get("trakt_activities_ts", "") or "").strip(),
             full_history_sync=bool(isinstance(sync_modes, dict) and sync_modes.get("full_history")),
             trakt_watched_history_interval_seconds=options["trakt_watched_history_interval_seconds"],
+            trakt_resume_progress_interval_seconds=options["trakt_resume_progress_interval_seconds"],
             trakt_sync_full_watch_counts=False,
             trakt_reconcile_watched_history=False,
             trakt_sync_resume_progress=modes["resume"] and options["activity_resume_source"] == "trakt",

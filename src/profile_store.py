@@ -20,6 +20,7 @@ DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
 DEFAULT_SYNC_INTERVAL_SECONDS = 43200  # 12 hours
 MIN_SYNC_INTERVAL_SECONDS = 600
 DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 3600
+MIN_RESUME_SYNC_INTERVAL_SECONDS = 3600
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MAX_HISTORY_ITEMS = 20
@@ -515,6 +516,15 @@ def normalize_profile_options(options: dict | None) -> dict:
     if watched_history_interval_seconds < MIN_WATCHED_HISTORY_INTERVAL_SECONDS:
         watched_history_interval_seconds = MIN_WATCHED_HISTORY_INTERVAL_SECONDS
 
+    resume_interval_raw = raw.get("trakt_resume_progress_interval_seconds", DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)
+    try:
+        resume_progress_interval_seconds = int(resume_interval_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Trakt resume progress interval must be a whole number of seconds") from exc
+
+    if resume_progress_interval_seconds < MIN_RESUME_SYNC_INTERVAL_SECONDS:
+        resume_progress_interval_seconds = MIN_RESUME_SYNC_INTERVAL_SECONDS
+
     requested_types = raw.get("media_types", DEFAULT_MEDIA_TYPES)
     if not isinstance(requested_types, list):
         raise ValueError("Media types must be a list")
@@ -556,6 +566,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         "trakt_sync_full_watch_counts": False,
         "trakt_reconcile_watched_history": False,
         "trakt_sync_resume_progress": resume_source == "trakt",
+        "trakt_resume_progress_interval_seconds": resume_progress_interval_seconds,
         "simkl_visibility": _normalize_visibility(raw.get("simkl_visibility"), "private"),
         "anilist_visibility": _normalize_visibility(raw.get("anilist_visibility"), "private"),
         "trakt_personal_visibility": _normalize_visibility(raw.get("trakt_personal_visibility"), "private"),
@@ -618,7 +629,7 @@ class ProfileStore:
         if not options["auto_sync"] or options["activity_resume_source"] == "off":
             next_resume_sync_at = None
         elif not next_resume_sync_at or (parse_iso_datetime(next_resume_sync_at) or utc_now()) <= utc_now():
-            next_resume_sync_at = (utc_now() + timedelta(seconds=DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)).isoformat()
+            next_resume_sync_at = (utc_now() + timedelta(seconds=options["trakt_resume_progress_interval_seconds"])).isoformat()
         next_history_sync_at = raw_profile.get("next_history_sync_at")
         if not options.get("auto_history_sync", False) or options["activity_history_source"] == "off":
             next_history_sync_at = None
@@ -726,8 +737,8 @@ class ProfileStore:
         return (utc_now() + timedelta(seconds=interval_seconds)).isoformat()
 
     @staticmethod
-    def _next_resume_sync_iso() -> str:
-        return (utc_now() + timedelta(seconds=DEFAULT_RESUME_SYNC_INTERVAL_SECONDS)).isoformat()
+    def _next_resume_sync_iso(interval_seconds: int) -> str:
+        return (utc_now() + timedelta(seconds=interval_seconds)).isoformat()
 
     @staticmethod
     def _next_history_sync_iso(interval_seconds: int) -> str:
@@ -762,7 +773,9 @@ class ProfileStore:
         if sync_modes["resume"]:
             profile["last_resume_sync"] = utc_now_iso()
             if auto_sync and options.get("activity_resume_source") != "off":
-                profile["next_resume_sync_at"] = self._next_resume_sync_iso()
+                profile["next_resume_sync_at"] = self._next_resume_sync_iso(
+                    options["trakt_resume_progress_interval_seconds"]
+                )
             else:
                 profile["next_resume_sync_at"] = None
 
@@ -1065,7 +1078,7 @@ class ProfileStore:
             ),
             "last_resume_sync": None,
             "next_resume_sync_at": (
-                self._next_resume_sync_iso()
+                self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
                 if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off"
                 else None
             ),
@@ -1141,7 +1154,7 @@ class ProfileStore:
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
                         if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
-                        else self._next_resume_sync_iso()
+                        else self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
                     )
                 else:
                     profile["next_resume_sync_at"] = None
@@ -1187,7 +1200,7 @@ class ProfileStore:
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
                         if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
-                        else self._next_resume_sync_iso()
+                        else self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
                     )
                 else:
                     profile["next_resume_sync_at"] = None

@@ -95,6 +95,7 @@ class SyncConfig:
     trakt_activities_ts: str = ""   # last-seen Trakt /sync/last_activities "all" timestamp
     full_history_sync: bool = False  # True = ignore cursor, fetch everything
     trakt_watched_history_interval_seconds: int = 86400
+    trakt_resume_progress_interval_seconds: int = 3600
     trakt_sync_full_watch_counts: bool = False
     trakt_reconcile_watched_history: bool = False
     trakt_sync_resume_progress: bool = False
@@ -171,6 +172,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     cfg.sync.trakt_sync_watched_history = os.getenv("TRAKT_SYNC_WATCHED_HISTORY", "false").lower() == "true"
     watched_interval = os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS", "86400")
     cfg.sync.trakt_watched_history_interval_seconds = int(watched_interval) if watched_interval.isdigit() else 86400
+    resume_interval = os.getenv("TRAKT_RESUME_PROGRESS_INTERVAL_SECONDS", "3600")
+    cfg.sync.trakt_resume_progress_interval_seconds = int(resume_interval) if resume_interval.isdigit() else 3600
     cfg.sync.trakt_sync_full_watch_counts = os.getenv("TRAKT_SYNC_FULL_WATCH_COUNTS", "false").lower() == "true"
     cfg.sync.trakt_reconcile_watched_history = os.getenv("TRAKT_RECONCILE_WATCHED_HISTORY", "false").lower() == "true"
     cfg.sync.trakt_sync_resume_progress = os.getenv("TRAKT_SYNC_RESUME_PROGRESS", "false").lower() == "true"
@@ -268,6 +271,8 @@ def _apply_config_file(cfg: AppConfig, data: dict) -> None:
         cfg.sync.trakt_sync_watched_history = bool(sync["trakt_sync_watched_history"])
     if "trakt_watched_history_interval_seconds" in sync and not os.getenv("TRAKT_WATCHED_HISTORY_INTERVAL_SECONDS"):
         cfg.sync.trakt_watched_history_interval_seconds = int(sync["trakt_watched_history_interval_seconds"])
+    if "trakt_resume_progress_interval_seconds" in sync and not os.getenv("TRAKT_RESUME_PROGRESS_INTERVAL_SECONDS"):
+        cfg.sync.trakt_resume_progress_interval_seconds = int(sync["trakt_resume_progress_interval_seconds"])
     if "trakt_sync_full_watch_counts" in sync and not os.getenv("TRAKT_SYNC_FULL_WATCH_COUNTS"):
         cfg.sync.trakt_sync_full_watch_counts = bool(sync["trakt_sync_full_watch_counts"])
     if "trakt_reconcile_watched_history" in sync and not os.getenv("TRAKT_RECONCILE_WATCHED_HISTORY"):
