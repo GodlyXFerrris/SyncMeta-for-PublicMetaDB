@@ -109,6 +109,11 @@ class SimklClient:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
+        try:
+            from .api_logger import make_requests_hook
+            session.hooks["response"].append(make_requests_hook("simkl"))
+        except Exception:
+            pass
         return session
 
     def _get(self, path: str, params: dict | None = None) -> dict | list | None:

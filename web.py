@@ -55,6 +55,10 @@ LOGIN_WINDOW_SECONDS = int(os.getenv("SYNCMETA_LOGIN_WINDOW_SECONDS", "900"))
 SITE_ACCESS_PASSWORD = os.getenv("SITE_ACCESS_PASSWORD", "").strip()
 ACCESS_MAX_ATTEMPTS = int(os.getenv("SYNCMETA_ACCESS_MAX_ATTEMPTS", "10"))
 ACCESS_WINDOW_SECONDS = int(os.getenv("SYNCMETA_ACCESS_WINDOW_SECONDS", "900"))
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
+ADMIN_COOKIE_NAME = "syncmeta_admin"
+ADMIN_SESSION_TTL = 3600
+_server_start_time = time.time()
 
 SIMKL_STATUS_BY_LABEL = {
     "watching": "watching",
@@ -1563,6 +1567,135 @@ def api_profile_unresolved_dismiss():
     except KeyError:
         return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
     return jsonify({"status": "dismissed", "items": remaining})
+
+
+# ── Admin panel ───────────────────────────────────────────────────────────────
+
+_admin_sessions: dict[str, float] = {}
+_admin_sessions_lock = threading.Lock()
+
+
+def _create_admin_session() -> str:
+    token = secrets.token_urlsafe(24)
+    now = time.time()
+    with _admin_sessions_lock:
+        expired = [k for k, v in list(_admin_sessions.items()) if v < now]
+        for k in expired:
+            del _admin_sessions[k]
+        _admin_sessions[token] = now + ADMIN_SESSION_TTL
+    return token
+
+
+def _is_valid_admin_session(token: str | None) -> bool:
+    if not token:
+        return False
+    with _admin_sessions_lock:
+        exp = _admin_sessions.get(token)
+        return bool(exp and time.time() < exp)
+
+
+def _destroy_admin_session(token: str | None) -> None:
+    if token:
+        with _admin_sessions_lock:
+            _admin_sessions.pop(token, None)
+
+
+def _admin_token() -> str | None:
+    return request.cookies.get(ADMIN_COOKIE_NAME)
+
+
+def _is_admin() -> bool:
+    return bool(ADMIN_PASSWORD) and _is_valid_admin_session(_admin_token())
+
+
+def _admin_stats() -> dict:
+    import datetime as _dt
+    from src import api_logger
+    with _profile_store._lock:
+        profiles = list(_profile_store._profiles.values())
+    active = [p for p in profiles if p.get("sync_running")]
+    errored = [p for p in profiles if p.get("sync_error")]
+
+    raw_counters = api_logger.counters()
+    req_map = raw_counters.get("requests", {})
+    err_map = raw_counters.get("errors", {})
+    all_sources = sorted(set(list(req_map.keys()) + list(err_map.keys())))
+    counters_normalized = {
+        src: {"total": req_map.get(src, 0), "errors": err_map.get(src, 0)}
+        for src in all_sources
+    }
+    total_calls = sum(v["total"] for v in counters_normalized.values())
+    total_errors = sum(v["errors"] for v in counters_normalized.values())
+
+    raw_log = api_logger.snapshot(300)
+    for entry in raw_log:
+        ts = entry.get("ts", 0)
+        entry["ts_str"] = _dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "—"
+
+    uptime_s = int(time.time() - _server_start_time)
+    d, rem = divmod(uptime_s, 86400)
+    h, rem = divmod(rem, 3600)
+    m, s = divmod(rem, 60)
+    if d:
+        uptime_str = f"{d}d {h}h {m}m"
+    elif h:
+        uptime_str = f"{h}h {m}m {s}s"
+    else:
+        uptime_str = f"{m}m {s}s"
+
+    return {
+        "uptime_seconds": uptime_s,
+        "uptime_str": uptime_str,
+        "profile_count": len(profiles),
+        "active_syncs": len(active),
+        "errored_profiles": len(errored),
+        "active_sync_ids": [p.get("profile_id", "")[:8] for p in active],
+        "counters": counters_normalized,
+        "total_api_calls": total_calls,
+        "total_api_errors": total_errors,
+        "log": raw_log,
+    }
+
+
+@app.route("/admin", methods=["GET"])
+@app.route("/admin/", methods=["GET"])
+def admin_dashboard():
+    if not ADMIN_PASSWORD:
+        return _json_error("Admin panel is not configured. Set ADMIN_PASSWORD env var.", 404)
+    if not _is_admin():
+        return render_template("admin.html", view="login", error=None), 401
+    return render_template("admin.html", view="dashboard", stats=_admin_stats())
+
+
+@app.route("/admin/login", methods=["POST"])
+def admin_login():
+    if not ADMIN_PASSWORD:
+        return _json_error("Admin panel not configured", 404)
+    password = (request.form.get("password") or "").strip()
+    if not secrets.compare_digest(password.encode(), ADMIN_PASSWORD.encode()):
+        return render_template("admin.html", view="login", error="Wrong password"), 401
+    token = _create_admin_session()
+    resp = make_response(redirect("/admin"))
+    resp.set_cookie(ADMIN_COOKIE_NAME, token, httponly=True, samesite="Lax",
+                    secure=_cookie_secure(), max_age=ADMIN_SESSION_TTL)
+    return resp
+
+
+@app.route("/admin/logout", methods=["POST"])
+def admin_logout():
+    _destroy_admin_session(_admin_token())
+    resp = make_response(redirect("/admin"))
+    resp.delete_cookie(ADMIN_COOKIE_NAME)
+    return resp
+
+
+@app.route("/admin/api/stats", methods=["GET"])
+def admin_api_stats():
+    if not ADMIN_PASSWORD:
+        return _json_error("Admin panel not configured", 404)
+    if not _is_admin():
+        return _json_error("Not authorized", 401)
+    return jsonify(_admin_stats())
 
 
 if __name__ == "__main__":

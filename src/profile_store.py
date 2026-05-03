@@ -19,7 +19,7 @@ ALLOWED_MEDIA_TYPES = {"shows", "movies", "anime"}
 DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
 DEFAULT_SYNC_INTERVAL_SECONDS = 43200  # 12 hours
 MIN_SYNC_INTERVAL_SECONDS = 600
-DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 600
+DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 3600
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MAX_HISTORY_ITEMS = 20
@@ -778,9 +778,15 @@ class ProfileStore:
         # Drop the dry_run_preview items from history — it's only useful on the
         # most recent last_results, and keeping it in N history entries bloats
         # profiles.json without adding value.
+        _RESUME_NAMES = {"resume progress", "trakt resume progress"}
         trimmed_results = []
         for row in results or []:
-            if isinstance(row, dict) and "dry_run_preview" in row:
+            if not isinstance(row, dict):
+                continue
+            display = str(row.get("display_name") or row.get("list_name") or "").strip().lower()
+            if display in _RESUME_NAMES:
+                continue
+            if "dry_run_preview" in row:
                 row = {k: v for k, v in row.items() if k != "dry_run_preview"}
             trimmed_results.append(copy.deepcopy(row))
         history_entry = {

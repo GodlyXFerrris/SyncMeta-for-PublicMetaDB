@@ -119,6 +119,11 @@ class PublicMetaDBClient:
         adapter = HTTPAdapter(max_retries=retry)
         session.mount("https://", adapter)
         session.mount("http://", adapter)
+        try:
+            from .api_logger import make_requests_hook
+            session.hooks["response"].append(make_requests_hook("pmdb"))
+        except Exception:
+            pass
         return session
 
     def _session(self) -> requests.Session:
