@@ -1581,19 +1581,38 @@ class SyncService:
             time.perf_counter() - fetch_started,
             len(self._config.anilist.selected_statuses),
         )
+        # Formats whose synthetic status keys include single-episode items that
+        # were reclassified as media_type="movie" in anilist_client.  For those
+        # keys we must not drop movies, since e.g. a 1-episode ONA IS the thing
+        # the user wants in their "Completed ONA" list.
+        _FORMAT_KEYS = frozenset(AniListClient._FORMAT_FILTER_MAP.keys())
+
         for status_key in self._config.anilist.selected_statuses:
             self._check_cancelled()
             self._set_status(f"Fetching AniList {_STATUS_LABELS.get(status_key, status_key)} anime")
             raw_items = fetched_by_status.get(status_key, [])
-            items = [
-                item for item in raw_items
-                if str(item.get("media_type") or "").strip().lower() == "tv"
-            ]
+            if status_key in _FORMAT_KEYS:
+                # Format-specific list (ONA, OVA, MOVIE): include both tv and
+                # movie media_types so single-episode ONAs/OVAs are not lost.
+                items = [
+                    item for item in raw_items
+                    if str(item.get("media_type") or "").strip().lower() in {"tv", "movie"}
+                ]
+            else:
+                # Plain status (COMPLETED, WATCHING, …): only episodic TV entries.
+                # Single-episode ONA/OVA/SPECIAL entries get media_type="movie"
+                # in anilist_client and are intentionally routed to the format-
+                # specific list instead; drop them here to avoid duplicates.
+                items = [
+                    item for item in raw_items
+                    if str(item.get("media_type") or "").strip().lower() == "tv"
+                ]
             logger.info(
-                "Loaded AniList %s (%d/%d episodic anime items)",
+                "Loaded AniList %s (%d/%d anime items, %d dropped)",
                 _STATUS_LABELS.get(status_key, status_key),
                 len(items),
                 len(raw_items),
+                len(raw_items) - len(items),
             )
             all_items_by_status.append((status_key, items))
 

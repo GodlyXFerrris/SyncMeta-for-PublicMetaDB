@@ -379,15 +379,48 @@ class AniListClient:
         return self.get_statuses([status]).get(status, [])
 
     def get_statuses(self, statuses: list[str]) -> dict[str, list[dict]]:
-        """Fetch multiple AniList statuses while reusing base-status responses."""
+        """Fetch multiple AniList statuses while reusing base-status responses.
+
+        When a plain status like ``COMPLETED`` is requested alongside a
+        format-specific synthetic status like ``COMPLETED_ONA``, items that
+        belong to a synthetic bucket are excluded from the plain bucket so
+        that they appear in exactly one list.
+
+        Example: user has [COMPLETED, COMPLETED_ONA, COMPLETED_OVA].
+        - COMPLETED      → all completed items, EXCLUDING ONA and OVA formats
+        - COMPLETED_ONA  → completed items WHERE anilist_format == "ONA"
+        - COMPLETED_OVA  → completed items WHERE anilist_format == "OVA"
+        """
+        # Build a map: base_status → set of formats claimed by synthetic keys.
+        claimed_formats: dict[str, set[str]] = {}
+        for status in statuses:
+            base_status, fmt = self._base_status_and_filter(status)
+            if fmt:
+                claimed_formats.setdefault(base_status, set()).add(fmt)
+
         results: dict[str, list[dict]] = {}
         for status in statuses:
             base_status, format_filter = self._base_status_and_filter(status)
             base_items = self._fetch_base_status(base_status)
             if format_filter:
-                results[status] = [item for item in base_items if item.get("anilist_format") == format_filter]
+                # Synthetic key: only items matching this format (include both
+                # tv and movie media_types — single-episode ONAs/OVAs are stored
+                # as media_type="movie" but still belong in the ONA/OVA list).
+                results[status] = [
+                    item for item in base_items
+                    if item.get("anilist_format") == format_filter
+                ]
             else:
-                results[status] = list(base_items)
+                # Plain key: exclude every format claimed by a synthetic sibling
+                # that is also being synced, so items don't land in two lists.
+                excluded = claimed_formats.get(base_status, set())
+                if excluded:
+                    results[status] = [
+                        item for item in base_items
+                        if item.get("anilist_format") not in excluded
+                    ]
+                else:
+                    results[status] = list(base_items)
         return results
 
     @classmethod
