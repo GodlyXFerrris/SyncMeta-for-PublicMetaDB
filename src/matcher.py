@@ -373,18 +373,24 @@ class ItemMatcher:
                         self._record_match_stat(fribb_result)
                     return fribb_result
 
-                # Fribb has no entry — accept 0-vote PMDB candidate with a warning.
+                # Fribb has no entry and PMDB result is unconfirmed (0 votes).
+                # We cannot verify this mapping — returning it risks polluting PMDB
+                # with wrong entries (e.g. "An Affirmative Act" for an anime item).
+                # Mark as unresolved so the user can manually confirm via the UI.
                 if pmdb_candidate is not None:
                     logger.warning(
-                        "[resolve] anime '%s' — accepting unconfirmed PMDB %s=%s tmdb=%d"
-                        " (0 votes, Fribb miss); result may be wrong",
+                        "[resolve] anime '%s' — PMDB %s=%s returned unconfirmed tmdb=%d"
+                        " (0 votes) and Fribb has no entry; marking unresolved"
+                        " to avoid polluting PMDB with wrong mapping",
                         title, pmdb_candidate_source, pmdb_candidate_ext_id, pmdb_candidate,
                     )
                     result = MatchResult(
-                        tmdb_id=pmdb_candidate,
-                        resolution_kind="external_mapping",
-                        match_confidence="ambiguous",
+                        tmdb_id=None,
+                        resolution_kind="unresolved",
+                        unresolved_reason="unconfirmed_mapping",
+                        match_confidence="unresolved",
                         anime_mapping_source=pmdb_candidate_source,
+                        candidate_tmdb_id=pmdb_candidate,
                     )
                     with self._lock:
                         self._record_match_stat(result)

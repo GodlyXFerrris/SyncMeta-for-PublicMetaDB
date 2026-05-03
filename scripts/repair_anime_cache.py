@@ -154,8 +154,24 @@ def _fribb_tmdb_for_ids(anilist_id: str, mal_id: str) -> int | None:
         return None
 
 
+def _cache_key_is_anime(cache_key: str) -> bool:
+    """Return True if the cache key looks like an anime list_identity entry.
+
+    Anime list_identity keys have resolver_mode="list_identity" and typically
+    have AniList or MAL IDs in positions 6 and 5 of the colon-separated key.
+    """
+    ids = _parse_cache_key_ids(cache_key)
+    if not ids:
+        return False
+    return (
+        ids.get("resolver_mode") == "list_identity"
+        and (bool(ids.get("anilist_id")) or bool(ids.get("mal_id")))
+    )
+
+
 def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool,
-                   check_fribb: bool = False) -> dict:
+                   check_fribb: bool = False,
+                   clear_anime_auto: bool = False) -> dict:
     """Inspect and repair one profile.  Returns the (possibly modified) raw dict."""
     rc: dict = dict(profile_raw.get("resolution_cache") or {})
     mrc: dict = dict(profile_raw.get("manual_resolution_cache") or {})
@@ -208,7 +224,25 @@ def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool,
             rc.pop(ck, None)
             frc.pop(ck, None)
 
-    # ── 5. Cross-validate against Fribb (optional, --check-fribb) ─────────────
+    # ── 5. Clear all non-manual anime list_identity auto entries (--clear-anime-auto)
+    #   Nuclear option: wipe every anime list_identity resolution_cache entry that
+    #   is not in manual_resolution_cache.  This forces a fresh resolution on the
+    #   next sync, picking up any logic fixes made since the entries were cached.
+    #   Use when stale wrong entries (e.g. Fate/Zero→Fate/stay night) persist and
+    #   cannot be detected by the targeted checks above.
+    if clear_anime_auto:
+        for ck in list(rc.keys()):
+            if ck in mrc:
+                continue
+            if _cache_key_is_anime(ck):
+                changes.append(
+                    f"  [clear-anime-auto] cache_key={ck!r} tmdb={rc[ck]}"
+                    f" — cleared for fresh resolution"
+                )
+                rc.pop(ck, None)
+                frc.pop(ck, None)
+
+    # ── 6. Cross-validate against Fribb (optional, --check-fribb) ─────────────
     #   For each anime cache entry that has an AniList or MAL ID in the key,
     #   look up what Fribb says the TMDB ID should be.  If Fribb disagrees with
     #   the cached TMDB ID, the cached entry is probably wrong (e.g. "An
@@ -269,6 +303,13 @@ def main() -> None:
         help="Cross-validate cached anime TMDB IDs against Fribb database "
              "(clears entries where Fribb disagrees with the cached TMDB ID)",
     )
+    parser.add_argument(
+        "--clear-anime-auto", action="store_true",
+        help="Clear ALL non-manual anime list_identity resolution_cache entries "
+             "so they get fresh lookups on the next sync. Use after logic fixes "
+             "to ensure stale wrong entries (e.g. Fate/Zero→Fate/stay night) "
+             "are re-resolved.",
+    )
     args = parser.parse_args()
 
     print(f"Loading {PROFILE_STORE_FILE} …")
@@ -283,7 +324,11 @@ def main() -> None:
     for pid, pdata in profiles.items():
         if args.profile_id and not pid.startswith(args.profile_id):
             continue
-        updated = repair_profile(pid, pdata, args.dry_run, check_fribb=args.check_fribb)
+        updated = repair_profile(
+            pid, pdata, args.dry_run,
+            check_fribb=args.check_fribb,
+            clear_anime_auto=args.clear_anime_auto,
+        )
         if updated is not pdata:
             profiles[pid] = updated
             modified = True

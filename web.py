@@ -1946,6 +1946,9 @@ def admin_api_stats():
 def admin_repair_anime_cache():
     """Run the anime cache repair inline (no subprocess required).
 
+    Accepts optional JSON body: {"clear_anime_auto": true} to also wipe all
+    non-manual anime list_identity auto-cache entries (nuclear re-resolve).
+
     This replicates the logic from scripts/repair_anime_cache.py but operates
     directly on the live profile store.  Returns a summary of changes made.
     """
@@ -1954,9 +1957,21 @@ def admin_repair_anime_cache():
     if not _is_admin():
         return _json_error("Not authorized", 401)
 
+    body = request.get_json(silent=True) or {}
+    clear_anime_auto = bool(body.get("clear_anime_auto", False))
+
     FLAGGED_TMDB_IDS = {"277700", "154634", "317316", "298754"}
     report: list[str] = []
     total_cleared = 0
+
+    def _cache_key_is_anime_list(ck: str) -> bool:
+        parts = ck.split(":")
+        if len(parts) < 11:
+            return False
+        resolver_mode = parts[1]
+        mal_id = parts[5]
+        anilist_id = parts[6]
+        return resolver_mode == "list_identity" and (bool(anilist_id) or bool(mal_id))
 
     with _profile_store._lock:
         for pid, profile in _profile_store._profiles.items():
@@ -1994,6 +2009,18 @@ def admin_repair_anime_cache():
             if len(unresolved) != before:
                 report.append(f"{pid[:8]}: removed {before - len(unresolved)} stale unresolved items")
                 changed = True
+
+            # 5. Nuclear clear: wipe all non-manual anime list_identity auto entries.
+            #    Forces every anime to be re-resolved on the next sync, picking up
+            #    any logic fixes since the entries were first cached.
+            if clear_anime_auto:
+                for ck in list(rc.keys()):
+                    if ck not in mrc and _cache_key_is_anime_list(ck):
+                        report.append(f"{pid[:8]}: [clear-anime-auto] rc[{ck!r}]={rc[ck]} — cleared")
+                        rc.pop(ck, None)
+                        frc.pop(ck, None)
+                        changed = True
+                        total_cleared += 1
 
             if changed:
                 profile["resolution_cache"] = rc

@@ -173,7 +173,8 @@
       <div class="dash-meta">Started {{ stats.system.started_at }} &middot; PID {{ stats.system.pid }}</div>
     </div>
     <div style="display:flex;gap:8px;align-items:center">
-      <button class="btn btn-ghost" id="repair-btn" onclick="repairAnimeCache()" title="Clear stale/wrong auto-resolved anime cache entries so they get fresh lookups on the next sync">🔧 Repair Anime Cache</button>
+      <button class="btn btn-ghost" id="repair-btn" onclick="repairAnimeCache(false)" title="Clear stale/wrong auto-resolved anime cache entries so they get fresh lookups on the next sync">🔧 Repair Anime Cache</button>
+      <button class="btn btn-ghost" id="repair-full-btn" onclick="repairAnimeCache(true)" title="Nuclear: clear ALL auto-resolved anime entries so everything re-resolves on next sync. Use after logic fixes to clear wrong cached entries like Fate/Zero→Fate/stay night." style="color:var(--amber,#f59e0b)">🗑️ Clear All Anime Cache</button>
     </div>
   </div>
 
@@ -458,13 +459,18 @@
   })();
 
   // ── Anime cache repair ───────────────────────────────────────────────────
-  async function repairAnimeCache() {
-    const btn = document.getElementById('repair-btn');
+  async function repairAnimeCache(clearAll = false) {
+    const btn = document.getElementById(clearAll ? 'repair-full-btn' : 'repair-btn');
     if (!btn) return;
+    if (clearAll && !confirm('This will clear ALL auto-resolved anime cache entries and force re-resolution on the next sync.\n\nManual overrides are preserved.\n\nContinue?')) return;
     btn.disabled = true;
-    btn.textContent = '⏳ Repairing…';
+    btn.textContent = clearAll ? '⏳ Clearing…' : '⏳ Repairing…';
     try {
-      const resp = await fetch('/admin/api/repair-anime-cache', {method: 'POST'});
+      const resp = await fetch('/admin/api/repair-anime-cache', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({clear_anime_auto: clearAll}),
+      });
       const data = await resp.json();
       if (data.ok) {
         btn.textContent = `✓ ${data.message}`;
@@ -495,8 +501,8 @@
     }
     setTimeout(() => {
       btn.disabled = false;
-      btn.textContent = '🔧 Repair Anime Cache';
-      btn.style.color = '';
+      btn.textContent = clearAll ? '🗑️ Clear All Anime Cache' : '🔧 Repair Anime Cache';
+      btn.style.color = clearAll ? 'var(--amber,#f59e0b)' : '';
     }, 5000);
   }
 </script>

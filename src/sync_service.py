@@ -249,63 +249,55 @@ class SyncService:
             else:
                 result = MatchResult(tmdb_id=None, resolution_kind="unresolved")
 
-        # For anime items, Fribb's direct AniList→TMDB mapping can catch cases
-        # where PMDB's mapping has collapsed a sequel into the franchise root
-        # (e.g. Boruto→Naruto, Fate/UBW→Fate/stay night).
+        # For anime items, Fribb's per-show AniList→TMDB mapping is more accurate
+        # than PMDB community data, which can collapse sequels into the franchise
+        # root (e.g. PMDB maps Fate/Zero's AniList ID to Fate/stay night TMDB).
+        # Fribb maintains correct per-show entries (Fate/Zero → 44382, not 30887).
+        # Always prefer Fribb when it has an entry that disagrees with PMDB.
         #
-        # However, Fribb itself can also return the franchise root for entries like
-        # Fate/Zero (mapping it to Fate/stay night instead of its own TMDB ID).
-        # To avoid Fribb making things WORSE, we only apply the Fribb override when
-        # the PMDB result is genuinely suspicious:
-        #   - root_series resolution (always the franchise root by definition), OR
-        #   - external_mapping with match_confidence != "verified" (0-vote / ambiguous)
-        #
-        # A community-verified PMDB external_mapping (votes > 0, confidence="verified")
-        # is treated as authoritative and Fribb is NOT allowed to override it.
+        # Exception: if PMDB used root_series AND Fribb has no entry, accept PMDB
+        # (root is better than nothing).  If Fribb has no entry and PMDB is
+        # unconfirmed (0-vote / ambiguous), log a warning — the result may be wrong.
         if (
             str(item.get("simkl_type", "")).strip().lower() == "anime"
             and result.resolution_kind in ("external_mapping", "root_series")
             and result.tmdb_id is not None
         ):
-            # Skip Fribb override for verified community-voted PMDB mappings.
-            # Only apply when PMDB result is a root-series lookup or unconfirmed.
-            pmdb_is_verified = (
-                result.resolution_kind == "external_mapping"
-                and result.match_confidence == "verified"
-            )
-            if pmdb_is_verified:
-                logger.debug(
-                    "[resolve-post] anime '%s' — PMDB external_mapping tmdb=%d is"
-                    " community-verified; skipping Fribb override",
-                    item.get("title"), result.tmdb_id,
-                )
-            else:
-                fribb_tmdb = self._resolve_tmdb_id_via_fribb(item)
-                if fribb_tmdb is None:
-                    # Fribb has no entry at all — PMDB is the only signal, log warning.
+            fribb_tmdb = self._resolve_tmdb_id_via_fribb(item)
+            if fribb_tmdb is None:
+                # Fribb has no entry at all.  Log severity depends on confidence.
+                if result.match_confidence != "verified":
                     logger.warning(
-                        "[resolve-post] anime '%s' — PMDB %s returned tmdb=%d but Fribb"
-                        " has no entry; mapping may be wrong (anilist=%s mal=%s)",
+                        "[resolve-post] anime '%s' — PMDB %s returned unconfirmed"
+                        " tmdb=%d (confidence=%s) and Fribb has no entry;"
+                        " result may be wrong (anilist=%s mal=%s)",
                         item.get("title"),
                         result.resolution_kind,
                         result.tmdb_id,
+                        result.match_confidence,
                         item.get("anilist_id") or (item.get("ids") or {}).get("anilist"),
                         item.get("mal_id") or (item.get("ids") or {}).get("mal"),
                     )
-                elif fribb_tmdb != result.tmdb_id:
-                    logger.info(
-                        "[resolve-post] anime '%s' — Fribb tmdb=%d overrides"
-                        " unverified PMDB tmdb=%d (kind=%s confidence=%s)",
-                        item.get("title"), fribb_tmdb, result.tmdb_id,
-                        result.resolution_kind, result.match_confidence,
+                else:
+                    logger.debug(
+                        "[resolve-post] anime '%s' — Fribb has no entry;"
+                        " keeping PMDB tmdb=%d (verified)",
+                        item.get("title"), result.tmdb_id,
                     )
-                    return MatchResult(
-                        tmdb_id=fribb_tmdb,
-                        resolution_kind="fribb_exact",
-                        match_confidence="exact",
-                        anime_mapping_source="fribb_exact",
-                        candidate_tmdb_id=result.tmdb_id,
-                    )
+            elif fribb_tmdb != result.tmdb_id:
+                logger.info(
+                    "[resolve-post] anime '%s' — Fribb tmdb=%d overrides"
+                    " PMDB tmdb=%d (kind=%s confidence=%s)",
+                    item.get("title"), fribb_tmdb, result.tmdb_id,
+                    result.resolution_kind, result.match_confidence,
+                )
+                return MatchResult(
+                    tmdb_id=fribb_tmdb,
+                    resolution_kind="fribb_exact",
+                    match_confidence="exact",
+                    anime_mapping_source="fribb_exact",
+                    candidate_tmdb_id=result.tmdb_id,
+                )
         return result
 
     def _resolve_tmdb_id_via_fribb(self, item: dict) -> int | None:
