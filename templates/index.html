@@ -2739,8 +2739,10 @@
 
       const liveStatus = profile.sync_status || 'Running...';
       const liveStamp = profile.sync_updated_at ? `Updated ${timeAgo(profile.sync_updated_at)}` : '';
+      const queueStatus = profile.queue_status || {};
+      const queueSummary = formatQueueSummary(queueStatus, !!profile.sync_running);
       const lastSyncSub = profile.sync_running
-        ? `<span class="status-inline"><span class="spinner"></span><span>${esc(liveStatus)}</span></span>${liveStamp ? `<div class="catalog-note">${esc(liveStamp)}</div>` : ''}`
+        ? `<span class="status-inline"><span class="spinner"></span><span>${esc(liveStatus)}</span></span>${liveStamp ? `<div class="catalog-note">${esc(liveStamp)}</div>` : ''}${queueSummary ? `<div class="catalog-note">${esc(queueSummary)}</div>` : ''}`
         : (profile.sync_error ? `<span style="color:var(--red)">${esc(profile.sync_error)}</span>` : 'Background sync ready');
 
       el('cards').innerHTML = `
@@ -2768,7 +2770,7 @@
         : (profile.next_sync_at ? `Next automatic sync ${timeUntil(profile.next_sync_at)} (${intervalLabel(options.interval_seconds)})` : `Automatic sync every ${intervalLabel(options.interval_seconds)}`);
       const profileShort = profile.profile_id ? profile.profile_id.slice(0, 8) + '...' : 'Not saved';
       el('sync-hint').textContent = profile.sync_running
-        ? `Profile ${profileShort} - ${liveStatus}${liveStamp ? ` - ${liveStamp}` : ''}`
+        ? `Profile ${profileShort} - ${liveStatus}${liveStamp ? ` - ${liveStamp}` : ''}${queueSummary ? ` - ${queueSummary}` : ''}`
         : `Profile ${profileShort} - ${nextSyncText}`;
 
       el('results-time').textContent = profile.sync_running
@@ -3066,6 +3068,27 @@
       return `${source.toUpperCase()} continue watching sync · auto every ${intervalLabel(options.trakt_resume_progress_interval_seconds || 3600)}`;
     }
 
+    function formatQueueSummary(queueStatus, syncRunning) {
+      const info = queueStatus || {};
+      const running = Number(info.running || 0);
+      const queued = Number(info.queued || 0);
+      const maxConcurrent = Number(info.max_concurrent || 0);
+      const queuePosition = Number(info.profile_queue_position || 0);
+      const profileRunning = !!info.profile_running;
+
+      if (!syncRunning && !queued && !running) return '';
+      if (queuePosition > 0) {
+        return `Queued · position ${queuePosition}${queued ? ` of ${queued}` : ''} · ${running}/${maxConcurrent || running} running`;
+      }
+      if (profileRunning) {
+        return `${running}/${maxConcurrent || running} syncs running${queued > 0 ? ` · ${queued} queued` : ''}`;
+      }
+      if (running || queued) {
+        return `${running}/${maxConcurrent || running} running${queued > 0 ? ` · ${queued} queued` : ''}`;
+      }
+      return '';
+    }
+
     function updateClearHistoryButtons(show, canUse) {
       const arm = el('btn-clear-history-arm');
       const confirm = el('btn-clear-history-confirm');
@@ -3289,6 +3312,7 @@
           options: profile.options || {},
           profile_id: profile.profile_id || '',
           sync_cancel_requested: !!profile.sync_cancel_requested,
+          queue_status: profile.queue_status || {},
         });
         if (!wantsCredentials && renderKey === lastStatusRenderKey) {
           return profile;

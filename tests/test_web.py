@@ -70,6 +70,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Resume Progress", html)
         self.assertIn("Import your watched history into PublicMetaDB. Only adds items not already marked watched. Run manually from the dashboard or on a background schedule.", html)
         self.assertIn("Import continue-watching progress. When background sync is on, this refreshes automatically on its own schedule.", html)
+        self.assertIn("Queued · position", html)
         self.assertIn("RESULTS_PAGE_SIZE = 25", html)
         self.assertIn("results-prev-page", html)
         self.assertIn('id="btn-stop"', html)
@@ -468,6 +469,8 @@ class WebTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["profile"]["profile_id"], profile["profile_id"])
         self.assertNotIn("credentials", data["profile"])
+        self.assertIn("queue_status", data["profile"])
+        self.assertEqual(data["profile"]["queue_status"]["max_concurrent"], 4)
 
     def test_delete_profile_endpoint_removes_signed_in_profile(self) -> None:
         profile = web._profile_store.create_profile("secret", {

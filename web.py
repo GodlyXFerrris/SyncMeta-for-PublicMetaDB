@@ -48,7 +48,7 @@ PROFILE_STORE_FILE = Path(
     os.getenv("PROFILE_STORE_FILE", str(Path(__file__).resolve().parent / "data" / "profiles.json"))
 )
 SCHEDULER_POLL_SECONDS = 5
-MAX_CONCURRENT_SYNCS = max(1, int(os.getenv("SYNCMETA_MAX_CONCURRENT_SYNCS", "2") or "2"))
+MAX_CONCURRENT_SYNCS = max(1, int(os.getenv("SYNCMETA_MAX_CONCURRENT_SYNCS", "4") or "4"))
 SESSION_COOKIE_NAME = "syncmeta_session"
 ACCESS_COOKIE_NAME = "syncmeta_site_access"
 SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))
@@ -351,6 +351,7 @@ def _profile_response(profile: dict, include_credentials: bool = False):
     payload = dict(profile)
     if not include_credentials:
         payload.pop("credentials", None)
+    payload["queue_status"] = _sync_runner.snapshot(payload.get("profile_id"))
     return jsonify({"profile": payload})
 
 
@@ -515,6 +516,7 @@ class SyncRunner:
         self._workers: list[threading.Thread] = []
         self._lock = threading.Lock()
         self._started = False
+        self._running_profile_ids: set[str] = set()
 
     def start(self) -> None:
         with self._lock:
@@ -537,12 +539,41 @@ class SyncRunner:
     def queue_size(self) -> int:
         return self._queue.qsize()
 
+    def snapshot(self, profile_id: str | None = None) -> dict:
+        with self._lock:
+            running_ids = set(self._running_profile_ids)
+            max_workers = self._max_workers
+        with self._queue.mutex:
+            queued_items = list(self._queue.queue)
+        queued_profile_ids = [str(item[0].get("profile_id", "")).strip() for item in queued_items]
+        profile_queue_position = None
+        if profile_id:
+            normalized_profile_id = str(profile_id).strip()
+            try:
+                profile_queue_position = queued_profile_ids.index(normalized_profile_id) + 1
+            except ValueError:
+                profile_queue_position = None
+        return {
+            "max_concurrent": max_workers,
+            "running": len(running_ids),
+            "queued": len(queued_profile_ids),
+            "profile_queue_position": profile_queue_position,
+            "profile_running": bool(profile_id and str(profile_id).strip() in running_ids),
+        }
+
     def _worker_loop(self) -> None:
         while True:
             profile, dry_run, sync_modes = self._queue.get()
+            profile_id = str(profile.get("profile_id", "")).strip()
+            if profile_id:
+                with self._lock:
+                    self._running_profile_ids.add(profile_id)
             try:
                 _run_profile_sync(profile, dry_run=dry_run, sync_modes=sync_modes)
             finally:
+                if profile_id:
+                    with self._lock:
+                        self._running_profile_ids.discard(profile_id)
                 self._queue.task_done()
 
 
