@@ -96,6 +96,8 @@ class SyncStats:
 # Cap preview items per list to keep the dry-run payload bounded even for
 # profiles that have hundreds of items across many lists.
 _DRY_RUN_PREVIEW_LIMIT = 50
+_WATCHED_HISTORY_VERIFY_RETRIES = 3
+_WATCHED_HISTORY_VERIFY_DELAY_SECONDS = 0.75
 
 
 def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason: str = "") -> dict:
@@ -2450,7 +2452,7 @@ class SyncService:
             return
 
         try:
-            refreshed_counts = self._count_watched_history_identities(self._pmdb.get_watched_history())
+            refreshed_counts = self._verify_watched_history_counts(existing_counts_before, pending_identity_keys)
         except Exception:
             logger.warning("Could not verify PMDB watched history totals after write", exc_info=True)
             return
@@ -2471,6 +2473,38 @@ class SyncService:
         for key in pending_identity_keys:
             if key:
                 existing_counts[key] = int(refreshed_counts.get(key, 0) or 0)
+
+    def _verify_watched_history_counts(
+        self,
+        existing_counts_before: dict[str, int],
+        pending_identity_keys: set[str],
+    ) -> dict[str, int]:
+        last_counts: dict[str, int] = {}
+        for attempt in range(_WATCHED_HISTORY_VERIFY_RETRIES):
+            refreshed_counts = self._count_watched_history_identities(self._pmdb.get_watched_history())
+            last_counts = refreshed_counts
+            if self._watched_history_verification_complete(
+                refreshed_counts,
+                existing_counts_before,
+                pending_identity_keys,
+            ):
+                return refreshed_counts
+            if attempt < _WATCHED_HISTORY_VERIFY_RETRIES - 1:
+                time.sleep(_WATCHED_HISTORY_VERIFY_DELAY_SECONDS * (attempt + 1))
+        return last_counts
+
+    @staticmethod
+    def _watched_history_verification_complete(
+        refreshed_counts: dict[str, int],
+        existing_counts_before: dict[str, int],
+        pending_identity_keys: set[str],
+    ) -> bool:
+        for key in pending_identity_keys:
+            before_count = int(existing_counts_before.get(key, 0) or 0)
+            after_count = int(refreshed_counts.get(key, 0) or 0)
+            if after_count <= before_count:
+                return False
+        return True
 
     def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
         stale_items: list[dict] = []

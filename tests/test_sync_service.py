@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 from src.config import AniListConfig, AppConfig, PublicMetaDBConfig, SimklConfig, SyncConfig
 from src.matcher import MatchResult
@@ -1781,6 +1782,67 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(stats.items_added, 1)
         self.assertEqual(stats.items_skipped_duplicate, 1)
         self.assertEqual(len(pmdb.watched), 1)
+
+    def test_write_watched_history_items_retries_pmdb_visibility_before_downgrading_added_count(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"anime": [], "shows": [], "movies": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["movies"]),
+            )
+        )
+
+        class DelayedVisibilityPMDBClient(StubPMDBClient):
+            def __init__(self) -> None:
+                super().__init__()
+                self._history_reads = 0
+                self._pending_visible: list[dict] = []
+
+            def mark_watched(
+                self,
+                tmdb_id: int,
+                media_type: str,
+                season: int | None = None,
+                episode: int | None = None,
+                watched_at: str | None = None,
+                dedupe: bool = False,
+            ) -> dict:
+                item = {
+                    "tmdb_id": tmdb_id,
+                    "media_type": media_type,
+                    "watched_at": watched_at,
+                }
+                self._pending_visible.append(item)
+                return {"success": True, "item": item}
+
+            def get_watched_history(self) -> list[dict]:
+                self._history_reads += 1
+                if self._history_reads >= 2 and self._pending_visible:
+                    self.watched.extend(self._pending_visible)
+                    self._pending_visible = []
+                return list(self.watched)
+
+        pmdb = DelayedVisibilityPMDBClient()
+        service._pmdb = pmdb
+        stats = SyncStats(display_name="Watch History", source_name="Trakt")
+        existing_counts = {}
+
+        with patch("src.sync_service.time.sleep", return_value=None) as mock_sleep:
+            service._write_watched_history_items(
+                [
+                    {"tmdb_id": 5001, "media_type": "movie", "title": "Weapons", "watched_at": "2026-05-03T12:00:00Z"},
+                    {"tmdb_id": 5002, "media_type": "movie", "title": "Send Help", "watched_at": "2026-05-03T12:05:00Z"},
+                ],
+                existing_counts,
+                stats,
+                "Writing test history",
+            )
+
+        self.assertEqual(stats.items_added, 2)
+        self.assertEqual(stats.items_skipped_duplicate, 0)
+        self.assertEqual(len(pmdb.watched), 2)
+        self.assertGreaterEqual(pmdb._history_reads, 2)
+        mock_sleep.assert_called()
 
     def test_trakt_watched_history_keeps_distinct_repeat_watches_with_different_timestamps(self) -> None:
         config = AppConfig(
