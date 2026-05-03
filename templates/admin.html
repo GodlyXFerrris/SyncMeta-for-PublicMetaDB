@@ -172,6 +172,9 @@
       <div class="dash-title">Dashboard</div>
       <div class="dash-meta">Started {{ stats.system.started_at }} &middot; PID {{ stats.system.pid }}</div>
     </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="btn btn-ghost" id="repair-btn" onclick="repairAnimeCache()" title="Clear stale/wrong auto-resolved anime cache entries so they get fresh lookups on the next sync">🔧 Repair Anime Cache</button>
+    </div>
   </div>
 
   <!-- TOP STATS -->
@@ -453,6 +456,49 @@
     }
     setInterval(()=>{ secs++; el.textContent = fmt(secs); }, 1000);
   })();
+
+  // ── Anime cache repair ───────────────────────────────────────────────────
+  async function repairAnimeCache() {
+    const btn = document.getElementById('repair-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Repairing…';
+    try {
+      const resp = await fetch('/admin/api/repair-anime-cache', {method: 'POST'});
+      const data = await resp.json();
+      if (data.ok) {
+        btn.textContent = `✓ ${data.message}`;
+        btn.style.color = 'var(--green)';
+        // Show report in a dialog-like overlay
+        if (data.report && data.report.length > 0) {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px';
+          const box = document.createElement('div');
+          box.style.cssText = 'background:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:24px;max-width:700px;width:100%;max-height:80vh;overflow-y:auto';
+          box.innerHTML = `<div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:12px">Repair Report</div>`
+            + `<pre style="font-size:11px;color:#a1a1aa;white-space:pre-wrap;line-height:1.6">${data.report.join('\n')}</pre>`
+            + `<button onclick="this.closest('.overlay-root').remove()" style="margin-top:16px;padding:8px 18px;background:#3f3f46;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Close</button>`;
+          overlay.classList.add('overlay-root');
+          overlay.appendChild(box);
+          overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+          document.body.appendChild(overlay);
+        }
+      } else {
+        btn.textContent = '✗ Repair failed';
+        btn.style.color = 'var(--red)';
+        console.error('Repair error:', data);
+      }
+    } catch(e) {
+      btn.textContent = '✗ Error';
+      btn.style.color = 'var(--red)';
+      console.error(e);
+    }
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '🔧 Repair Anime Cache';
+      btn.style.color = '';
+    }, 5000);
+  }
 </script>
 {% endif %}
 </body>

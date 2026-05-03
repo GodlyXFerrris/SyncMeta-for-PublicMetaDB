@@ -654,17 +654,25 @@ class ItemMatcher:
     @staticmethod
     def _cache_key(item: dict) -> str:
         ids = item.get("ids", {})
+        # Prefer top-level ID fields (present in unresolved summaries and history
+        # items) with fallback to the nested ids dict (present in raw SIMKL items).
+        # This ensures the key is identical whether computed from a full item or a
+        # reconstructed unresolved-item summary.
         anilist_id = item.get("anilist_id") or ids.get("anilist") or ""
+        mal_id = item.get("mal_id") or ids.get("mal") or ""
+        root_mal = item.get("root_mal_id") or ids.get("root_mal") or ""
+        root_anilist = item.get("root_anilist_id") or ids.get("root_anilist") or ""
+        simkl_id = item.get("simkl_id") or ids.get("simkl") or ""
         resolver_mode = str(item.get("anime_resolve_mode") or "")
         return (
             f"{item.get('media_type', '')}:"
             f"{resolver_mode}:"
-            f"{ids.get('simkl', '')}:"
+            f"{simkl_id}:"
             f"{item.get('imdb_id', '')}:"
             f"{item.get('tmdb_id', '')}:"
-            f"{ids.get('mal', '')}:"
+            f"{mal_id}:"
             f"{anilist_id}:"
-            f"{ids.get('root_mal', '')}:"
-            f"{ids.get('root_anilist', '')}:"
+            f"{root_mal}:"
+            f"{root_anilist}:"
             f"{item.get('title', '')}:{item.get('year', '')}"
         )

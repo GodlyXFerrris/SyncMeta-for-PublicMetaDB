@@ -605,6 +605,26 @@ def _apply_unresolved_resolution(
     target_item: dict | None,
     tmdb_id: int,
 ) -> dict:
+    # Detailed logging for debugging anime mapping issues.
+    logger.info(
+        "[manual-map] profile=%s | title=%r year=%s type=%s simkl_type=%s"
+        " | simkl_id=%s mal_id=%s anilist_id=%s"
+        " | suggested_tmdb=%s → manual_tmdb=%s"
+        " | unresolved_reason=%s | cache_key=%s",
+        profile_id[:8],
+        (target_item or {}).get("title"),
+        (target_item or {}).get("year"),
+        (target_item or {}).get("media_type"),
+        (target_item or {}).get("simkl_type"),
+        (target_item or {}).get("simkl_id"),
+        (target_item or {}).get("mal_id"),
+        (target_item or {}).get("anilist_id"),
+        (target_item or {}).get("candidate_tmdb_id"),
+        tmdb_id,
+        (target_item or {}).get("unresolved_reason"),
+        cache_key,
+    )
+
     remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
 
     pmdb_result = None
@@ -626,8 +646,13 @@ def _apply_unresolved_resolution(
                 if pmdb_list_id and media_type:
                     pmdb_result = pmdb.add_item_to_list(str(pmdb_list_id), tmdb_id, media_type)
                     logger.info(
-                        "Instantly added tmdb_id=%s (%s) to list '%s' for profile %s",
-                        tmdb_id, media_type, list_name, profile_id[:8],
+                        "[manual-map] ✓ added tmdb_id=%s (%s) to list '%s' (pmdb_list=%s) profile=%s → pmdb_result=%s",
+                        tmdb_id, media_type, list_name, pmdb_list_id, profile_id[:8], pmdb_result,
+                    )
+                else:
+                    logger.warning(
+                        "[manual-map] ✗ could not add to PMDB: list_name=%r pmdb_list_id=%s media_type=%r",
+                        list_name, pmdb_list_id, media_type,
                     )
         except Exception as exc:
             logger.warning("Failed to instantly add resolved item to PMDB list: %s", exc)
@@ -1844,6 +1869,92 @@ def admin_api_stats():
     if not _is_admin():
         return _json_error("Not authorized", 401)
     return jsonify(_admin_stats())
+
+
+@app.route("/admin/api/repair-anime-cache", methods=["POST"])
+def admin_repair_anime_cache():
+    """Run the anime cache repair inline (no subprocess required).
+
+    This replicates the logic from scripts/repair_anime_cache.py but operates
+    directly on the live profile store.  Returns a summary of changes made.
+    """
+    if not ADMIN_PASSWORD:
+        return _json_error("Admin panel not configured", 404)
+    if not _is_admin():
+        return _json_error("Not authorized", 401)
+
+    from collections import defaultdict as _dd
+
+    FLAGGED_TMDB_IDS = {"277700", "154634", "317316", "298754"}
+    report: list[str] = []
+    total_cleared = 0
+
+    with _profile_store._lock:
+        for pid, profile in _profile_store._profiles.items():
+            rc = dict(profile.get("resolution_cache") or {})
+            mrc = dict(profile.get("manual_resolution_cache") or {})
+            frc = dict(profile.get("failed_resolution_cache") or {})
+            unresolved = list(profile.get("unresolved_items") or [])
+            changed = False
+
+            # 1. Stale auto entries that conflict with manual entries.
+            for ck, manual_tmdb in mrc.items():
+                auto_tmdb = rc.get(ck)
+                if auto_tmdb is not None and auto_tmdb != manual_tmdb:
+                    report.append(f"{pid[:8]}: stale rc[{ck!r}]={auto_tmdb} vs manual={manual_tmdb} — cleared")
+                    del rc[ck]
+                    changed = True
+                    total_cleared += 1
+
+            # 2. Duplicate TMDB IDs (collision pairs) — clear non-manual entries.
+            by_tmdb: dict = _dd(list)
+            for ck, tid in rc.items():
+                if tid:
+                    by_tmdb[str(tid)].append(ck)
+            for tmdb_str, dup_keys in by_tmdb.items():
+                non_manual = [k for k in dup_keys if k not in mrc]
+                if len(non_manual) <= 1:
+                    continue
+                for ck in non_manual:
+                    report.append(f"{pid[:8]}: collision tmdb={tmdb_str} rc[{ck!r}] — cleared")
+                    rc.pop(ck, None)
+                    frc.pop(ck, None)
+                    changed = True
+                    total_cleared += 1
+
+            # 3. Flagged TMDB IDs — clear from auto cache so they get fresh lookups.
+            for ck, tid in list(rc.items()):
+                if str(tid) in FLAGGED_TMDB_IDS and ck not in mrc:
+                    report.append(f"{pid[:8]}: flagged tmdb={tid} rc[{ck!r}] — cleared")
+                    rc.pop(ck, None)
+                    frc.pop(ck, None)
+                    changed = True
+                    total_cleared += 1
+
+            # 4. Stale unresolved items already in manual cache.
+            before = len(unresolved)
+            unresolved = [i for i in unresolved if i.get("cache_key") not in mrc]
+            if len(unresolved) != before:
+                report.append(f"{pid[:8]}: removed {before - len(unresolved)} stale unresolved items")
+                changed = True
+
+            if changed:
+                profile["resolution_cache"] = rc
+                profile["failed_resolution_cache"] = frc
+                profile["unresolved_items"] = unresolved
+
+    if total_cleared or any("removed" in r for r in report):
+        try:
+            _profile_store._save_locked()
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc), "report": report}), 500
+
+    return jsonify({
+        "ok": True,
+        "total_cleared": total_cleared,
+        "report": report,
+        "message": f"Cleared {total_cleared} stale cache entries." if total_cleared else "Nothing to repair.",
+    })
 
 
 if __name__ == "__main__":

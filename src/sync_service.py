@@ -275,14 +275,36 @@ class SyncService:
         IDs here. Otherwise sequel entries like Naruto Shippuden, Boruto, or
         Fate variants can be "corrected" back onto the root series and then get
         deduped away in PMDB.
+
+        Type-guard: if Fribb classifies the entry as "movie" but the item's
+        media_type is "tv" (or vice versa), we refuse to override the PMDB
+        external-mapping result.  Applying a type-mismatched Fribb TMDB ID
+        would push the wrong entry into the PMDB list with the wrong type.
         """
         try:
             fribb = self._lookup_fribb_entry(item, allow_root_fallback=False)
             if not fribb:
                 return None
             raw = fribb.get("themoviedb")
-            if raw:
-                return int(raw)
+            if not raw:
+                return None
+            tmdb_id = int(raw)
+
+            # Validate type consistency before returning the override.
+            fribb_type = str(fribb.get("type") or "").strip().lower()
+            if fribb_type:
+                expected_media_type = "movie" if fribb_type == "movie" else "tv"
+                item_media_type = str(item.get("media_type") or "").strip().lower()
+                if item_media_type and item_media_type != expected_media_type:
+                    logger.debug(
+                        "Fribb type mismatch for %r — fribb.type=%r expects media_type=%r"
+                        " but item has media_type=%r; skipping Fribb override (tmdb=%s)",
+                        item.get("title"), fribb_type, expected_media_type,
+                        item_media_type, tmdb_id,
+                    )
+                    return None
+
+            return tmdb_id
         except Exception:
             pass
         return None
@@ -2473,11 +2495,15 @@ class SyncService:
 
     @staticmethod
     def _should_preserve_manual_list_additions(source_name: str, selection: dict | None) -> bool:
+        # Manual list additions must always be preserved regardless of source or
+        # media type.  Previously SIMKL-anime lists were excluded here, which
+        # meant that items manually mapped via the "Map" button were evicted from
+        # the PMDB list on every subsequent sync (because force_remove_missing=True
+        # for anime and the auto-resolver still couldn't resolve the item).
+        # AniList lists are excluded only because they manage their own additions
+        # through the AniList sync path, not via the manual-map flow.
         source = str((selection or {}).get("source") or source_name or "").strip().lower()
-        media_type = str((selection or {}).get("media_type") or "").strip().lower()
         if source == "anilist":
-            return False
-        if source == "simkl" and media_type == "anime":
             return False
         return True
 
