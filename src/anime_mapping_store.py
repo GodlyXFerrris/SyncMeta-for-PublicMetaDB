@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 FRIBB_URL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json"
 ANIME_LISTS_XML_URL = "https://raw.githubusercontent.com/Anime-Lists/anime-lists/master/anime-list-full.xml"
 REQUEST_TIMEOUT = (5, 30)
+
+# Re-check upstream for updates this often.  The check is ETag-conditional so
+# if nothing changed GitHub returns 304 and we skip re-parsing entirely.
+_REFRESH_INTERVAL_SECONDS: float = 7 * 24 * 3600  # 1 week
 
 _CACHE_DIR = Path("data") / "cache"
 _FRIBB_CACHE_PATH = _CACHE_DIR / "anime-list-full.json.cache"
@@ -47,6 +52,8 @@ class AnimeMappingStore:
         self._lock = threading.Lock()
         self._fribb_loaded = False
         self._xml_loaded = False
+        self._fribb_last_checked: float = 0.0   # unix timestamp of last upstream check
+        self._xml_last_checked: float = 0.0
         self._fribb_by_anilist: dict[int, dict] = {}
         self._fribb_by_mal: dict[int, dict] = {}
         self._fribb_by_anidb: dict[int, dict] = {}
@@ -186,14 +193,36 @@ class AnimeMappingStore:
         return list(self._xml_by_tvdb.get(int(tvdb_id)) or [])
 
     def _ensure_fribb_loaded(self) -> None:
-        if self._fribb_loaded:
+        """Load (or refresh) the Fribb mapping data.
+
+        First call downloads and parses the full JSON.  Subsequent calls are
+        no-ops until _REFRESH_INTERVAL_SECONDS has elapsed; then an ETag-
+        conditional request is sent.  If GitHub returns 304 (no change) the
+        in-memory data is kept as-is and only the check timestamp is updated.
+        If new content is returned the index is rebuilt from scratch.
+        """
+        now = time.time()
+        # Fast path: data loaded and not yet due for a refresh check.
+        if self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
             return
         with self._lock:
-            if self._fribb_loaded:
+            now = time.time()
+            if self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
                 return
-            data = self._load_or_download_json(FRIBB_URL, _FRIBB_CACHE_PATH, _FRIBB_META_PATH)
+            changed, data = self._load_or_download_json_with_change(
+                FRIBB_URL, _FRIBB_CACHE_PATH, _FRIBB_META_PATH,
+            )
+            self._fribb_last_checked = time.time()
+            if not changed and self._fribb_loaded:
+                # ETag confirmed no upstream change — keep existing in-memory data.
+                logger.debug("Fribb anime-lists unchanged (304); keeping in-memory index")
+                return
             if not isinstance(data, list):
+                if self._fribb_loaded:
+                    logger.warning("Fribb refresh failed; keeping existing in-memory data")
+                    return
                 raise RuntimeError("Fribb anime map is unavailable")
+            logger.info("(Re-)indexing Fribb anime-lists (%d entries)", len(data))
             self._fribb_by_anilist.clear()
             self._fribb_by_mal.clear()
             self._fribb_by_anidb.clear()
@@ -221,14 +250,27 @@ class AnimeMappingStore:
             self._fribb_loaded = True
 
     def _ensure_xml_loaded(self) -> None:
-        if self._xml_loaded:
+        """Load (or refresh) the Anime-Lists XML mapping data."""
+        now = time.time()
+        if self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
             return
         with self._lock:
-            if self._xml_loaded:
+            now = time.time()
+            if self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
                 return
-            xml_text = self._load_or_download_text(ANIME_LISTS_XML_URL, _XML_CACHE_PATH, _XML_META_PATH)
+            changed, xml_text = self._load_or_download_text_with_change(
+                ANIME_LISTS_XML_URL, _XML_CACHE_PATH, _XML_META_PATH,
+            )
+            self._xml_last_checked = time.time()
+            if not changed and self._xml_loaded:
+                logger.debug("Anime-Lists XML unchanged (304); keeping in-memory index")
+                return
             if not xml_text:
+                if self._xml_loaded:
+                    logger.warning("Anime-Lists XML refresh failed; keeping existing in-memory data")
+                    return
                 raise RuntimeError("Anime-Lists XML is unavailable")
+            logger.info("(Re-)parsing Anime-Lists XML")
             root = ET.fromstring(xml_text)
             self._xml_by_anidb.clear()
             self._xml_by_tvdb.clear()
@@ -253,27 +295,41 @@ class AnimeMappingStore:
                         self._xml_by_imdb.setdefault(imdb_id, []).append(anime)
             self._xml_loaded = True
 
-    def _load_or_download_json(self, url: str, cache_path: Path, meta_path: Path) -> object:
-        text = self._load_or_download_text(url, cache_path, meta_path)
-        return json.loads(text) if text else None
+    def _load_or_download_json_with_change(
+        self, url: str, cache_path: Path, meta_path: Path,
+    ) -> tuple[bool, object]:
+        """Return (changed, parsed_data).  changed=False means a 304 was received."""
+        changed, text = self._load_or_download_text_with_change(url, cache_path, meta_path)
+        return changed, (json.loads(text) if text else None)
 
     @staticmethod
-    def _load_or_download_text(url: str, cache_path: Path, meta_path: Path) -> str:
+    def _load_or_download_text_with_change(
+        url: str, cache_path: Path, meta_path: Path,
+    ) -> tuple[bool, str]:
+        """Fetch url with ETag conditional request.
+
+        Returns (changed, text):
+          changed=False → server returned 304; text is the existing cache content.
+          changed=True  → new content was downloaded; text is the new content.
+          On any error, falls back to the cache file with changed=True so the
+          caller re-parses from disk (safe even if data didn't actually change).
+        """
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        meta = {}
+        meta: dict = {}
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except Exception:
                 meta = {}
-        headers = {}
+        headers: dict[str, str] = {}
         etag = str(meta.get("etag") or "").strip()
         if etag:
             headers["If-None-Match"] = etag
         try:
             response = requests.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
             if response.status_code == 304 and cache_path.exists():
-                return cache_path.read_text(encoding="utf-8")
+                # Nothing changed upstream — caller can skip re-parsing.
+                return False, cache_path.read_text(encoding="utf-8")
             response.raise_for_status()
             text = response.text
             cache_path.write_text(text, encoding="utf-8")
@@ -283,13 +339,14 @@ class AnimeMappingStore:
                 "source_url": url,
             }
             meta_path.write_text(json.dumps(next_meta, indent=2, sort_keys=True), encoding="utf-8")
-            return text
+            return True, text
         except Exception as exc:
             if cache_path.exists():
                 logger.warning("Using cached anime mapping for %s after refresh failure: %s", url, exc)
-                return cache_path.read_text(encoding="utf-8")
+                # Treat as changed so existing in-memory data is rebuilt from cache.
+                return True, cache_path.read_text(encoding="utf-8")
             logger.warning("Failed to load anime mapping %s: %s", url, exc)
-            return ""
+            return True, ""
 
     def _resolve_absolute_numbering(
         self,
