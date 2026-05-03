@@ -260,7 +260,23 @@ class SyncService:
             and result.tmdb_id is not None
         ):
             fribb_tmdb = self._resolve_tmdb_id_via_fribb(item)
-            if fribb_tmdb and fribb_tmdb != result.tmdb_id:
+            if fribb_tmdb is None:
+                # Fribb has no entry at all for this anime — PMDB's mapping is the
+                # only signal.  Log a warning so polluted results are visible in logs.
+                logger.warning(
+                    "[resolve-post] anime '%s' — PMDB %s returned tmdb=%d but Fribb"
+                    " has no entry; mapping may be wrong (anilist=%s mal=%s)",
+                    item.get("title"),
+                    result.resolution_kind,
+                    result.tmdb_id,
+                    item.get("anilist_id") or (item.get("ids") or {}).get("anilist"),
+                    item.get("mal_id") or (item.get("ids") or {}).get("mal"),
+                )
+            elif fribb_tmdb != result.tmdb_id:
+                logger.info(
+                    "[resolve-post] anime '%s' — Fribb tmdb=%d overrides PMDB tmdb=%d",
+                    item.get("title"), fribb_tmdb, result.tmdb_id,
+                )
                 return MatchResult(
                     tmdb_id=fribb_tmdb,
                     resolution_kind="fribb_exact",

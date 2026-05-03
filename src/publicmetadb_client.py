@@ -329,6 +329,10 @@ class PublicMetaDBClient:
                 return {
                     "tmdb_id": best.get("tmdb_id"),
                     "status": "hit",
+                    # Expose vote count so callers can apply extra scrutiny on
+                    # zero-vote (self-submitted, unconfirmed) mappings.
+                    "votes": int(best.get("votes") or 0),
+                    "result_count": len(results),
                 }
             self._record_stat("mapping_lookup_misses")
             return {"tmdb_id": None, "status": "miss"}

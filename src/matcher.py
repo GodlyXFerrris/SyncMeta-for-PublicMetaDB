@@ -37,6 +37,17 @@ _ROOT_LOOKUP_CHAIN = [
 # Failed resolutions are remembered for this long before being retried.
 _FAILED_CACHE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 
+# TMDB IDs confirmed to be wrong community-submitted mappings in PMDB for anime
+# entries.  Any PMDB external-mapping result that returns one of these IDs for an
+# anime item is silently rejected so the item falls through to Fribb or manual
+# resolution.  Extend this set if new pollution patterns are discovered.
+_BLOCKED_ANIME_PMDB_TMDB_IDS: frozenset[int] = frozenset([
+    277700,  # Wrong franchise-root for multiple anime series
+    154634,  # Wrong mapping confirmed in repair script
+    317316,  # Wrong mapping confirmed in repair script
+    298754,  # Wrong mapping confirmed in repair script
+])
+
 
 @dataclass(frozen=True)
 class MatchResult:
@@ -231,14 +242,23 @@ class ItemMatcher:
         else:
             self._stats["not_found_failures"] += 1
 
-    def _lookup_external_mapping(self, id_type: str, ext_id: str, media_type: str) -> tuple[int | None, str]:
+    def _lookup_external_mapping(self, id_type: str, ext_id: str, media_type: str) -> tuple[int | None, str, int]:
+        """Return (tmdb_id, status, votes) from PMDB external-ID mapping lookup.
+
+        ``votes`` is the community vote count on the best matching entry.
+        Zero means the mapping was submitted but never independently verified.
+        """
         try:
             detailed_lookup = getattr(self._pmdb, "lookup_by_external_id_detailed", None)
             if callable(detailed_lookup):
                 detail = detailed_lookup(id_type, ext_id, media_type) or {}
-                return detail.get("tmdb_id"), str(detail.get("status") or "miss")
+                return (
+                    detail.get("tmdb_id"),
+                    str(detail.get("status") or "miss"),
+                    int(detail.get("votes") or 0),
+                )
             tmdb_id = self._pmdb.lookup_by_external_id(id_type, ext_id, media_type)
-            return tmdb_id, "hit" if tmdb_id else "miss"
+            return tmdb_id, "hit" if tmdb_id else "miss", 0
         except requests.HTTPError as exc:
             response = getattr(exc, "response", None)
             status_code = getattr(response, "status_code", None)
@@ -250,7 +270,7 @@ class ItemMatcher:
                     media_type,
                     status_code,
                 )
-                return None, "lookup_unavailable"
+                return None, "lookup_unavailable", 0
             raise
 
     def _try_resolve(self, item: dict) -> MatchResult:
@@ -269,18 +289,55 @@ class ItemMatcher:
                 return root_result
 
         if is_anime:
+            year = item.get("year", "")
+            anilist_id = item.get("anilist_id") or ids.get("anilist") or ""
+            mal_id_log = item.get("mal_id") or ids.get("mal") or ""
+            anidb_id_log = item.get("anidb_id") or ids.get("anidb") or ""
+            logger.info(
+                "[resolve] anime '%s' (%s) media_type=%s mode=%s  "
+                "anilist=%s mal=%s anidb=%s",
+                title, year, media_type, anime_resolve_mode,
+                anilist_id, mal_id_log, anidb_id_log,
+            )
+
             # For list_identity: try PMDB external mapping FIRST — it has per-show
             # accurate TMDB IDs (e.g. Shippuden→1553, Boruto→65334). Fribb often
             # stores the franchise root TMDB for sequels, causing false duplicates.
+            # However we apply two safety filters:
+            #   1. Block known-bad TMDB IDs that have polluted PMDB community data.
+            #   2. Reject zero-vote (unconfirmed, self-submitted) mappings: try Fribb
+            #      first; only fall back to the 0-vote PMDB result if Fribb also fails.
             if anime_resolve_mode == "list_identity":
+                pmdb_candidate: int | None = None
+                pmdb_candidate_source: str = ""
+                pmdb_candidate_ext_id: str = ""
+                pmdb_candidate_votes: int = 0
                 for id_type, item_key in self._lookup_chain_for_item(item):
                     ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
                     if not ext_id:
                         continue
                     ext_id = str(ext_id)
-                    tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
-                    if tmdb_id:
-                        logger.debug("Resolved anime '%s' via PMDB %s mapping (%s -> %d)", title, id_type, ext_id, tmdb_id)
+                    tmdb_id, status, votes = self._lookup_external_mapping(id_type, ext_id, media_type)
+                    if not tmdb_id:
+                        logger.debug(
+                            "[resolve] anime '%s' PMDB %s=%s → miss (status=%s)",
+                            title, id_type, ext_id, status,
+                        )
+                        continue
+                    # Reject known-bad TMDB IDs (confirmed wrong community mappings).
+                    if tmdb_id in _BLOCKED_ANIME_PMDB_TMDB_IDS:
+                        logger.warning(
+                            "[resolve] anime '%s' — PMDB %s=%s returned blocked TMDB %d"
+                            " (known bad mapping); skipping",
+                            title, id_type, ext_id, tmdb_id,
+                        )
+                        continue
+                    logger.info(
+                        "[resolve] anime '%s' PMDB %s=%s → tmdb=%d (votes=%d)",
+                        title, id_type, ext_id, tmdb_id, votes,
+                    )
+                    if votes > 0:
+                        # Community-verified mapping → accept immediately.
                         result = MatchResult(
                             tmdb_id=tmdb_id,
                             resolution_kind="external_mapping",
@@ -290,14 +347,53 @@ class ItemMatcher:
                         with self._lock:
                             self._record_match_stat(result)
                         return result
+                    # Zero-vote mapping: stash as candidate and check Fribb first.
+                    if pmdb_candidate is None:
+                        pmdb_candidate = tmdb_id
+                        pmdb_candidate_source = id_type
+                        pmdb_candidate_ext_id = ext_id
+                        pmdb_candidate_votes = votes
 
-            # Fribb exact lookup — fallback for list_identity, primary for other modes.
-            fribb_result = self._try_exact_anime_fribb_lookup(item)
-            if fribb_result.tmdb_id:
-                with self._lock:
-                    self._record_match_stat(fribb_result)
-                return fribb_result
-            if anime_resolve_mode == "list_identity":
+                # Fribb exact lookup — primary for non-list_identity, cross-check here.
+                fribb_result = self._try_exact_anime_fribb_lookup(item)
+                if fribb_result.tmdb_id:
+                    logger.info(
+                        "[resolve] anime '%s' Fribb → tmdb=%d (source=%s)",
+                        title, fribb_result.tmdb_id, fribb_result.anime_mapping_source,
+                    )
+                    if pmdb_candidate and pmdb_candidate != fribb_result.tmdb_id:
+                        logger.warning(
+                            "[resolve] anime '%s' — Fribb tmdb=%d disagrees with"
+                            " PMDB %s=%s tmdb=%d (votes=%d); preferring Fribb",
+                            title, fribb_result.tmdb_id,
+                            pmdb_candidate_source, pmdb_candidate_ext_id,
+                            pmdb_candidate, pmdb_candidate_votes,
+                        )
+                    with self._lock:
+                        self._record_match_stat(fribb_result)
+                    return fribb_result
+
+                # Fribb has no entry — accept 0-vote PMDB candidate with a warning.
+                if pmdb_candidate is not None:
+                    logger.warning(
+                        "[resolve] anime '%s' — accepting unconfirmed PMDB %s=%s tmdb=%d"
+                        " (0 votes, Fribb miss); result may be wrong",
+                        title, pmdb_candidate_source, pmdb_candidate_ext_id, pmdb_candidate,
+                    )
+                    result = MatchResult(
+                        tmdb_id=pmdb_candidate,
+                        resolution_kind="external_mapping",
+                        match_confidence="ambiguous",
+                        anime_mapping_source=pmdb_candidate_source,
+                    )
+                    with self._lock:
+                        self._record_match_stat(result)
+                    return result
+
+                logger.info(
+                    "[resolve] anime '%s' — PMDB miss, Fribb miss → unresolved",
+                    title,
+                )
                 unresolved_reason = fribb_result.unresolved_reason or "missing_anime_mapping"
                 if unresolved_reason == "not_found":
                     unresolved_reason = "missing_anime_mapping"
@@ -309,6 +405,18 @@ class ItemMatcher:
                     anime_mapping_source=fribb_result.anime_mapping_source or "fribb_exact",
                     candidate_tmdb_id=fribb_result.candidate_tmdb_id,
                 )
+
+            # Fribb exact lookup — primary for non-list_identity modes.
+            fribb_result = self._try_exact_anime_fribb_lookup(item)
+            if fribb_result.tmdb_id:
+                logger.info(
+                    "[resolve] anime '%s' Fribb → tmdb=%d (mode=%s source=%s)",
+                    title, fribb_result.tmdb_id, anime_resolve_mode,
+                    fribb_result.anime_mapping_source,
+                )
+                with self._lock:
+                    self._record_match_stat(fribb_result)
+                return fribb_result
 
         # Do NOT collapse anime list identity to the franchise root up front.
         # Root-chain lookups are useful for history remapping, but for title/list
@@ -342,7 +450,7 @@ class ItemMatcher:
                 continue
             had_lookup_candidate = True
             ext_id = str(ext_id)
-            tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
+            tmdb_id, status, _votes = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
                 logger.debug("Resolved '%s' via %s lookup (%s -> %d)", title, id_type, ext_id, tmdb_id)
                 result = MatchResult(
@@ -424,7 +532,7 @@ class ItemMatcher:
             if not ext_id:
                 continue
             ext_id = str(ext_id)
-            tmdb_id, status = self._lookup_external_mapping(id_type, ext_id, media_type)
+            tmdb_id, status, _votes = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
                 logger.info(
                     "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
@@ -632,7 +740,7 @@ class ItemMatcher:
         for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
             root_ext_id = root.get(root_key)
             if root_ext_id:
-                tmdb_id, status = self._lookup_external_mapping(id_type, str(root_ext_id), media_type)
+                tmdb_id, status, _votes = self._lookup_external_mapping(id_type, str(root_ext_id), media_type)
                 if tmdb_id:
                     logger.info(
                         "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",

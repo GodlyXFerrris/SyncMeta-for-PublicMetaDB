@@ -14,12 +14,20 @@ Problems addressed:
   3. Entries in resolution_cache that were later overridden by manual_resolution_cache
      with a DIFFERENT value — the old auto entry is already shadowed at runtime
      but cleaning it avoids confusion.
+  4. Known-bad TMDB IDs (277700, 154634, 317316, 298754) — confirmed wrong
+     community mappings; cleared so items get fresh lookups.
+  5. (--check-fribb) Cross-validate every anime resolution_cache entry against
+     Fribb/anime-lists.  Any entry whose cached TMDB ID is NOT found as a
+     valid themoviedb value in Fribb (for the item's AniList or MAL ID) is
+     flagged as suspicious and cleared so it gets re-resolved.
 
 Usage:
-  python scripts/repair_anime_cache.py [--dry-run] [--profile-id <id>]
+  python scripts/repair_anime_cache.py [--dry-run] [--profile-id <id>] [--check-fribb]
 
   --dry-run        Print what would be changed without writing.
   --profile-id ID  Restrict to a single profile (prefix match, 8+ chars).
+  --check-fribb    Cross-validate cached anime TMDB IDs against Fribb database.
+                   Requires AniList or MAL IDs to be present in the cache key.
 
 The script writes a backup of profiles.json to profiles.json.bak before
 making any changes.
@@ -87,7 +95,78 @@ def _find_duplicate_tmdb_keys(rc: dict) -> dict[str, list[str]]:
     return {tmdb: keys for tmdb, keys in by_tmdb.items() if len(keys) > 1}
 
 
-def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool) -> dict:
+def _parse_cache_key_ids(cache_key: str) -> dict:
+    """Extract IDs embedded in a cache key string.
+
+    Cache key format (from ItemMatcher._cache_key):
+      media_type:resolver_mode:simkl_id:imdb_id:tmdb_id:mal_id:anilist_id:root_mal:root_anilist:title:year
+    """
+    parts = cache_key.split(":")
+    if len(parts) < 11:
+        return {}
+    return {
+        "media_type": parts[0],
+        "resolver_mode": parts[1],
+        "simkl_id": parts[2],
+        "imdb_id": parts[3],
+        "tmdb_id": parts[4],
+        "mal_id": parts[5],
+        "anilist_id": parts[6],
+        "root_mal": parts[7],
+        "root_anilist": parts[8],
+        "title": parts[9],
+        "year": parts[10] if len(parts) > 10 else "",
+    }
+
+
+_FRIBB_LOADED = False
+_fribb_by_anilist: dict[int, dict] = {}
+_fribb_by_mal: dict[int, dict] = {}
+
+
+def _ensure_fribb_loaded() -> bool:
+    global _FRIBB_LOADED, _fribb_by_anilist, _fribb_by_mal
+    if _FRIBB_LOADED:
+        return True
+    try:
+        from src import fribb_client  # noqa: PLC0415
+        # Force the store to load.
+        from src.fribb_client import AnimeMappingStore  # noqa: PLC0415
+        store = AnimeMappingStore.get()
+        if store is None:
+            print("[WARN] Fribb store could not be loaded; --check-fribb skipped")
+            return False
+        _fribb_by_anilist = store._by_anilist if hasattr(store, "_by_anilist") else {}
+        _fribb_by_mal = store._by_mal if hasattr(store, "_by_mal") else {}
+        # If the internal dicts aren't available, fall back to the lookup functions.
+        if not _fribb_by_anilist and not _fribb_by_mal:
+            print("[INFO] Using fribb_client lookup functions (internal index not exposed)")
+        _FRIBB_LOADED = True
+        return True
+    except Exception as exc:
+        print(f"[WARN] Could not load Fribb: {exc}; --check-fribb skipped")
+        return False
+
+
+def _fribb_tmdb_for_ids(anilist_id: str, mal_id: str) -> int | None:
+    """Return the Fribb TMDB ID for the given AniList or MAL ID, or None."""
+    try:
+        from src import fribb_client  # noqa: PLC0415
+        entry = None
+        if anilist_id:
+            entry = fribb_client.lookup_by_anilist(int(anilist_id))
+        if entry is None and mal_id:
+            entry = fribb_client.lookup_by_mal(int(mal_id))
+        if entry is None:
+            return None
+        raw = entry.get("themoviedb")
+        return int(raw) if raw else None
+    except Exception:
+        return None
+
+
+def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool,
+                   check_fribb: bool = False) -> dict:
     """Inspect and repair one profile.  Returns the (possibly modified) raw dict."""
     rc: dict = dict(profile_raw.get("resolution_cache") or {})
     mrc: dict = dict(profile_raw.get("manual_resolution_cache") or {})
@@ -157,6 +236,39 @@ def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool) -> dict:
             rc.pop(ck, None)
             frc.pop(ck, None)
 
+    # ── 5. Cross-validate against Fribb (optional, --check-fribb) ─────────────
+    #   For each anime cache entry that has an AniList or MAL ID in the key,
+    #   look up what Fribb says the TMDB ID should be.  If Fribb disagrees with
+    #   the cached TMDB ID, the cached entry is probably wrong (e.g. "An
+    #   Affirmative Act" pattern: a non-anime TMDB result was accepted for an
+    #   anime item).  Clear those entries so they get fresh lookups.
+    if check_fribb and _ensure_fribb_loaded():
+        for ck, cached_tmdb in list(rc.items()):
+            if not cached_tmdb or ck in mrc:
+                continue
+            ids_in_key = _parse_cache_key_ids(ck)
+            if not ids_in_key:
+                continue
+            # Only check items that look like anime (resolver_mode set or
+            # has anilist/mal IDs in key).
+            anilist_id = ids_in_key.get("anilist_id", "").strip()
+            mal_id_k = ids_in_key.get("mal_id", "").strip()
+            if not anilist_id and not mal_id_k:
+                continue
+            fribb_tmdb = _fribb_tmdb_for_ids(anilist_id, mal_id_k)
+            if fribb_tmdb is None:
+                # Fribb has no entry — can't validate, skip.
+                continue
+            if fribb_tmdb != int(cached_tmdb):
+                title_in_key = ids_in_key.get("title", "?")
+                changes.append(
+                    f"  [fribb-mismatch] '{title_in_key}' cached tmdb={cached_tmdb}"
+                    f" but Fribb says tmdb={fribb_tmdb}"
+                    f" (anilist={anilist_id} mal={mal_id_k}) — clearing for re-resolution"
+                )
+                rc.pop(ck, None)
+                frc.pop(ck, None)
+
     if not changes:
         print(f"  Profile {profile_id[:8]}: nothing to fix")
         return profile_raw
@@ -180,6 +292,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Repair bad anime cache entries in profiles.json")
     parser.add_argument("--dry-run", action="store_true", help="Print changes without writing")
     parser.add_argument("--profile-id", default="", help="Restrict to one profile (prefix)")
+    parser.add_argument(
+        "--check-fribb", action="store_true",
+        help="Cross-validate cached anime TMDB IDs against Fribb database "
+             "(clears entries where Fribb disagrees with the cached TMDB ID)",
+    )
     args = parser.parse_args()
 
     print(f"Loading {PROFILE_STORE_FILE} …")
@@ -194,7 +311,7 @@ def main() -> None:
     for pid, pdata in profiles.items():
         if args.profile_id and not pid.startswith(args.profile_id):
             continue
-        updated = repair_profile(pid, pdata, args.dry_run)
+        updated = repair_profile(pid, pdata, args.dry_run, check_fribb=args.check_fribb)
         if updated is not pdata:
             profiles[pid] = updated
             modified = True
