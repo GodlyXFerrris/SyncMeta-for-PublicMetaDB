@@ -176,7 +176,68 @@
     .conn-card-pmdb{display:flex;align-items:flex-start;gap:24px}
     .conn-card-pmdb-meta{min-width:180px;flex-shrink:0}
     .conn-card-pmdb-field{flex:1;min-width:0}
-    @media (max-width:700px){.hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}.form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}.cards{grid-template-columns:1fr 1fr}th,td{padding:8px 12px}.catalog-search{flex-direction:column}.settings-layout{grid-template-columns:1fr}.settings-sidebar{position:static}.conn-grid{grid-template-columns:1fr}.dash-grid{grid-template-columns:1fr}.conn-card-pmdb{flex-direction:column;gap:12px}.conn-card-pmdb-meta{min-width:0}}
+    @media (max-width:700px){
+      .hero h1{font-size:28px}.hero-card{padding:36px 24px 32px}
+      .form-grid{grid-template-columns:1fr}.settings-columns{grid-template-columns:1fr}.options-grid{grid-template-columns:1fr}.source-card{min-height:0}
+      .cards{grid-template-columns:1fr 1fr}
+      th,td{padding:8px 10px}
+      .catalog-search{flex-direction:column}
+      .settings-layout{grid-template-columns:1fr;padding:16px 0 48px;gap:0}
+      .settings-sidebar{position:static;margin-bottom:4px}
+      .settings-nav{display:flex;flex-direction:row;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:0 0 1px;border-bottom:1px solid var(--z800);gap:0;background:transparent}
+      .settings-nav::-webkit-scrollbar{display:none}
+      .settings-nav-item{flex-shrink:0;white-space:nowrap;width:auto;padding:10px 14px;border-radius:0;margin-bottom:0;border-bottom:2px solid transparent;font-size:13px}
+      .settings-nav-item.active{background:transparent;border-bottom-color:var(--accent);color:var(--white)}
+      .settings-nav-item:hover{background:transparent}
+      .settings-nav-sep{display:none}
+      .settings-page-title{font-size:18px}
+      .settings-tab.active{padding-top:16px}
+      .conn-grid{grid-template-columns:1fr}.dash-grid{grid-template-columns:1fr}
+      .conn-card-pmdb{flex-direction:column;gap:12px}.conn-card-pmdb-meta{min-width:0}
+      .dash-topbar{flex-direction:column-reverse;align-items:stretch;gap:10px;padding:16px 0 12px}
+      .dash-topbar-left{gap:6px}
+      .dash-topbar-right{justify-content:flex-start;flex-wrap:wrap}
+      .panel-header{flex-wrap:wrap;gap:8px;padding:12px 14px}
+      .panel-header .actions-bar{margin-top:0;flex-wrap:wrap}
+      .panel-body{padding:14px}
+      .history-item{flex-wrap:wrap;gap:4px}
+      .history-stats{flex-wrap:wrap;gap:8px}
+      .table-actions{min-width:0;width:auto}
+      .inline-actions{min-width:0;flex-wrap:wrap}
+      .next-sync-badge{font-size:11px;padding:5px 10px}
+      .actions-meta{font-size:12px}
+    }
+    @media (max-width:480px){
+      nav{padding:0 12px}
+      .nav-inner{height:50px}
+      .nav-logo{font-size:16px}
+      .nav-links{overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;flex-shrink:1}
+      .nav-links::-webkit-scrollbar{display:none}
+      .nav-link{padding:12px 10px;font-size:13px}
+      .nav-external{padding:12px 8px;font-size:13px}
+      .page{padding:0 12px}
+      .hero{padding:40px 12px}
+      .hero-card{padding:28px 16px 24px;border-radius:12px}
+      .hero h1{font-size:22px;letter-spacing:-1px}
+      .hero p{font-size:14px;margin-bottom:24px}
+      .hero-services{gap:8px;margin-bottom:28px}
+      .service-pill{padding:8px 14px;font-size:13px}
+      .hero-cta{padding:11px 28px;font-size:14px}
+      .cards{grid-template-columns:1fr 1fr}
+      .card{padding:14px}.card-value{font-size:18px}
+      .activity-stats{grid-template-columns:1fr 1fr}
+      .btn{padding:8px 14px;font-size:12px}.btn-sm{padding:5px 10px;font-size:11px}
+      .settings-group{padding:14px}
+      .settings-page-title{font-size:17px}
+      .provider-progress-row{grid-template-columns:80px minmax(0,1fr) auto;font-size:11px}
+      .history-item{flex-direction:column;align-items:flex-start;gap:4px}
+      .history-stats{gap:6px}
+      .toast{bottom:12px;right:12px;left:12px;max-width:none}
+      .form-grid{gap:12px}
+      .catalog-row{padding:10px}
+      .catalog-title{font-size:13px}
+      .status-groups{grid-template-columns:1fr}
+    }
     .settings-layout{display:grid;grid-template-columns:190px 1fr;gap:20px;align-items:start;padding:24px 0 64px}
     .settings-sidebar{position:sticky;top:72px}
     .settings-nav{background:transparent;padding:4px}
@@ -3349,7 +3410,14 @@
         const result = await apiPost('/api/profile/sync', { dry_run: dryRun });
 
         if (!result.ok) {
-          showToast(formatApiError(result.data, 'Unable to start sync.'), true, false);
+          if (result.status === 409) {
+            showToast('A sync is already in progress — opening dashboard.', false, true);
+            switchView('dashboard');
+            fetchStatus();
+            setPollingInterval(POLL_RUNNING_MS);
+          } else {
+            showToast(formatApiError(result.data, 'Unable to start sync.'), true, false);
+          }
           return;
         }
 
@@ -3369,7 +3437,14 @@
       try {
         const result = await apiPost('/api/profile/activity/sync', { mode });
         if (!result.ok) {
-          showToast(formatApiError(result.data, 'Unable to start activity sync.'), true, false);
+          if (result.status === 409) {
+            showToast('A sync is already in progress — opening dashboard.', false, true);
+            switchView('dashboard');
+            fetchStatus();
+            setPollingInterval(POLL_RUNNING_MS);
+          } else {
+            showToast(formatApiError(result.data, 'Unable to start activity sync.'), true, false);
+          }
           return;
         }
 
