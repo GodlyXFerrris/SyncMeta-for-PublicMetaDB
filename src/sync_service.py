@@ -2125,7 +2125,7 @@ class SyncService:
         pmdb_read_elapsed = time.perf_counter() - pmdb_read_started
         stats.phase_timings["pmdb_read_seconds"] = round(pmdb_read_elapsed, 4)
         desired_keys: set[str] = set()
-        desired_key_owners: dict[str, dict] = {}
+        desired_key_titles: dict[str, str] = {}  # key → title, for debug logging only
         pending_adds: list[tuple[dict, int, str, str]] = []
         for item in resolved:
             self._check_cancelled()
@@ -2133,25 +2133,22 @@ class SyncService:
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
-                existing_owner = desired_key_owners.get(key)
-                if self._is_distinct_anime_list_collision(existing_owner, item):
-                    stats.items_skipped_unresolved += 1
-                    unresolved_summary = _unresolved_item_summary(
-                        item,
-                        list_name=stats.list_name,
-                        unresolved_reason="tmdb_collision",
-                    )
-                    unresolved_summary["match_confidence"] = item.get("match_confidence")
-                    unresolved_summary["anime_mapping_source"] = item.get("anime_mapping_source")
-                    unresolved_summary["candidate_tmdb_id"] = tmdb_id
-                    unresolved_summary["anime_conflict_reason"] = "tmdb_collision"
-                    stats.unresolved_items.append(unresolved_summary)
-                else:
-                    stats.items_skipped_duplicate += 1
+                # PMDB (like Trakt) stores one entry per show covering all
+                # seasons — TMDB 203737 represents "Oshi no Ko" regardless of
+                # which season from SIMKL resolved to it.  A second anime item
+                # resolving to the same TMDB ID is not an error; the show is
+                # already in the desired set, so it is simply a duplicate.
+                stats.items_skipped_duplicate += 1
+                logger.debug(
+                    "Duplicate TMDB %s:%s — '%s' (%s) already covered by '%s'",
+                    tmdb_id, media_type,
+                    item.get("title"), item.get("year"),
+                    desired_key_titles.get(key, "?"),
+                )
                 self._publish_progress([stats])
                 continue
             desired_keys.add(key)
-            desired_key_owners[key] = item
+            desired_key_titles[key] = f"{item.get('title')} ({item.get('year')})"
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1
@@ -2507,30 +2504,6 @@ class SyncService:
             return False
         return True
 
-    @staticmethod
-    def _anime_source_identity(item: dict | None) -> tuple | None:
-        if not isinstance(item, dict):
-            return None
-        if str(item.get("simkl_type") or "").strip().lower() != "anime":
-            return None
-        if str(item.get("anime_resolve_mode") or "").strip().lower() != "list_identity":
-            return None
-        return (
-            str(item.get("anilist_id") or ""),
-            str(item.get("mal_id") or ""),
-            str(item.get("anidb_id") or ""),
-            str(item.get("title") or ""),
-            str(item.get("year") or ""),
-            str(item.get("media_type") or ""),
-        )
-
-    @classmethod
-    def _is_distinct_anime_list_collision(cls, left: dict | None, right: dict | None) -> bool:
-        left_id = cls._anime_source_identity(left)
-        right_id = cls._anime_source_identity(right)
-        if not left_id or not right_id:
-            return False
-        return left_id != right_id
 
     @staticmethod
     def _build_existing_map(items: list[dict]) -> dict[str, dict]:
