@@ -2041,6 +2041,64 @@ def admin_repair_anime_cache():
     })
 
 
+@app.route("/admin/api/refresh-anime-mappings", methods=["POST"])
+def admin_refresh_anime_mappings():
+    """Force an immediate re-check of Fribb and Anime-Lists upstream data.
+
+    Resets the last-checked timestamps so the next lookup triggers a fresh
+    ETag-conditional request.  If the upstream files changed, in-memory indexes
+    are rebuilt; if not (304), the existing data is kept with no overhead.
+    Returns the result: whether new data was downloaded or existing was current.
+    """
+    if not ADMIN_PASSWORD:
+        return _json_error("Admin panel not configured", 404)
+    if not _is_admin():
+        return _json_error("Not authorized", 401)
+
+    import time as _time
+    try:
+        from src.anime_mapping_store import _STORE  # noqa: PLC0415
+    except Exception as exc:
+        return jsonify({"ok": False, "error": f"Could not import store: {exc}"}), 500
+
+    results: list[str] = []
+
+    # Reset last-checked timestamps to force a re-check on the next _ensure_* call.
+    with _STORE._lock:
+        _STORE._fribb_last_checked = 0.0
+        _STORE._xml_last_checked = 0.0
+        fribb_was_loaded = _STORE._fribb_loaded
+        xml_was_loaded = _STORE._xml_loaded
+        # Also reset loaded flags so data is fully re-indexed from fresh content.
+        _STORE._fribb_loaded = False
+        _STORE._xml_loaded = False
+
+    try:
+        t0 = _time.monotonic()
+        _STORE._ensure_fribb_loaded()
+        fribb_ms = int((_time.monotonic() - t0) * 1000)
+        results.append(f"Fribb: refreshed in {fribb_ms}ms"
+                       f" ({'re-indexed' if not fribb_was_loaded else 'updated or 304'})")
+    except Exception as exc:
+        results.append(f"Fribb: ERROR — {exc}")
+
+    try:
+        t0 = _time.monotonic()
+        _STORE._ensure_xml_loaded()
+        xml_ms = int((_time.monotonic() - t0) * 1000)
+        results.append(f"Anime-Lists XML: refreshed in {xml_ms}ms"
+                       f" ({'re-indexed' if not xml_was_loaded else 'updated or 304'})")
+    except Exception as exc:
+        results.append(f"Anime-Lists XML: ERROR — {exc}")
+
+    ok = not any("ERROR" in r for r in results)
+    return jsonify({
+        "ok": ok,
+        "results": results,
+        "message": " | ".join(results),
+    })
+
+
 if __name__ == "__main__":
     import argparse
 

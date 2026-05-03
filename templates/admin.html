@@ -175,6 +175,7 @@
     <div style="display:flex;gap:8px;align-items:center">
       <button class="btn btn-ghost" id="repair-btn" onclick="repairAnimeCache(false)" title="Clear stale/wrong auto-resolved anime cache entries so they get fresh lookups on the next sync">🔧 Repair Anime Cache</button>
       <button class="btn btn-ghost" id="repair-full-btn" onclick="repairAnimeCache(true)" title="Nuclear: clear ALL auto-resolved anime entries so everything re-resolves on next sync. Use after logic fixes to clear wrong cached entries like Fate/Zero→Fate/stay night." style="color:var(--amber,#f59e0b)">🗑️ Clear All Anime Cache</button>
+      <button class="btn btn-ghost" id="refresh-mappings-btn" onclick="refreshAnimeMappings()" title="Force an immediate re-check of Fribb and Anime-Lists data against GitHub. Downloads new data if available, skips if unchanged (304).">🔄 Update Anime Lists</button>
     </div>
   </div>
 
@@ -504,6 +505,48 @@
       btn.textContent = clearAll ? '🗑️ Clear All Anime Cache' : '🔧 Repair Anime Cache';
       btn.style.color = clearAll ? 'var(--amber,#f59e0b)' : '';
     }, 5000);
+  }
+
+  // ── Anime mapping refresh ─────────────────────────────────────────────────
+  async function refreshAnimeMappings() {
+    const btn = document.getElementById('refresh-mappings-btn');
+    if (!btn) return;
+    btn.disabled = true;
+    btn.textContent = '⏳ Updating…';
+    try {
+      const resp = await fetch('/admin/api/refresh-anime-mappings', {method: 'POST'});
+      const data = await resp.json();
+      if (data.ok) {
+        btn.textContent = '✓ Updated';
+        btn.style.color = 'var(--green)';
+        if (data.results && data.results.length > 0) {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:100;display:flex;align-items:center;justify-content:center;padding:24px';
+          const box = document.createElement('div');
+          box.style.cssText = 'background:#18181b;border:1px solid #3f3f46;border-radius:12px;padding:24px;max-width:600px;width:100%';
+          box.innerHTML = `<div style="font-size:15px;font-weight:700;color:#fff;margin-bottom:12px">Anime Lists Update</div>`
+            + `<pre style="font-size:12px;color:#a1a1aa;white-space:pre-wrap;line-height:1.7">${data.results.join('\n')}</pre>`
+            + `<button onclick="this.closest('.overlay-root').remove()" style="margin-top:16px;padding:8px 18px;background:#3f3f46;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px">Close</button>`;
+          overlay.classList.add('overlay-root');
+          overlay.appendChild(box);
+          overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+          document.body.appendChild(overlay);
+        }
+      } else {
+        btn.textContent = '✗ Update failed';
+        btn.style.color = 'var(--red)';
+        console.error('Mapping refresh error:', data);
+      }
+    } catch(e) {
+      btn.textContent = '✗ Error';
+      btn.style.color = 'var(--red)';
+      console.error(e);
+    }
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '🔄 Update Anime Lists';
+      btn.style.color = '';
+    }, 6000);
   }
 </script>
 {% endif %}
