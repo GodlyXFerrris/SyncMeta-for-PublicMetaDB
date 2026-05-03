@@ -11,6 +11,11 @@ from .publicmetadb_client import PublicMetaDBClient
 
 logger = logging.getLogger(__name__)
 
+_TITLE_STOPWORDS = {
+    "the", "a", "an", "of", "and", "to", "no", "vs", "part", "season", "movie",
+    "tv", "ova", "ona", "special",
+}
+
 # External ID types to try, in order, when TMDB is missing.
 _DEFAULT_LOOKUP_CHAIN = [
     ("imdb", "imdb_id"),
@@ -242,8 +247,8 @@ class ItemMatcher:
         else:
             self._stats["not_found_failures"] += 1
 
-    def _lookup_external_mapping(self, id_type: str, ext_id: str, media_type: str) -> tuple[int | None, str, int]:
-        """Return (tmdb_id, status, votes) from PMDB external-ID mapping lookup.
+    def _lookup_external_mapping(self, id_type: str, ext_id: str, media_type: str) -> tuple[int | None, str, int, str]:
+        """Return (tmdb_id, status, votes, title) from PMDB external-ID mapping lookup.
 
         ``votes`` is the community vote count on the best matching entry.
         Zero means the mapping was submitted but never independently verified.
@@ -256,9 +261,10 @@ class ItemMatcher:
                     detail.get("tmdb_id"),
                     str(detail.get("status") or "miss"),
                     int(detail.get("votes") or 0),
+                    str(detail.get("title") or ""),
                 )
             tmdb_id = self._pmdb.lookup_by_external_id(id_type, ext_id, media_type)
-            return tmdb_id, "hit" if tmdb_id else "miss", 0
+            return tmdb_id, "hit" if tmdb_id else "miss", 0, ""
         except requests.HTTPError as exc:
             response = getattr(exc, "response", None)
             status_code = getattr(response, "status_code", None)
@@ -270,8 +276,32 @@ class ItemMatcher:
                     media_type,
                     status_code,
                 )
-                return None, "lookup_unavailable", 0
+                return None, "lookup_unavailable", 0, ""
             raise
+
+    @staticmethod
+    def _normalized_title_tokens(title: str) -> set[str]:
+        cleaned = "".join(ch.lower() if ch.isalnum() else " " for ch in str(title or ""))
+        return {
+            token for token in cleaned.split()
+            if token and token not in _TITLE_STOPWORDS and not token.isdigit()
+        }
+
+    @classmethod
+    def _titles_are_compatible(cls, source_title: str, mapped_title: str) -> bool:
+        if not mapped_title:
+            return True
+        source_tokens = cls._normalized_title_tokens(source_title)
+        mapped_tokens = cls._normalized_title_tokens(mapped_title)
+        if not source_tokens or not mapped_tokens:
+            return True
+        if source_tokens == mapped_tokens:
+            return True
+        overlap = len(source_tokens & mapped_tokens)
+        if not overlap:
+            return False
+        union = len(source_tokens | mapped_tokens)
+        return (overlap / max(1, union)) >= 0.75
 
     def _try_resolve(self, item: dict) -> MatchResult:
         title = item.get("title", "Unknown")
@@ -317,7 +347,7 @@ class ItemMatcher:
                     if not ext_id:
                         continue
                     ext_id = str(ext_id)
-                    tmdb_id, status, votes = self._lookup_external_mapping(id_type, ext_id, media_type)
+                    tmdb_id, status, votes, mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
                     if not tmdb_id:
                         logger.debug(
                             "[resolve] anime '%s' PMDB %s=%s → miss (status=%s)",
@@ -333,9 +363,15 @@ class ItemMatcher:
                         )
                         continue
                     logger.info(
-                        "[resolve] anime '%s' PMDB %s=%s → tmdb=%d (votes=%d)",
-                        title, id_type, ext_id, tmdb_id, votes,
+                        "[resolve] anime '%s' PMDB %s=%s → tmdb=%d (votes=%d title=%r)",
+                        title, id_type, ext_id, tmdb_id, votes, mapped_title,
                     )
+                    if mapped_title and not self._titles_are_compatible(title, mapped_title):
+                        logger.warning(
+                            "[resolve] anime '%s' — PMDB %s=%s returned incompatible title %r for tmdb=%d; skipping",
+                            title, id_type, ext_id, mapped_title, tmdb_id,
+                        )
+                        continue
                     if votes > 0:
                         # Community-verified mapping → accept immediately.
                         result = MatchResult(
@@ -456,7 +492,7 @@ class ItemMatcher:
                 continue
             had_lookup_candidate = True
             ext_id = str(ext_id)
-            tmdb_id, status, _votes = self._lookup_external_mapping(id_type, ext_id, media_type)
+            tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
                 logger.debug("Resolved '%s' via %s lookup (%s -> %d)", title, id_type, ext_id, tmdb_id)
                 result = MatchResult(
@@ -538,7 +574,7 @@ class ItemMatcher:
             if not ext_id:
                 continue
             ext_id = str(ext_id)
-            tmdb_id, status, _votes = self._lookup_external_mapping(id_type, ext_id, media_type)
+            tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
                 logger.info(
                     "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
@@ -746,7 +782,7 @@ class ItemMatcher:
         for id_type, root_key in [("mal", "idMal"), ("anilist", "id")]:
             root_ext_id = root.get(root_key)
             if root_ext_id:
-                tmdb_id, status, _votes = self._lookup_external_mapping(id_type, str(root_ext_id), media_type)
+                tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, str(root_ext_id), media_type)
                 if tmdb_id:
                     logger.info(
                         "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",

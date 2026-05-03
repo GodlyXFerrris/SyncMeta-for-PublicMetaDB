@@ -280,7 +280,42 @@ class ItemMatcherTests(unittest.TestCase):
         self.assertIsNone(result.tmdb_id)
         self.assertEqual(result.resolution_kind, "unresolved")
         self.assertEqual(result.unresolved_reason, "missing_anime_mapping")
-        self.assertEqual(client.calls, [])
+        self.assertEqual(client.calls, [("anilist", "999001", "movie")])
+
+    @patch("src.fribb_client.lookup_by_anilist")
+    def test_anime_list_identity_rejects_incompatible_verified_external_title(self, lookup_by_anilist) -> None:
+        lookup_by_anilist.return_value = None
+
+        client = StubPMDBClient()
+
+        def fake_lookup_detailed(id_type: str, id_value: str, media_type: str) -> dict:
+            client.calls.append((id_type, id_value, media_type))
+            if (id_type, id_value, media_type) == ("anilist", "38691", "tv"):
+                return {
+                    "tmdb_id": 68028,
+                    "status": "hit",
+                    "votes": 12,
+                    "title": "Vazquez vs Marquez I",
+                }
+            return {"tmdb_id": None, "status": "miss"}
+
+        client.lookup_by_external_id_detailed = fake_lookup_detailed  # type: ignore[method-assign]
+        matcher = ItemMatcher(client)
+
+        result = matcher.resolve_match({
+            "title": "Dr. Stone",
+            "year": 2019,
+            "media_type": "tv",
+            "simkl_type": "anime",
+            "anilist_id": "38691",
+            "ids": {"anilist": "38691"},
+            "anime_resolve_mode": "list_identity",
+        })
+
+        self.assertIsNone(result.tmdb_id)
+        self.assertEqual(result.resolution_kind, "unresolved")
+        self.assertEqual(result.unresolved_reason, "missing_anime_mapping")
+        self.assertEqual(client.calls, [("anilist", "38691", "tv")])
 
 
     def test_cache_key_includes_anilist_id_so_stale_entries_are_invalidated(self) -> None:

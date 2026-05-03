@@ -333,6 +333,13 @@ class PublicMetaDBClient:
                     # zero-vote (self-submitted, unconfirmed) mappings.
                     "votes": int(best.get("votes") or 0),
                     "result_count": len(results),
+                    "title": (
+                        best.get("title")
+                        or best.get("name")
+                        or best.get("english_title")
+                        or best.get("original_title")
+                        or ""
+                    ),
                 }
             self._record_stat("mapping_lookup_misses")
             return {"tmdb_id": None, "status": "miss"}
