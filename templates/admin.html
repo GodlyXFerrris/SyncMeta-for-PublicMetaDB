@@ -5,95 +5,126 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SyncMeta Admin</title>
   <style>
-    :root{--black:#000;--z950:#0a0a0b;--z900:#18181b;--z800:#27272a;--z700:#3f3f46;--z600:#52525b;--z500:#71717a;--z400:#a1a1aa;--z300:#d4d4d8;--z100:#f4f4f5;--white:#fff;--accent:#7c6df7;--accent2:#6c5ce7;--green:#34d399;--red:#f87171;--orange:#fbbf24}
+    :root{
+      --black:#000;--z950:#0a0a0b;--z900:#18181b;--z800:#27272a;--z700:#3f3f46;
+      --z600:#52525b;--z500:#71717a;--z400:#a1a1aa;--z300:#d4d4d8;--z100:#f4f4f5;
+      --white:#fff;--accent:#7c6df7;--accent2:#6c5ce7;
+      --green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa;
+    }
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:var(--black);color:var(--z300);min-height:100vh;-webkit-font-smoothing:antialiased}
 
-    /* NAV */
-    nav{position:sticky;top:0;z-index:50;background:rgba(0,0,0,.85);backdrop-filter:blur(24px);border-bottom:1px solid rgba(255,255,255,.08);padding:0 24px}
-    .nav-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:52px}
+    /* ── NAV ── */
+    nav{position:sticky;top:0;z-index:50;background:rgba(0,0,0,.88);backdrop-filter:blur(24px);border-bottom:1px solid rgba(255,255,255,.07);padding:0 24px}
+    .nav-inner{max-width:1280px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;height:52px}
     .nav-brand{font-size:15px;font-weight:700;color:var(--z100);letter-spacing:-.3px;display:flex;align-items:center;gap:8px;text-decoration:none}
-    .nav-badge{font-size:10px;font-weight:700;background:var(--accent);color:var(--white);padding:2px 7px;border-radius:4px;letter-spacing:.5px}
-    .nav-right{display:flex;align-items:center;gap:12px}
-    .nav-link-back{font-size:13px;color:var(--z400);text-decoration:none;padding:6px 10px;border-radius:6px;transition:color .15s,background .15s}
-    .nav-link-back:hover{color:var(--z100);background:rgba(255,255,255,.06)}
+    .nav-badge{font-size:10px;font-weight:700;background:var(--accent);color:var(--white);padding:2px 8px;border-radius:4px;letter-spacing:.6px;text-transform:uppercase}
+    .nav-right{display:flex;align-items:center;gap:10px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:opacity .15s,background .15s}
+    .btn-ghost{background:rgba(255,255,255,.07);color:var(--z300)}
+    .btn-ghost:hover{background:rgba(255,255,255,.13)}
+    .btn-danger{background:rgba(248,113,113,.13);color:var(--red)}
+    .btn-danger:hover{background:rgba(248,113,113,.22)}
+    .btn-primary{background:var(--accent);color:var(--white);width:100%;margin-top:14px;padding:11px}
+    .btn-primary:hover{opacity:.85}
 
-    /* LAYOUT */
-    .page{max-width:1200px;margin:0 auto;padding:32px 24px}
-
-    /* LOGIN */
+    /* ── LOGIN ── */
     .login-wrap{display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 52px)}
     .login-card{background:var(--z950);border:1px solid var(--z800);border-radius:14px;padding:40px 36px;width:100%;max-width:380px}
     .login-title{font-size:20px;font-weight:700;color:var(--white);margin-bottom:6px}
     .login-sub{font-size:13px;color:var(--z500);margin-bottom:28px}
-    .login-error{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.3);color:var(--red);font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:16px}
-    label{display:block;font-size:12px;font-weight:600;color:var(--z400);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+    .login-error{background:rgba(248,113,113,.1);border:1px solid rgba(248,113,113,.25);color:var(--red);font-size:13px;padding:10px 14px;border-radius:8px;margin-bottom:16px}
+    label{display:block;font-size:11px;font-weight:600;color:var(--z400);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
     input[type=password]{width:100%;background:var(--z900);border:1px solid var(--z800);border-radius:8px;padding:10px 14px;font-size:14px;color:var(--z100);outline:none;transition:border-color .15s}
     input[type=password]:focus{border-color:var(--accent)}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;border:none;transition:opacity .15s}
-    .btn-primary{background:var(--accent);color:var(--white);width:100%;margin-top:16px}
-    .btn-primary:hover{opacity:.85}
-    .btn-sm{padding:6px 14px;font-size:13px;background:rgba(255,255,255,.07);color:var(--z300);border-radius:6px}
-    .btn-sm:hover{background:rgba(255,255,255,.12)}
-    .btn-danger-sm{padding:6px 14px;font-size:13px;background:rgba(248,113,113,.12);color:var(--red);border-radius:6px}
-    .btn-danger-sm:hover{background:rgba(248,113,113,.2)}
 
-    /* DASHBOARD */
-    .dash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;gap:16px;flex-wrap:wrap}
-    .dash-title{font-size:22px;font-weight:800;color:var(--white);letter-spacing:-.5px}
-    .dash-actions{display:flex;gap:8px;align-items:center}
+    /* ── LAYOUT ── */
+    .page{max-width:1280px;margin:0 auto;padding:28px 24px 60px}
+    .dash-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;gap:16px;flex-wrap:wrap}
+    .dash-title{font-size:21px;font-weight:800;color:var(--white);letter-spacing:-.5px}
+    .dash-meta{font-size:12px;color:var(--z600);margin-top:2px}
 
-    /* STAT GRID */
-    .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-bottom:28px}
-    .stat-card{background:var(--z950);border:1px solid var(--z800);border-radius:10px;padding:16px 18px}
-    .stat-label{font-size:11px;font-weight:600;color:var(--z500);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px}
-    .stat-value{font-size:26px;font-weight:800;color:var(--white);letter-spacing:-1px}
-    .stat-sub{font-size:12px;color:var(--z500);margin-top:3px}
-    .stat-value.green{color:var(--green)}
-    .stat-value.orange{color:var(--orange)}
-    .stat-value.red{color:var(--red)}
+    /* ── STAT GRID ── */
+    .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:24px}
+    .stat-card{background:var(--z950);border:1px solid var(--z800);border-radius:10px;padding:14px 16px}
+    .stat-label{font-size:10px;font-weight:700;color:var(--z500);text-transform:uppercase;letter-spacing:.7px;margin-bottom:5px}
+    .stat-value{font-size:24px;font-weight:800;color:var(--white);letter-spacing:-1px;line-height:1}
+    .stat-sub{font-size:11px;color:var(--z600);margin-top:4px}
+    .green{color:var(--green)!important} .orange{color:var(--orange)!important} .red{color:var(--red)!important} .blue{color:var(--blue)!important}
 
-    /* SECTION */
-    .section{background:var(--z950);border:1px solid var(--z800);border-radius:12px;margin-bottom:20px;overflow:hidden}
-    .section-head{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--z800)}
-    .section-title{font-size:14px;font-weight:700;color:var(--z100)}
-    .section-body{padding:16px 20px}
+    /* ── SECTION ── */
+    .section{background:var(--z950);border:1px solid var(--z800);border-radius:12px;margin-bottom:16px;overflow:hidden}
+    .section-head{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--z800);gap:12px}
+    .section-title{font-size:13px;font-weight:700;color:var(--z100);display:flex;align-items:center;gap:8px}
+    .section-count{font-size:11px;font-weight:500;color:var(--z600)}
+    .section-body{padding:14px 18px}
 
-    /* API COUNTERS */
-    .counters-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
-    .counter-pill{background:var(--z900);border:1px solid var(--z800);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
-    .counter-source{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px}
-    .counter-nums{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+    /* ── TWO COL ── */
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+    @media(max-width:768px){.two-col{grid-template-columns:1fr}}
+
+    /* ── KV LIST ── */
+    .kv-list{display:flex;flex-direction:column;gap:6px}
+    .kv{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px}
+    .kv-key{color:var(--z500);flex-shrink:0}
+    .kv-val{color:var(--z100);font-weight:600;text-align:right;word-break:break-all}
+
+    /* ── COUNTERS ── */
+    .counters-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+    .counter-pill{background:var(--z900);border:1px solid var(--z800);border-radius:8px;padding:10px 12px}
+    .counter-source{font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+    .counter-nums{display:flex;align-items:baseline;gap:6px}
     .counter-total{font-size:20px;font-weight:800;color:var(--white)}
-    .counter-errors{font-size:12px;color:var(--red)}
+    .counter-errors{font-size:11px;color:var(--red)}
 
-    /* LOG TABLE */
-    .log-wrap{overflow-x:auto;max-height:480px;overflow-y:auto}
+    /* ── ACTIVITY BADGES ── */
+    .activity-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+    .activity-item{background:var(--z900);border:1px solid var(--z800);border-radius:8px;padding:10px 12px;text-align:center}
+    .activity-num{font-size:22px;font-weight:800;color:var(--white)}
+    .activity-label{font-size:10px;font-weight:600;color:var(--z500);text-transform:uppercase;letter-spacing:.5px;margin-top:3px}
+
+    /* ── CACHE PILLS ── */
+    .cache-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+    .cache-item{background:var(--z900);border:1px solid var(--z800);border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .cache-label{font-size:12px;color:var(--z400)}
+    .cache-val{font-size:14px;font-weight:700;color:var(--z100)}
+    .badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:.4px}
+    .badge-green{background:rgba(52,211,153,.12);color:var(--green)}
+    .badge-red{background:rgba(248,113,113,.12);color:var(--red)}
+    .badge-orange{background:rgba(251,191,36,.12);color:var(--orange)}
+    .badge-blue{background:rgba(96,165,250,.12);color:var(--blue)}
+    .badge-purple{background:rgba(124,109,247,.15);color:var(--accent)}
+
+    /* ── PROFILES TABLE ── */
+    .table-wrap{overflow-x:auto;max-height:520px;overflow-y:auto}
     table{width:100%;border-collapse:collapse;font-size:12px}
-    th{position:sticky;top:0;background:var(--z950);color:var(--z500);font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--z800);white-space:nowrap}
-    td{padding:6px 10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle;white-space:nowrap}
+    th{position:sticky;top:0;background:var(--z950);color:var(--z500);font-weight:600;text-transform:uppercase;letter-spacing:.5px;padding:8px 10px;text-align:left;border-bottom:1px solid var(--z800);white-space:nowrap;font-size:10px}
+    td{padding:7px 10px;border-bottom:1px solid rgba(255,255,255,.04);vertical-align:middle}
     tr:last-child td{border-bottom:none}
     tr:hover td{background:rgba(255,255,255,.02)}
-    .td-url{max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--z400)}
+    .td-mono{font-family:ui-monospace,monospace;color:var(--z400)}
+    .td-err{color:var(--red);max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .src-pill{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;background:rgba(124,109,247,.15);color:var(--accent);margin:1px 1px}
+    .num-cell{text-align:right;color:var(--z300);font-weight:600}
+    .num-zero{color:var(--z700)}
+
+    /* ── LOG TABLE ── */
+    .log-wrap{overflow-x:auto;max-height:460px;overflow-y:auto}
     .tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 6px;border-radius:4px;letter-spacing:.3px}
     .tag-get{background:rgba(52,211,153,.1);color:var(--green)}
     .tag-post{background:rgba(124,109,247,.15);color:var(--accent)}
     .tag-patch,.tag-put{background:rgba(251,191,36,.1);color:var(--orange)}
-    .tag-del{background:rgba(248,113,113,.1);color:var(--red)}
-    .status-ok{color:var(--green)}
-    .status-err{color:var(--red)}
-    .status-warn{color:var(--orange)}
-    .dur-fast{color:var(--green)}
-    .dur-med{color:var(--orange)}
-    .dur-slow{color:var(--red)}
+    .tag-delete{background:rgba(248,113,113,.1);color:var(--red)}
+    .status-ok{color:var(--green)} .status-err{color:var(--red)} .status-warn{color:var(--orange)}
+    .dur-fast{color:var(--green)} .dur-med{color:var(--orange)} .dur-slow{color:var(--red)}
+    .td-url{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--z400)}
 
-    /* RELOAD */
+    /* ── MISC ── */
     .auto-badge{font-size:11px;color:var(--z500);display:flex;align-items:center;gap:6px}
     .dot{width:6px;height:6px;background:var(--green);border-radius:50%;display:inline-block;animation:pulse 2s infinite}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-
-    /* EMPTY */
-    .empty{color:var(--z600);font-size:13px;padding:12px 0}
+    .empty{color:var(--z600);font-size:13px;padding:8px 0}
+    .divider{height:1px;background:var(--z800);margin:12px 0}
   </style>
 </head>
 <body>
@@ -101,15 +132,17 @@
 <nav>
   <div class="nav-inner">
     <a class="nav-brand" href="/admin">
-      SyncMeta <span class="nav-badge">ADMIN</span>
+      SyncMeta <span class="nav-badge">Admin</span>
     </a>
     <div class="nav-right">
-      <a class="nav-link-back" href="/">← App</a>
       {% if view == "dashboard" %}
+      <span class="auto-badge"><span class="dot"></span> Auto-refresh 30s</span>
+      <button class="btn btn-ghost" onclick="location.reload()">Refresh</button>
       <form method="POST" action="/admin/logout" style="margin:0">
-        <button class="btn-danger-sm btn" type="submit">Logout</button>
+        <button class="btn btn-danger" type="submit">Logout</button>
       </form>
       {% endif %}
+      <a class="btn btn-ghost" href="/" style="text-decoration:none">← App</a>
     </div>
   </div>
 </nav>
@@ -132,19 +165,20 @@
 
 {% elif view == "dashboard" %}
 <div class="page">
+
+  <!-- HEADER -->
   <div class="dash-header">
-    <div class="dash-title">Dashboard</div>
-    <div class="dash-actions">
-      <span class="auto-badge"><span class="dot"></span> Auto-refresh 30s</span>
-      <button class="btn btn-sm" onclick="location.reload()">Refresh</button>
+    <div>
+      <div class="dash-title">Dashboard</div>
+      <div class="dash-meta">Started {{ stats.system.started_at }} &middot; PID {{ stats.system.pid }}</div>
     </div>
   </div>
 
-  <!-- STAT CARDS -->
+  <!-- TOP STATS -->
   <div class="stat-grid">
     <div class="stat-card">
       <div class="stat-label">Uptime</div>
-      <div class="stat-value" id="uptime-val">{{ stats.uptime_str }}</div>
+      <div class="stat-value" id="uptime-val" style="font-size:18px">{{ stats.uptime_str }}</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Profiles</div>
@@ -155,25 +189,126 @@
       <div class="stat-value {% if stats.active_syncs > 0 %}green{% endif %}">{{ stats.active_syncs }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Errored Profiles</div>
+      <div class="stat-label">Errored</div>
       <div class="stat-value {% if stats.errored_profiles > 0 %}red{% endif %}">{{ stats.errored_profiles }}</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Total API Calls</div>
-      <div class="stat-value">{{ stats.total_api_calls }}</div>
-      <div class="stat-sub">since server start</div>
+      <div class="stat-label">API Calls</div>
+      <div class="stat-value blue">{{ stats.total_api_calls }}</div>
+      <div class="stat-sub">since start</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">API Errors</div>
       <div class="stat-value {% if stats.total_api_errors > 0 %}orange{% endif %}">{{ stats.total_api_errors }}</div>
     </div>
+    <div class="stat-card">
+      <div class="stat-label">Mem RSS</div>
+      <div class="stat-value" style="font-size:16px;padding-top:4px">{{ stats.system.mem_rss }}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Data File</div>
+      <div class="stat-value" style="font-size:16px;padding-top:4px">{{ stats.cache.profiles_file_size }}</div>
+    </div>
+  </div>
+
+  <!-- SYSTEM + LAST 24H -->
+  <div class="two-col">
+    <div class="section">
+      <div class="section-head"><span class="section-title">System</span></div>
+      <div class="section-body">
+        <div class="kv-list">
+          <div class="kv"><span class="kv-key">Python</span><span class="kv-val">{{ stats.system.python }}</span></div>
+          <div class="kv"><span class="kv-key">Platform</span><span class="kv-val">{{ stats.system.platform }}</span></div>
+          <div class="kv"><span class="kv-key">PID</span><span class="kv-val">{{ stats.system.pid }}</span></div>
+          <div class="kv"><span class="kv-key">Memory RSS</span><span class="kv-val">{{ stats.system.mem_rss }}</span></div>
+          <div class="kv"><span class="kv-key">Memory VMS</span><span class="kv-val">{{ stats.system.mem_vms }}</span></div>
+          <div class="kv"><span class="kv-key">Started at</span><span class="kv-val">{{ stats.system.started_at }}</span></div>
+          <div class="kv"><span class="kv-key">Data dir</span><span class="kv-val">{{ stats.cache.data_dir_size }}</span></div>
+          <div class="kv"><span class="kv-key">Cache dir</span><span class="kv-val">{{ stats.cache.cache_dir_size }}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-head"><span class="section-title">Last 24 Hours</span></div>
+      <div class="section-body">
+        {% if stats.last_24h %}
+        <div class="activity-grid">
+          {% set l = stats.last_24h %}
+          <div class="activity-item"><div class="activity-num">{{ l.get('sync_runs', 0) }}</div><div class="activity-label">Sync Runs</div></div>
+          <div class="activity-item"><div class="activity-num green">{{ l.get('completed_runs', 0) }}</div><div class="activity-label">Completed</div></div>
+          <div class="activity-item"><div class="activity-num red">{{ l.get('failed_runs', 0) }}</div><div class="activity-label">Failed</div></div>
+          <div class="activity-item"><div class="activity-num">{{ l.get('lists', 0) }}</div><div class="activity-label">Lists</div></div>
+          <div class="activity-item"><div class="activity-num blue">{{ l.get('fetched', 0) }}</div><div class="activity-label">Fetched</div></div>
+          <div class="activity-item"><div class="activity-num green">{{ l.get('added', 0) }}</div><div class="activity-label">Added</div></div>
+          <div class="activity-item"><div class="activity-num orange">{{ l.get('removed', 0) }}</div><div class="activity-label">Removed</div></div>
+          <div class="activity-item"><div class="activity-num red">{{ l.get('unresolved', 0) }}</div><div class="activity-label">Unresolved</div></div>
+        </div>
+        {% else %}
+        <div class="empty">No activity data yet.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- CACHE STATS -->
+  <div class="section">
+    <div class="section-head"><span class="section-title">Cache &amp; Mapping Store</span></div>
+    <div class="section-body">
+      <div class="cache-grid">
+        <div class="cache-item">
+          <span class="cache-label">Fribb anime map</span>
+          <span>
+            {% if stats.cache.fribb_loaded %}
+            <span class="badge badge-green">Loaded</span>
+            <span class="cache-val" style="margin-left:6px">{{ stats.cache.fribb_entries }}</span>
+            {% else %}
+            <span class="badge badge-orange">Not loaded</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Anime-Lists XML</span>
+          <span>
+            {% if stats.cache.xml_loaded %}
+            <span class="badge badge-green">Loaded</span>
+            <span class="cache-val" style="margin-left:6px">{{ stats.cache.xml_entries }}</span>
+            {% else %}
+            <span class="badge badge-orange">Not loaded</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Season group cache</span>
+          <span class="cache-val">{{ stats.cache.season_group_cache }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Mapping string cache</span>
+          <span class="cache-val">{{ stats.cache.mapping_str_cache }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Resolution cache</span>
+          <span class="cache-val">{{ stats.cache.resolution_cache_total }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Failed resolution</span>
+          <span class="cache-val {% if stats.cache.failed_cache_total > 0 %}orange{% endif %}">{{ stats.cache.failed_cache_total }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Manual overrides</span>
+          <span class="cache-val blue">{{ stats.cache.manual_cache_total }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Unresolved items</span>
+          <span class="cache-val {% if stats.cache.unresolved_total > 0 %}red{% endif %}">{{ stats.cache.unresolved_total }}</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- API COUNTERS -->
   <div class="section">
-    <div class="section-head">
-      <span class="section-title">API Requests by Source</span>
-    </div>
+    <div class="section-head"><span class="section-title">API Requests by Source</span></div>
     <div class="section-body">
       {% if stats.counters %}
       <div class="counters-grid">
@@ -193,10 +328,76 @@
     </div>
   </div>
 
+  <!-- PROFILES TABLE -->
+  <div class="section">
+    <div class="section-head">
+      <span class="section-title">
+        Profiles
+        <span class="section-count">{{ stats.profile_rows | length }}</span>
+      </span>
+    </div>
+    <div class="table-wrap">
+      {% if stats.profile_rows %}
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Sources</th>
+            <th>Lists</th>
+            <th>Last Sync</th>
+            <th>Next Sync</th>
+            <th>Status</th>
+            <th>Resolved</th>
+            <th>Failed</th>
+            <th>Manual</th>
+            <th>Unresolved</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in stats.profile_rows %}
+          <tr>
+            <td class="td-mono">{{ row.id }}</td>
+            <td>
+              {% for src in row.sources %}
+              <span class="src-pill">{{ src }}</span>
+              {% endfor %}
+              {% if not row.sources %}<span style="color:var(--z700)">—</span>{% endif %}
+            </td>
+            <td class="num-cell {% if not row.managed_lists %}num-zero{% endif %}">{{ row.managed_lists }}</td>
+            <td style="color:var(--z400);white-space:nowrap">{{ row.last_sync }}</td>
+            <td style="color:var(--z400);white-space:nowrap">{{ row.next_sync }}</td>
+            <td>
+              {% if row.running %}
+              <span class="badge badge-green">Syncing</span>
+              {% elif row.error %}
+              <span class="badge badge-red">Error</span>
+              {% else %}
+              <span style="color:var(--z600);font-size:11px">Idle</span>
+              {% endif %}
+            </td>
+            <td class="num-cell {% if not row.resolution_cache %}num-zero{% endif %}">{{ row.resolution_cache }}</td>
+            <td class="num-cell {% if row.failed_cache %}orange{% elif not row.failed_cache %}num-zero{% endif %}">{{ row.failed_cache }}</td>
+            <td class="num-cell {% if row.manual_cache %}blue{% elif not row.manual_cache %}num-zero{% endif %}">{{ row.manual_cache }}</td>
+            <td class="num-cell {% if row.unresolved %}red{% elif not row.unresolved %}num-zero{% endif %}">{{ row.unresolved }}</td>
+            <td class="td-err" title="{{ row.error }}">{{ row.error or "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="section-body empty">No profiles found.</div>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- REQUEST LOG -->
   <div class="section">
     <div class="section-head">
-      <span class="section-title">Recent API Requests <span style="color:var(--z600);font-weight:400;font-size:12px">(last {{ stats.log | length }})</span></span>
+      <span class="section-title">
+        API Request Log
+        <span class="section-count">last {{ stats.log | length }}</span>
+      </span>
     </div>
     <div class="log-wrap">
       {% if stats.log %}
@@ -212,18 +413,16 @@
           </tr>
         </thead>
         <tbody>
-          {% for entry in stats.log | reverse %}
+          {% for entry in stats.log %}
           <tr>
-            <td style="color:var(--z500)">{{ entry.ts_str }}</td>
-            <td style="color:var(--z300);font-weight:600">{{ entry.source }}</td>
-            <td>
-              <span class="tag tag-{{ entry.method | lower }}{% if entry.method == 'DELETE' %} tag-del{% endif %}">{{ entry.method }}</span>
-            </td>
+            <td style="color:var(--z600);font-family:ui-monospace,monospace">{{ entry.ts_str }}</td>
+            <td style="color:var(--z300);font-weight:600;white-space:nowrap">{{ entry.source }}</td>
+            <td><span class="tag tag-{{ entry.method | lower }}">{{ entry.method }}</span></td>
             <td class="{% if entry.status >= 500 %}status-err{% elif entry.status >= 400 %}status-warn{% else %}status-ok{% endif %}">
               {{ entry.status }}
             </td>
             <td class="{% if entry.duration_ms < 400 %}dur-fast{% elif entry.duration_ms < 1500 %}dur-med{% else %}dur-slow{% endif %}">
-              {{ "%.0f" | format(entry.duration_ms) }}ms
+              {{ "%.0f"|format(entry.duration_ms) }}ms
             </td>
             <td class="td-url" title="{{ entry.url }}">{{ entry.url }}</td>
           </tr>
@@ -239,7 +438,6 @@
 </div>
 
 <script>
-  // Auto-refresh every 30s
   setTimeout(() => location.reload(), 30000);
 
   // Live uptime counter
@@ -257,6 +455,5 @@
   })();
 </script>
 {% endif %}
-
 </body>
 </html>

@@ -1608,14 +1608,169 @@ def _is_admin() -> bool:
     return bool(ADMIN_PASSWORD) and _is_valid_admin_session(_admin_token())
 
 
-def _admin_stats() -> dict:
+def _admin_stats() -> dict:  # noqa: C901
     import datetime as _dt
+    import os as _os
+    import platform as _platform
+    import sys as _sys
     from src import api_logger
-    with _profile_store._lock:
-        profiles = list(_profile_store._profiles.values())
-    active = [p for p in profiles if p.get("sync_running")]
-    errored = [p for p in profiles if p.get("sync_error")]
+    from src import anime_mapping_store as _ams
 
+    # ── uptime ──────────────────────────────────────────────────────────────
+    uptime_s = int(time.time() - _server_start_time)
+    d, rem = divmod(uptime_s, 86400)
+    h, rem = divmod(rem, 3600)
+    m, s = divmod(rem, 60)
+    if d:
+        uptime_str = f"{d}d {h}h {m}m"
+    elif h:
+        uptime_str = f"{h}h {m}m {s}s"
+    else:
+        uptime_str = f"{m}m {s}s"
+
+    # ── profiles ─────────────────────────────────────────────────────────────
+    with _profile_store._lock:
+        profiles_raw = list(_profile_store._profiles.values())
+
+    from src.profile_store import _configured_sources_for_profile, parse_iso_datetime
+    active = [p for p in profiles_raw if p.get("sync_running")]
+    errored = [p for p in profiles_raw if p.get("sync_error")]
+
+    profile_rows = []
+    for p in profiles_raw:
+        pid = p.get("profile_id", "")
+        sources = _configured_sources_for_profile(p)
+        res_cache = p.get("resolution_cache") or {}
+        fail_cache = p.get("failed_resolution_cache") or {}
+        manual_cache = p.get("manual_resolution_cache") or {}
+        unresolved = p.get("unresolved_items") or []
+        managed = p.get("managed_lists") or []
+        last_sync = p.get("last_sync") or ""
+        next_sync = p.get("next_sync_at") or ""
+        err = p.get("sync_error") or ""
+
+        # humanise timestamps
+        def _rel(iso: str) -> str:
+            if not iso:
+                return "—"
+            try:
+                dt = _dt.datetime.fromisoformat(iso)
+                if dt.tzinfo:
+                    dt = dt.astimezone().replace(tzinfo=None)
+                diff = _dt.datetime.now() - dt
+                secs = int(diff.total_seconds())
+                if secs < 0:
+                    secs = -secs
+                    sign = "in "
+                else:
+                    sign = ""
+                if secs < 60:
+                    return f"{sign}{secs}s ago" if not sign else f"in {secs}s"
+                if secs < 3600:
+                    return f"{sign}{secs // 60}m ago" if not sign else f"in {secs // 60}m"
+                if secs < 86400:
+                    return f"{sign}{secs // 3600}h ago" if not sign else f"in {secs // 3600}h"
+                return f"{sign}{secs // 86400}d ago" if not sign else f"in {secs // 86400}d"
+            except Exception:
+                return iso[:16]
+
+        profile_rows.append({
+            "id": pid[:8],
+            "sources": sources,
+            "managed_lists": len(managed),
+            "last_sync": _rel(last_sync),
+            "next_sync": _rel(next_sync),
+            "running": bool(p.get("sync_running")),
+            "error": err[:120] if err else "",
+            "resolution_cache": len(res_cache),
+            "failed_cache": len(fail_cache),
+            "manual_cache": len(manual_cache),
+            "unresolved": len(unresolved),
+        })
+
+    # ── site stats (last 24h) ────────────────────────────────────────────────
+    try:
+        site_stats = _profile_store.get_site_stats()
+        last_24h = site_stats.get("last_24h", {})
+    except Exception:
+        last_24h = {}
+
+    # ── cache / anime mapping ────────────────────────────────────────────────
+    store = _ams._STORE
+    with store._lock:
+        fribb_loaded = store._fribb_loaded
+        xml_loaded = store._xml_loaded
+        fribb_entries = len(store._fribb_by_anilist) if fribb_loaded else 0
+        xml_entries = len(store._xml_by_anidb) if xml_loaded else 0
+        season_cache = len(store._same_season_group_cache)
+        mapping_str_cache = len(store._mapping_string_cache)
+
+    # data dir sizes
+    data_dir = PROFILE_STORE_FILE.parent
+    cache_dir = data_dir / "cache"
+
+    def _dir_size_mb(p: Path) -> str:
+        try:
+            total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            return f"{total / 1_048_576:.1f} MB"
+        except Exception:
+            return "—"
+
+    def _file_size(p: Path) -> str:
+        try:
+            size = p.stat().st_size
+            if size < 1024:
+                return f"{size} B"
+            if size < 1_048_576:
+                return f"{size / 1024:.1f} KB"
+            return f"{size / 1_048_576:.1f} MB"
+        except Exception:
+            return "—"
+
+    # aggregate resolution caches across profiles
+    total_res = sum(len(p.get("resolution_cache") or {}) for p in profiles_raw)
+    total_fail = sum(len(p.get("failed_resolution_cache") or {}) for p in profiles_raw)
+    total_manual = sum(len(p.get("manual_resolution_cache") or {}) for p in profiles_raw)
+    total_unresolved = sum(len(p.get("unresolved_items") or []) for p in profiles_raw)
+
+    cache_info = {
+        "fribb_loaded": fribb_loaded,
+        "fribb_entries": fribb_entries,
+        "xml_loaded": xml_loaded,
+        "xml_entries": xml_entries,
+        "season_group_cache": season_cache,
+        "mapping_str_cache": mapping_str_cache,
+        "resolution_cache_total": total_res,
+        "failed_cache_total": total_fail,
+        "manual_cache_total": total_manual,
+        "unresolved_total": total_unresolved,
+        "profiles_file_size": _file_size(PROFILE_STORE_FILE),
+        "cache_dir_size": _dir_size_mb(cache_dir),
+        "data_dir_size": _dir_size_mb(data_dir),
+    }
+
+    # ── system info ──────────────────────────────────────────────────────────
+    mem_rss = "—"
+    mem_vms = "—"
+    try:
+        import psutil as _ps
+        proc = _ps.Process()
+        mi = proc.memory_info()
+        mem_rss = f"{mi.rss / 1_048_576:.1f} MB"
+        mem_vms = f"{mi.vms / 1_048_576:.1f} MB"
+    except Exception:
+        pass
+
+    system_info = {
+        "python": _sys.version.split()[0],
+        "platform": _platform.platform(terse=True),
+        "pid": _os.getpid(),
+        "mem_rss": mem_rss,
+        "mem_vms": mem_vms,
+        "started_at": _dt.datetime.fromtimestamp(_server_start_time).strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+    # ── API log ──────────────────────────────────────────────────────────────
     raw_counters = api_logger.counters()
     req_map = raw_counters.get("requests", {})
     err_map = raw_counters.get("errors", {})
@@ -1632,24 +1787,17 @@ def _admin_stats() -> dict:
         ts = entry.get("ts", 0)
         entry["ts_str"] = _dt.datetime.fromtimestamp(ts).strftime("%H:%M:%S") if ts else "—"
 
-    uptime_s = int(time.time() - _server_start_time)
-    d, rem = divmod(uptime_s, 86400)
-    h, rem = divmod(rem, 3600)
-    m, s = divmod(rem, 60)
-    if d:
-        uptime_str = f"{d}d {h}h {m}m"
-    elif h:
-        uptime_str = f"{h}h {m}m {s}s"
-    else:
-        uptime_str = f"{m}m {s}s"
-
     return {
         "uptime_seconds": uptime_s,
         "uptime_str": uptime_str,
-        "profile_count": len(profiles),
+        "profile_count": len(profiles_raw),
         "active_syncs": len(active),
         "errored_profiles": len(errored),
         "active_sync_ids": [p.get("profile_id", "")[:8] for p in active],
+        "profile_rows": profile_rows,
+        "last_24h": last_24h,
+        "cache": cache_info,
+        "system": system_info,
         "counters": counters_normalized,
         "total_api_calls": total_calls,
         "total_api_errors": total_errors,
