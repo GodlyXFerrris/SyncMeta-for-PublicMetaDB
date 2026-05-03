@@ -1954,8 +1954,6 @@ def admin_repair_anime_cache():
     if not _is_admin():
         return _json_error("Not authorized", 401)
 
-    from collections import defaultdict as _dd
-
     FLAGGED_TMDB_IDS = {"277700", "154634", "317316", "298754"}
     report: list[str] = []
     total_cleared = 0
@@ -1977,21 +1975,9 @@ def admin_repair_anime_cache():
                     changed = True
                     total_cleared += 1
 
-            # 2. Duplicate TMDB IDs (collision pairs) — clear non-manual entries.
-            by_tmdb: dict = _dd(list)
-            for ck, tid in rc.items():
-                if tid:
-                    by_tmdb[str(tid)].append(ck)
-            for tmdb_str, dup_keys in by_tmdb.items():
-                non_manual = [k for k in dup_keys if k not in mrc]
-                if len(non_manual) <= 1:
-                    continue
-                for ck in non_manual:
-                    report.append(f"{pid[:8]}: collision tmdb={tmdb_str} rc[{ck!r}] — cleared")
-                    rc.pop(ck, None)
-                    frc.pop(ck, None)
-                    changed = True
-                    total_cleared += 1
+            # 2. (removed) Duplicate TMDB ID collision cleanup — no longer valid.
+            #    PMDB is season-agnostic: multiple anime seasons legitimately share
+            #    the same TMDB ID, so clearing "duplicates" just creates a loop.
 
             # 3. Flagged TMDB IDs — clear from auto cache so they get fresh lookups.
             for ck, tid in list(rc.items()):

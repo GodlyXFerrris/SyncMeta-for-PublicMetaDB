@@ -40,7 +40,6 @@ import json
 import os
 import shutil
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 # ── resolve repo root ────────────────────────────────────────────────────────
@@ -83,16 +82,6 @@ def _decrypt_credentials(profile_id: str, profile_raw: dict) -> dict | None:
     # resolution_cache is stored as plain dict — no decryption needed.
     return profile_raw
 
-
-def _find_duplicate_tmdb_keys(rc: dict) -> dict[str, list[str]]:
-    """Return {tmdb_id_str: [cache_key, ...]} for TMDB IDs that appear more
-    than once in the resolution_cache.  These are candidates for collision
-    entries where both items were cached with the same wrong TMDB ID."""
-    by_tmdb: dict[str, list[str]] = defaultdict(list)
-    for cache_key, tmdb_id in rc.items():
-        if tmdb_id:
-            by_tmdb[str(tmdb_id)].append(cache_key)
-    return {tmdb: keys for tmdb, keys in by_tmdb.items() if len(keys) > 1}
 
 
 def _parse_cache_key_ids(cache_key: str) -> dict:
@@ -188,27 +177,10 @@ def repair_profile(profile_id: str, profile_raw: dict, dry_run: bool,
             )
             del rc[ck]
 
-    # ── 2. Detect duplicate TMDB IDs in resolution_cache (collision pairs) ───
-    dups = _find_duplicate_tmdb_keys(rc)
-    for tmdb_id_str, dup_keys in dups.items():
-        # Skip if ALL of these keys are also in manual_resolution_cache
-        # (user already fixed them manually).
-        non_manual = [k for k in dup_keys if k not in mrc]
-        if len(non_manual) <= 1:
-            continue
-        # These are anime cache keys that map to the same TMDB ID.
-        # The first one that was synced is correct; the rest are wrong.
-        # We can't know which is "first" so we clear them ALL from the
-        # auto cache — they will get fresh lookups on the next sync.
-        # Manual overrides are untouched.
-        for ck in non_manual:
-            changes.append(
-                f"  [collision] tmdb={tmdb_id_str} ← cache_key={ck!r}: "
-                f"clearing from resolution_cache (will re-resolve on next sync)"
-            )
-            rc.pop(ck, None)
-            # Also clear from failed_resolution_cache so it gets retried.
-            frc.pop(ck, None)
+    # ── 2. (removed) Duplicate TMDB ID cleanup was here but is no longer valid.
+    #   PMDB is season-agnostic (like Trakt): multiple anime seasons legitimately
+    #   resolve to the same TMDB ID.  Clearing those entries as "collisions" just
+    #   causes them to be re-resolved and re-cached on the next sync.
 
     # ── 3. Clear unresolved items whose cache_key is already in manual cache ──
     #   They should have been removed by resolve_item_manually but may linger
