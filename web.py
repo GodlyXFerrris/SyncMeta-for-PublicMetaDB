@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import re
 import secrets
 import threading
@@ -47,6 +48,7 @@ PROFILE_STORE_FILE = Path(
     os.getenv("PROFILE_STORE_FILE", str(Path(__file__).resolve().parent / "data" / "profiles.json"))
 )
 SCHEDULER_POLL_SECONDS = 5
+MAX_CONCURRENT_SYNCS = max(1, int(os.getenv("SYNCMETA_MAX_CONCURRENT_SYNCS", "2") or "2"))
 SESSION_COOKIE_NAME = "syncmeta_session"
 ACCESS_COOKIE_NAME = "syncmeta_site_access"
 SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))
@@ -455,6 +457,17 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
     profile_id = profile["profile_id"]
     modes = sync_modes or profile.get("pending_sync_modes") or {"lists": True, "history": False, "resume": False}
     try:
+        try:
+            latest_profile = _profile_store.get_private_profile_by_id(profile_id)
+            latest_profile["pending_sync_modes"] = modes
+            profile = latest_profile
+        except KeyError:
+            logger.warning("Queued sync skipped because profile %s no longer exists", profile_id[:8])
+            return
+        if _profile_store.is_sync_cancel_requested(profile_id):
+            logger.info("Queued sync cancelled before start for profile %s", profile_id[:8])
+            _profile_store.record_sync_cancelled(profile_id, dry_run=dry_run, sync_modes=modes)
+            return
         _profile_store.update_sync_status(profile_id, "Starting sync")
         service = SyncService(
             _config_from_profile(profile, dry_run=dry_run, sync_modes=modes),
@@ -490,6 +503,46 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
         _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run, sync_modes=modes)
+
+
+class SyncRunner:
+    """Runs sync jobs through a bounded worker pool instead of unbounded threads."""
+
+    def __init__(self, max_workers: int = MAX_CONCURRENT_SYNCS):
+        self._max_workers = max(1, int(max_workers))
+        self._queue: queue.Queue[tuple[dict, bool, dict | None]] = queue.Queue()
+        self._workers: list[threading.Thread] = []
+        self._lock = threading.Lock()
+        self._started = False
+
+    def start(self) -> None:
+        with self._lock:
+            if self._started:
+                return
+            for idx in range(self._max_workers):
+                worker = threading.Thread(
+                    target=self._worker_loop,
+                    name=f"sync-worker-{idx + 1}",
+                    daemon=True,
+                )
+                worker.start()
+                self._workers.append(worker)
+            self._started = True
+
+    def enqueue(self, profile: dict, dry_run: bool = False, sync_modes: dict | None = None) -> None:
+        self.start()
+        self._queue.put((profile, dry_run, sync_modes))
+
+    def queue_size(self) -> int:
+        return self._queue.qsize()
+
+    def _worker_loop(self) -> None:
+        while True:
+            profile, dry_run, sync_modes = self._queue.get()
+            try:
+                _run_profile_sync(profile, dry_run=dry_run, sync_modes=sync_modes)
+            finally:
+                self._queue.task_done()
 
 
 def _find_managed_list(profile: dict, list_name: str) -> dict | None:
@@ -891,17 +944,13 @@ class ProfileScheduler:
                     self._stop.wait(30)
                     if self._stop.is_set():
                         return
-                threading.Thread(
-                    target=_run_profile_sync,
-                    args=(profile, False, profile.get("pending_sync_modes")),
-                    name=f"sync-{profile['profile_id'][:8]}",
-                    daemon=True,
-                ).start()
+                _sync_runner.enqueue(profile, False, profile.get("pending_sync_modes"))
             first_poll = False
             self._stop.wait(self._poll_seconds)
 
 
 _scheduler = ProfileScheduler(_profile_store)
+_sync_runner = SyncRunner(MAX_CONCURRENT_SYNCS)
 
 
 def _ensure_scheduler_started() -> None:
@@ -911,6 +960,7 @@ def _ensure_scheduler_started() -> None:
     with _scheduler_lock:
         if _scheduler_started:
             return
+        _sync_runner.start()
         _scheduler.start()
         _scheduler_started = True
 
@@ -1408,14 +1458,9 @@ def api_profile_sync():
     except RuntimeError:
         return _json_error("Sync already in progress", 409)
 
-    thread = threading.Thread(
-        target=_run_profile_sync,
-        args=(profile, dry_run, {"lists": True, "history": False, "resume": False}),
-        name=f"manual-sync-{profile['profile_id'][:8]}",
-        daemon=True,
-    )
-    thread.start()
-    return jsonify({"status": "started", "dry_run": dry_run})
+    sync_modes = {"lists": True, "history": False, "resume": False}
+    _sync_runner.enqueue(profile, dry_run, sync_modes)
+    return jsonify({"status": "started", "dry_run": dry_run, "queued_jobs": _sync_runner.queue_size()})
 
 
 @app.route("/api/profile/activity/sync", methods=["POST"])
@@ -1452,14 +1497,8 @@ def api_profile_activity_sync():
     except RuntimeError:
         return _json_error("Sync already in progress", 409)
 
-    thread = threading.Thread(
-        target=_run_profile_sync,
-        args=(claimed, False, sync_modes),
-        name=f"activity-sync-{mode}-{claimed['profile_id'][:8]}",
-        daemon=True,
-    )
-    thread.start()
-    return jsonify({"status": "started", "mode": mode})
+    _sync_runner.enqueue(claimed, False, sync_modes)
+    return jsonify({"status": "started", "mode": mode, "queued_jobs": _sync_runner.queue_size()})
 
 
 @app.route("/api/profile/activity/history/clear", methods=["POST"])

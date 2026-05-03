@@ -39,43 +39,42 @@ class WebTests(unittest.TestCase):
         self.assertIn("MDBList Lists", html)
         self.assertIn("Search public MDBList lists", html)
         self.assertIn("dot-mdblist", html)
-        self.assertIn("If SIMKL asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
-        self.assertIn("If Trakt asks for a redirect URL, use your SyncMeta HTTPS URL.", html)
+        self.assertIn("Use the redirect URL if asked.", html)
+        self.assertIn('id="simkl-redirect-url"', html)
+        self.assertIn('id="trakt-redirect-url"', html)
         self.assertIn("https://github.com/Febsho/SyncMeta-for-PublicMetaDB", html)
-        self.assertIn("<h3>Options</h3>", html)
-        self.assertIn("SIMKL Lists Visibility", html)
-        self.assertIn("AniList Lists Visibility", html)
-        self.assertIn("Trakt Personal Lists Visibility", html)
-        self.assertIn("Trakt Public Lists Visibility", html)
-        self.assertIn("MDBList Visibility", html)
-        self.assertIn("Applies to Trakt watchlist and default personal-style catalogs like recommendations.", html)
+        self.assertIn("List Visibility", html)
+        self.assertIn('id="opt-simkl-visibility"', html)
+        self.assertIn('id="opt-anilist-visibility"', html)
+        self.assertIn('id="opt-trakt-personal-visibility"', html)
+        self.assertIn('id="opt-trakt-public-visibility"', html)
+        self.assertIn('id="opt-mdblist-visibility"', html)
+        self.assertIn("Recommended: private", html)
         self.assertIn("Applies to liked Trakt lists and Discover/public Trakt lists.", html)
         self.assertIn("Delete User Records", html)
         self.assertIn("Danger Zone", html)
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
-        self.assertIn("personal created lists, liked lists, and selected public Trakt lists", html)
+        self.assertIn("Watchlist, liked lists, personal lists, history, and device auth.", html)
         self.assertIn("personal or public-style catalog lists", html)
-        self.assertIn("Watch History Source", html)
-        self.assertIn("Sync watch history automatically in the background", html)
-        self.assertIn("Watch History Update Every (Seconds)", html)
-        self.assertIn("Minimum 86400 seconds (24h)", html)
-        self.assertIn("Only import SIMKL anime watch history", html)
-        self.assertIn("Resume Progress Source", html)
         self.assertIn("Activity Sync", html)
+        self.assertIn("Sync watch history automatically in the background", html)
+        self.assertIn("Auto-Sync Every (Seconds)", html)
+        self.assertIn("Minimum 86400 s (24 h). Only affects automatic history sync.", html)
+        self.assertIn("Only import SIMKL anime watch history", html)
+        self.assertIn('id="opt-activity-resume-source"', html)
         self.assertIn('id="activity-cards"', html)
         self.assertIn("Sync Watch History", html)
         self.assertIn("Clear PMDB History", html)
         self.assertIn("Sync Resume Progress", html)
-        self.assertIn("Watch history can run manually from the dashboard button or automatically on the schedule above", html)
-        self.assertIn("Resume progress also refreshes automatically every 10 minutes while background sync is on", html)
-        self.assertIn("Watched history imports only add items that are not already watched in PublicMetaDB", html)
+        self.assertIn("Import your watched history into PublicMetaDB. Only adds items not already marked watched. Run manually from the dashboard or on a background schedule.", html)
+        self.assertIn("Trakt resume also refreshes automatically every 10 minutes while background sync is on.", html)
         self.assertIn("RESULTS_PAGE_SIZE = 25", html)
         self.assertIn("results-prev-page", html)
         self.assertIn('id="btn-stop"', html)
         self.assertIn("SyncMeta</div>", html)
         self.assertNotIn("cookie_notice_ack", html)
-        self.assertIn("choose exactly which movie, show, and anime statuses should sync", html)
-        self.assertIn("choose which anime lists should sync into PublicMetaDB", html)
+        self.assertIn("Choose which movie, show, and anime statuses should sync from SIMKL.", html)
+        self.assertIn("Choose which anime lists should sync into PublicMetaDB.", html)
         self.assertIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
         self.assertNotIn('href="/impressum"', html)
         self.assertNotIn('href="/datenschutz"', html)
@@ -803,15 +802,70 @@ class WebTests(unittest.TestCase):
         })
         self.assertEqual(login_response.status_code, 200)
 
-        with patch("web.threading.Thread") as mock_thread:
+        with patch.object(web._sync_runner, "enqueue") as mock_enqueue:
             response = self.client.post("/api/profile/activity/sync", json={"mode": "history"})
             data = response.get_json()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(data["status"], "started")
         self.assertEqual(data["mode"], "history")
-        thread_args = mock_thread.call_args.kwargs["args"]
-        self.assertEqual(thread_args[2], {"lists": False, "history": True, "resume": False, "full_history": True})
+        enqueue_args = mock_enqueue.call_args.args
+        self.assertEqual(enqueue_args[2], {"lists": False, "history": True, "resume": False, "full_history": True})
+
+    def test_profile_sync_endpoint_enqueues_list_job(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "selected_statuses": {"shows": [], "movies": [], "anime": []},
+            },
+            "anilist": {
+                "username": "",
+                "access_token": "",
+                "selected_statuses": [],
+            },
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {
+                "api_key": "",
+                "selected_lists": [],
+            },
+            "pmdb": {
+                "api_key": "pmdb-key",
+            },
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows", "movies", "anime"],
+        })
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        with patch.object(web._sync_runner, "enqueue") as mock_enqueue, patch.object(web._sync_runner, "queue_size", return_value=3):
+            response = self.client.post("/api/profile/sync", json={"dry_run": False})
+            data = response.get_json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(data["status"], "started")
+        self.assertEqual(data["dry_run"], False)
+        self.assertEqual(data["queued_jobs"], 3)
+        enqueue_args = mock_enqueue.call_args.args
+        self.assertEqual(enqueue_args[1], False)
+        self.assertEqual(enqueue_args[2], {"lists": True, "history": False, "resume": False})
 
     @patch("web.PublicMetaDBClient.add_item_to_list")
     @patch("web._resolve_unresolved_item_automatically")
