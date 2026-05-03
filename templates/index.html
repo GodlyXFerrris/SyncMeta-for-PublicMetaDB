@@ -70,7 +70,9 @@
     .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px}.toggle-row:last-child{margin-bottom:0}.toggle-row>label:last-child{margin-bottom:0;text-transform:none;font-size:13px;color:var(--z300);font-weight:400}
     .toggle{position:relative;width:36px;height:20px;flex-shrink:0}.toggle input{opacity:0;width:0;height:0}.toggle .slider{position:absolute;inset:0;background:var(--z800);border:1px solid var(--z700);border-radius:10px;cursor:pointer}.toggle .slider:before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:var(--z500);border-radius:50%;transition:all .2s}.toggle input:checked + .slider{background:var(--accent2);border-color:var(--accent)}.toggle input:checked + .slider:before{transform:translateX(16px);background:var(--white)}
     .btn{padding:9px 18px;border-radius:6px;border:1px solid var(--z800);background:var(--z900);color:var(--z300);font-size:13px;font-weight:500;cursor:pointer;display:inline-flex;align-items:center;gap:6px}.btn:hover{border-color:var(--z600);color:var(--z100)}.btn:disabled{opacity:.4;cursor:not-allowed}.btn-primary{background:var(--accent2);border-color:var(--accent2);color:var(--white);font-weight:600}.btn-primary:hover{background:var(--accent)}.btn-danger{background:rgba(127,29,29,.9);border-color:rgba(248,113,113,.35);color:var(--white);font-weight:700}.btn-danger:hover{background:rgba(153,27,27,.95);border-color:rgba(248,113,113,.55);color:var(--white)}.btn-sm{padding:6px 12px;font-size:12px}.btn-ghost{background:transparent;border-color:transparent;color:var(--z400)}.btn-ghost:hover{color:var(--red)}
-    .dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot-ok{background:var(--green)}.dot-off{background:var(--z700)}
+    .dot{width:8px;height:8px;border-radius:50%;display:inline-block}.dot-ok{background:var(--green)}.dot-off{background:var(--z700)}.dot-err{background:var(--red);box-shadow:0 0 0 2px rgba(248,113,113,.25);animation:dot-pulse 2s infinite}@keyframes dot-pulse{0%,100%{box-shadow:0 0 0 2px rgba(248,113,113,.25)}50%{box-shadow:0 0 0 4px rgba(248,113,113,.1)}}
+    .conn-token-error{display:none;margin-top:8px;padding:8px 12px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:7px;font-size:12px;color:var(--red);gap:6px;align-items:flex-start}
+    .conn-token-error.visible{display:flex}
     .spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--z800);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
     .empty{text-align:center;padding:40px 20px;color:var(--z600);font-size:13px}.history-item{padding:12px 18px;border-bottom:1px solid rgba(39,39,46,.3);font-size:13px;display:flex;justify-content:space-between;align-items:center}.history-item:last-child{border-bottom:none}.history-time{color:var(--z500);font-size:12px}.history-stats{display:flex;gap:14px;font-variant-numeric:tabular-nums}
     .activity-cards{margin-bottom:0}
@@ -428,6 +430,9 @@
                     </div>
                     <div class="hint">If the SIMKL page doesn't auto-fill, paste the PIN manually.</div>
                   </div>
+                  <div class="conn-token-error" id="token-error-simkl">
+                    <span>⚠</span><span id="token-error-simkl-msg"></span>
+                  </div>
                 </div>
                 <div class="conn-card form-section">
                   <div class="conn-card-title"><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
@@ -458,6 +463,9 @@
                       <button class="btn btn-sm" type="button" onclick="openTraktVerification()">Open Trakt</button>
                     </div>
                     <div class="hint">If the Trakt page doesn't auto-fill, paste the code manually.</div>
+                  </div>
+                  <div class="conn-token-error" id="token-error-trakt">
+                    <span>⚠</span><span id="token-error-trakt-msg"></span>
                   </div>
                 </div>
               </div>
@@ -1141,7 +1149,7 @@
       }, 250);
     }
 
-    function populateForm(creds, opts, profileMeta) {
+    function populateForm(creds, opts, profileMeta, syncError) {
       const meta = profileMeta || {};
       const simkl = creds && creds.simkl ? creds.simkl : {};
       const anilist = creds && creds.anilist ? creds.anilist : {};
@@ -1222,6 +1230,7 @@
       ensureLinkedSourceDefaults(false);
       renderActivityOptionVisibility();
       updateDots();
+      applyTokenErrors(syncError || '');
       renderSimklStatuses();
       renderAniListStatuses();
       renderTraktCatalogs();
@@ -1264,8 +1273,58 @@
       setDot('dot-pmdb', hasSecretInputOrSaved('pmdb-api-key', 'pmdb', 'api_key_saved'));
     }
 
-    function setDot(id, ok) {
-      el(id).className = 'dot ' + (ok ? 'dot-ok' : 'dot-off');
+    // 'state' is 'ok' | 'off' | 'err'
+    function setDot(id, okOrState, errorMsg) {
+      const node = el(id);
+      if (!node) return;
+      let state = okOrState;
+      if (typeof okOrState === 'boolean') state = okOrState ? 'ok' : 'off';
+      node.className = 'dot dot-' + state;
+      node.title = state === 'err' ? (errorMsg || 'Token error — reconnect this service') : '';
+    }
+
+    // Parse sync_error text to figure out which provider is broken and show
+    // the red dot + inline banner under that connection card.
+    function applyTokenErrors(syncError) {
+      const providers = [
+        {
+          key: 'trakt',
+          dotId: 'dot-trakt',
+          bannerId: 'token-error-trakt',
+          msgId: 'token-error-trakt-msg',
+          patterns: [/trakt.*token/i, /trakt.*expired/i, /reconnect trakt/i, /trakt.*401/i, /401.*trakt/i, /trakt.*forbidden/i],
+        },
+        {
+          key: 'simkl',
+          dotId: 'dot-simkl',
+          bannerId: 'token-error-simkl',
+          msgId: 'token-error-simkl-msg',
+          patterns: [/simkl.*token/i, /simkl.*expired/i, /reconnect simkl/i, /simkl.*401/i, /401.*simkl/i],
+        },
+      ];
+
+      for (const p of providers) {
+        const banner = el(p.bannerId);
+        const msgEl = el(p.msgId);
+        const dotEl = el(p.dotId);
+        if (!banner || !msgEl || !dotEl) continue;
+
+        const hasError = syncError && p.patterns.some(re => re.test(syncError));
+        if (hasError) {
+          // Only show red dot if the token is actually saved (dot is currently green).
+          if (dotEl.classList.contains('dot-ok')) {
+            setDot(p.dotId, 'err', syncError);
+          }
+          msgEl.textContent = syncError;
+          banner.classList.add('visible');
+        } else {
+          // Clear error state — if token is saved restore green dot.
+          if (dotEl.classList.contains('dot-err')) {
+            setDot(p.dotId, 'ok');
+          }
+          banner.classList.remove('visible');
+        }
+      }
     }
 
     function renderActivityOptionVisibility() {
@@ -3118,7 +3177,7 @@
         }
 
         const profile = result.data.profile;
-        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
+        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id }, profile.sync_error || '');
         renderDashboard(profile);
         clearDraftDirty();
         flashSaved();
@@ -3152,7 +3211,7 @@
         }
 
         const profile = result.data.profile;
-        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
+        populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id }, profile.sync_error || '');
         renderDashboard(profile);
         saveDraft(false);
         clearDraftDirty();
@@ -3202,7 +3261,7 @@
         }
         refreshPollingForProfile(profile);
         if (wantsCredentials) {
-          populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id });
+          populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id }, profile.sync_error || '');
         }
         const renderKey = JSON.stringify({
           sync_running: !!profile.sync_running,
@@ -3224,6 +3283,8 @@
         }
         lastStatusRenderKey = renderKey;
         renderDashboard(profile);
+        // Keep connection-card error banners and dots in sync as sync_error changes.
+        applyTokenErrors(profile.sync_error || '');
         return profile;
       } catch {
         if (!wantsCredentials && lastDashboardProfile) {
@@ -3431,7 +3492,7 @@
         el('profile-password').value = newPassword;
         el('profile-new-password').value = '';
         if (result.data.profile) {
-          populateForm(result.data.profile.credentials, result.data.profile.options, { profile_id: result.data.profile.profile_id });
+          populateForm(result.data.profile.credentials, result.data.profile.options, { profile_id: result.data.profile.profile_id }, result.data.profile.sync_error || '');
           renderDashboard(result.data.profile);
         }
         saveDraft(false);
@@ -3506,7 +3567,7 @@
         deletingManagedListName = '';
         pendingDeleteListName = '';
         if (profile) {
-          populateForm(profile.credentials || gatherDraftCreds(), profile.options || gatherOptions(), profile);
+          populateForm(profile.credentials || gatherDraftCreds(), profile.options || gatherOptions(), profile, profile.sync_error || '');
           saveDraft(false);
           clearDraftDirty();
           renderDashboard(profile);
