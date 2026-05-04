@@ -342,6 +342,10 @@ class ItemMatcher:
                 pmdb_candidate_source: str = ""
                 pmdb_candidate_ext_id: str = ""
                 pmdb_candidate_votes: int = 0
+                # First blocked ID seen is surfaced as a candidate hint in the
+                # unresolved summary so the user can understand why their anime
+                # is stuck and manually pick a better TMDB entry.
+                blocked_candidate: int | None = None
                 for id_type, item_key in self._lookup_chain_for_item(item):
                     ext_id = item.get(item_key) or ids.get(id_type) or ids.get(item_key)
                     if not ext_id:
@@ -361,6 +365,8 @@ class ItemMatcher:
                             " (known bad mapping); skipping",
                             title, id_type, ext_id, tmdb_id,
                         )
+                        if blocked_candidate is None:
+                            blocked_candidate = tmdb_id
                         continue
                     logger.info(
                         "[resolve] anime '%s' PMDB %s=%s → tmdb=%d (votes=%d title=%r)",
@@ -439,13 +445,16 @@ class ItemMatcher:
                 unresolved_reason = fribb_result.unresolved_reason or "missing_anime_mapping"
                 if unresolved_reason == "not_found":
                     unresolved_reason = "missing_anime_mapping"
+                # Surface the blocked ID (if any) as the candidate hint so the
+                # unresolved panel shows what was rejected and why.
+                candidate = fribb_result.candidate_tmdb_id or blocked_candidate
                 return MatchResult(
                     tmdb_id=None,
                     resolution_kind="unresolved",
                     unresolved_reason=unresolved_reason,
                     match_confidence=fribb_result.match_confidence or "unresolved",
                     anime_mapping_source=fribb_result.anime_mapping_source or "fribb_exact",
-                    candidate_tmdb_id=fribb_result.candidate_tmdb_id,
+                    candidate_tmdb_id=candidate,
                 )
 
             # Fribb exact lookup — primary for non-list_identity modes.
@@ -494,7 +503,33 @@ class ItemMatcher:
             ext_id = str(ext_id)
             tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
-                logger.debug("Resolved '%s' via %s lookup (%s -> %d)", title, id_type, ext_id, tmdb_id)
+                # For anime items, apply the same safety guards used in list_identity
+                # mode so wrong community mappings can't enter the library via the
+                # history/resume/generic fallback path either.
+                if is_anime:
+                    if tmdb_id in _BLOCKED_ANIME_PMDB_TMDB_IDS:
+                        logger.warning(
+                            "[resolve] anime '%s' (mode=%s) — fallback: PMDB %s=%s"
+                            " returned blocked TMDB %d (known bad mapping); skipping",
+                            title, anime_resolve_mode, id_type, ext_id, tmdb_id,
+                        )
+                        continue
+                    if _mapped_title and not self._titles_are_compatible(title, _mapped_title):
+                        logger.warning(
+                            "[resolve] anime '%s' (mode=%s) — fallback: PMDB %s=%s"
+                            " returned incompatible title %r for TMDB %d; skipping",
+                            title, anime_resolve_mode, id_type, ext_id,
+                            _mapped_title, tmdb_id,
+                        )
+                        continue
+                    logger.info(
+                        "[resolve] anime '%s' (mode=%s) — fallback: PMDB %s=%s → tmdb=%d"
+                        " (votes=%d title=%r) accepted",
+                        title, anime_resolve_mode, id_type, ext_id, tmdb_id,
+                        _votes, _mapped_title,
+                    )
+                else:
+                    logger.debug("Resolved '%s' via %s lookup (%s -> %d)", title, id_type, ext_id, tmdb_id)
                 result = MatchResult(
                     tmdb_id=tmdb_id,
                     resolution_kind="external_mapping",

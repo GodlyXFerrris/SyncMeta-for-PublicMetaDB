@@ -3038,7 +3038,15 @@
       const result = await apiPost('/api/profile/unresolved/resolve', {cache_key: cacheKey, tmdb_id: tmdbId});
       if (result.ok) {
         const added = result.data.pmdb_added;
-        if (mapBtn) { mapBtn.textContent = added ? '✓ Added to list' : '✓ Mapped'; mapBtn.style.color = 'var(--green)'; }
+        const skipReason = result.data.pmdb_skip_reason;
+        let btnLabel = '✓ Added to list';
+        if (!added) {
+          if (skipReason === 'no_pmdb_api_key') btnLabel = '✓ Saved (no PMDB key)';
+          else if (skipReason === 'list_not_found') btnLabel = '✓ Saved — sync to add';
+          else if (skipReason === 'item_not_in_unresolved') btnLabel = '✓ Override saved';
+          else btnLabel = '✓ Saved — sync to add';
+        }
+        if (mapBtn) { mapBtn.textContent = btnLabel; mapBtn.style.color = 'var(--green)'; }
         // Re-render dashboard stats so unresolved/added counts update instantly.
         if (result.data.profile) { lastDashboardProfile = result.data.profile; renderDashboard(result.data.profile); }
         setTimeout(() => renderUnresolvedPanel(result.data.items || []), 800);
