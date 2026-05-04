@@ -163,8 +163,12 @@ class StubPMDBClient:
 
 
 class StubTraktClient:
-    def __init__(self) -> None:
+    def __init__(self, playback_progress: list[dict] | None = None) -> None:
         self.last_history_since = None
+        self.playback_progress = playback_progress or [
+            {"tmdb_id": 903, "media_type": "movie", "position_ms": 1_800_000, "runtime_ms": 3_600_000, "progress": 50, "title": "Resume Movie"},
+            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "position_ms": 3_000_000, "runtime_ms": 3_600_000, "progress": 83.3, "title": "Completed Episode"},
+        ]
 
     def get_watchlist(self) -> list[dict]:
         return [
@@ -189,10 +193,7 @@ class StubTraktClient:
         ]
 
     def get_playback_progress(self) -> list[dict]:
-        return [
-            {"tmdb_id": 903, "media_type": "movie", "position_ms": 1_800_000, "runtime_ms": 3_600_000, "progress": 50, "title": "Resume Movie"},
-            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "position_ms": 3_000_000, "runtime_ms": 3_600_000, "progress": 83.3, "title": "Completed Episode"},
-        ]
+        return list(self.playback_progress)
 
 
 class StubRepeatedWatchTraktClient(StubTraktClient):
@@ -1082,7 +1083,7 @@ class SyncServiceTests(unittest.TestCase):
         config.trakt.access_token = "trakt-token"
         config.trakt.enabled = True
 
-        service = SyncService(config)
+        service = SyncService(config, sync_modes={"lists": False, "history": True, "resume": True})
         pmdb = StubPMDBClient()
         service._trakt = StubTraktClient()
         service._matcher = StubMatcher()
@@ -1097,10 +1098,141 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(len(pmdb.watched), 2)
         self.assertEqual(resume_stats.items_fetched, 2)
-        self.assertEqual(resume_stats.items_added, 1)
-        self.assertEqual(resume_stats.items_removed, 1)
+        self.assertEqual(resume_stats.items_added, 2)
+        self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(len(pmdb.resume_batches), 1)
-        self.assertEqual(watched_stats.history_cursor, "")
+        self.assertEqual(pmdb.resume_batches[0], [{
+            "tmdb_id": 903,
+            "media_type": "movie",
+            "position_ms": 1_800_000,
+            "runtime_ms": 3_600_000,
+        }, {
+            "tmdb_id": 904,
+            "media_type": "tv",
+            "position_ms": 3_000_000,
+            "runtime_ms": 3_600_000,
+            "season": 2,
+            "episode": 5,
+        }])
+        self.assertEqual(pmdb.watched, [
+            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z"},
+            {"tmdb_id": 902, "media_type": "tv", "watched_at": "2026-04-01T13:00:00Z", "season": 1, "episode": 2},
+        ])
+        self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
+
+    def test_trakt_resume_progress_only_marks_watched_at_100_percent(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_resume_progress=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config, sync_modes={"lists": False, "resume": True})
+        pmdb = StubPMDBClient()
+        service._trakt = StubTraktClient(playback_progress=[
+            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "position_ms": 3_000_000, "runtime_ms": 3_600_000, "progress": 83.3, "title": "Nearly Done Episode"},
+            {"tmdb_id": 905, "media_type": "tv", "season": 1, "episode": 1, "position_ms": 3_600_000, "runtime_ms": 3_600_000, "progress": 100, "title": "Finished Episode"},
+        ])
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
+
+        self.assertEqual(resume_stats.items_fetched, 2)
+        self.assertEqual(resume_stats.items_added, 2)
+        self.assertEqual(resume_stats.items_removed, 0)
+        self.assertEqual(resume_stats.items_skipped_duplicate, 0)
+        self.assertEqual(pmdb.resume_batches, [[{
+            "tmdb_id": 904,
+            "media_type": "tv",
+            "position_ms": 3_000_000,
+            "runtime_ms": 3_600_000,
+            "season": 2,
+            "episode": 5,
+        }]])
+        self.assertEqual(pmdb.watched, [{
+            "tmdb_id": 905,
+            "media_type": "tv",
+            "season": 1,
+            "episode": 1,
+            "watched_at": None,
+        }])
+
+    def test_trakt_resume_progress_skips_existing_resume_and_completed_duplicates(self) -> None:
+        config = AppConfig(
+            simkl=SimklConfig(
+                client_id="",
+                access_token="",
+                selected_statuses={"shows": [], "movies": [], "anime": []},
+            ),
+            pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+            sync=SyncConfig(
+                remove_missing=False,
+                delete_disabled_lists=False,
+                dry_run=False,
+                media_types=["shows", "movies"],
+                trakt_sync_resume_progress=True,
+            ),
+        )
+        config.trakt.client_id = "trakt-client"
+        config.trakt.client_secret = "trakt-secret"
+        config.trakt.access_token = "trakt-token"
+        config.trakt.enabled = True
+
+        service = SyncService(config, sync_modes={"lists": False, "resume": True})
+        pmdb = StubPMDBClient()
+        pmdb.resume_points = [{
+            "tmdb_id": 903,
+            "media_type": "movie",
+            "position_ms": 1_800_000,
+            "runtime_ms": 3_600_000,
+        }]
+        pmdb.watched = [{
+            "tmdb_id": 904,
+            "media_type": "tv",
+            "season": 2,
+            "episode": 5,
+            "watched_at": "2026-04-01T13:00:00Z",
+        }]
+        service._trakt = StubTraktClient(playback_progress=[
+            {"tmdb_id": 903, "media_type": "movie", "position_ms": 1_800_000, "runtime_ms": 3_600_000, "progress": 50, "title": "Resume Movie"},
+            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "position_ms": 3_600_000, "runtime_ms": 3_600_000, "progress": 100, "title": "Finished Episode"},
+        ])
+        service._matcher = StubMatcher()
+        service._pmdb = pmdb
+
+        results = service.run()
+
+        resume_stats = next(item for item in results if item.display_name == "Resume Progress")
+
+        self.assertEqual(resume_stats.items_fetched, 2)
+        self.assertEqual(resume_stats.items_added, 0)
+        self.assertEqual(resume_stats.items_removed, 0)
+        self.assertEqual(resume_stats.items_skipped_duplicate, 2)
+        self.assertEqual(pmdb.resume_batches, [])
+        self.assertEqual(pmdb.watched, [{
+            "tmdb_id": 904,
+            "media_type": "tv",
+            "season": 2,
+            "episode": 5,
+            "watched_at": "2026-04-01T13:00:00Z",
+        }])
 
     def test_syncs_simkl_watched_history_when_enabled(self) -> None:
         config = AppConfig(
@@ -2261,7 +2393,7 @@ class SyncServiceTests(unittest.TestCase):
         config.trakt.access_token = "trakt-token"
         config.trakt.enabled = True
 
-        service = SyncService(config)
+        service = SyncService(config, sync_modes={"lists": False, "resume": True})
         pmdb = StubPMDBClient()
         pmdb.resume_points = [
             {"tmdb_id": 903, "media_type": "movie", "position_ms": 1_800_000, "runtime_ms": 3_600_000},

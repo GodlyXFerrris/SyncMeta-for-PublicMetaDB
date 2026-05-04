@@ -1537,21 +1537,42 @@ class SyncService:
             stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
             return stats
 
+        try:
+            existing_watched_items = self._pmdb.get_watched_history()
+        except Exception as exc:
+            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            return stats
+
         existing_resume_by_key: dict[str, dict] = {}
         for item in existing_resume_points:
             key = self._resume_key(item)
             if key:
                 existing_resume_by_key[key] = item
 
+        existing_watched_counts: dict[str, int] = {}
+        for item in existing_watched_items:
+            key = self._watched_identity_key(item)
+            if key:
+                existing_watched_counts[key] = existing_watched_counts.get(key, 0) + 1
+
         payloads: list[dict] = []
+        completed_items: list[dict] = []
         for item in normalized_items:
             self._check_cancelled()
             key = self._resume_key(item)
+            runtime_ms = int(item.get("runtime_ms", 0) or 0)
+            position_ms = int(item.get("position_ms", 0) or 0)
+            if runtime_ms > 0 and position_ms >= runtime_ms:
+                if existing_watched_counts.get(key, 0) > 0:
+                    stats.items_skipped_duplicate += 1
+                    continue
+                completed_items.append(item)
+                continue
             payload = {
                 "tmdb_id": int(item["tmdb_id"]),
                 "media_type": item["media_type"],
-                "position_ms": int(item["position_ms"]),
-                "runtime_ms": int(item["runtime_ms"]),
+                "position_ms": position_ms,
+                "runtime_ms": runtime_ms,
             }
             if item.get("season") is not None:
                 payload["season"] = int(item["season"])
@@ -1563,6 +1584,14 @@ class SyncService:
                 continue
             payloads.append(payload)
 
+        self._write_watched_history_items(
+            completed_items,
+            existing_watched_counts,
+            stats,
+            status_message="Writing Trakt completed playback items to PublicMetaDB",
+            total_source=len(normalized_items),
+        )
+
         if not payloads:
             return stats
 
@@ -1571,16 +1600,18 @@ class SyncService:
             try:
                 self._set_status("Writing Trakt resume progress to PublicMetaDB")
                 response = self._pmdb.save_resume_points_batch(chunk) or {}
+                payloads_by_key = {self._resume_key(item): item for item in chunk}
+                saved_count = 0
                 for result in response.get("results", []):
                     action = str(result.get("action", "")).strip().lower()
-                    if action == "saved":
+                    payload = payloads_by_key.get(self._resume_key(result), {})
+                    runtime_ms = int(payload.get("runtime_ms", 0) or 0)
+                    position_ms = int(payload.get("position_ms", 0) or 0)
+                    local_completion = runtime_ms > 0 and position_ms >= runtime_ms
+                    if action == "saved" or (action == "completed" and not local_completion):
                         stats.items_added += 1
-                    elif action == "completed":
-                        stats.items_removed += 1
-                stats.items_skipped_duplicate += max(0, len(chunk) - sum(
-                    1 for result in response.get("results", [])
-                    if str(result.get("action", "")).strip().lower() in {"saved", "completed"}
-                ))
+                        saved_count += 1
+                stats.items_skipped_duplicate += max(0, len(chunk) - saved_count)
             except SyncCancelled:
                 raise
             except Exception as exc:
