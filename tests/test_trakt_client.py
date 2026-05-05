@@ -134,7 +134,7 @@ class TraktClientTests(unittest.TestCase):
             def __init__(self) -> None:
                 super().__init__(TraktConfig())
 
-            def _get_paginated_history(self, path: str, normalizer) -> list[dict]:
+            def _get_paginated_history(self, path: str, normalizer, since=None, status_callback=None, label="") -> list[dict]:
                 if "movies" in path:
                     return [
                         {"tmdb_id": 1, "media_type": "movie", "watched_at": "2026-04-01T12:00:00.000Z", "title": "Old Movie"},

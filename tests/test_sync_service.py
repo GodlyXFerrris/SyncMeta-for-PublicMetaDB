@@ -185,7 +185,7 @@ class StubTraktClient:
     def get_liked_lists(self) -> list[dict]:
         return []
 
-    def get_watched_history(self, since: str | None = None) -> list[dict]:
+    def get_watched_history(self, since: str | None = None, status_callback=None) -> list[dict]:
         self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
@@ -197,7 +197,7 @@ class StubTraktClient:
 
 
 class StubRepeatedWatchTraktClient(StubTraktClient):
-    def get_watched_history(self, since: str | None = None) -> list[dict]:
+    def get_watched_history(self, since: str | None = None, status_callback=None) -> list[dict]:
         self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
@@ -475,6 +475,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -506,6 +508,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = DirectAnimeMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -545,6 +548,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -575,6 +580,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = DirectAnimeMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -603,6 +609,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -646,6 +654,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = TypeAwareMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -1096,8 +1105,10 @@ class SyncServiceTests(unittest.TestCase):
 
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
-        self.assertEqual(len(pmdb.watched), 2)
+        # 904 at 83.3% is submitted as watched (not as a resume point).
+        self.assertEqual(len(pmdb.watched), 3)
         self.assertEqual(resume_stats.items_fetched, 2)
+        # 904 at 83.3% (≥80%) → watched; 903 at 50% → resume batch.
         self.assertEqual(resume_stats.items_added, 2)
         self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(len(pmdb.resume_batches), 1)
@@ -1106,21 +1117,10 @@ class SyncServiceTests(unittest.TestCase):
             "media_type": "movie",
             "position_ms": 1_800_000,
             "runtime_ms": 3_600_000,
-        }, {
-            "tmdb_id": 904,
-            "media_type": "tv",
-            "position_ms": 3_000_000,
-            "runtime_ms": 3_600_000,
-            "season": 2,
-            "episode": 5,
         }])
-        self.assertEqual(pmdb.watched, [
-            {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z"},
-            {"tmdb_id": 902, "media_type": "tv", "watched_at": "2026-04-01T13:00:00Z", "season": 1, "episode": 2},
-        ])
         self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
 
-    def test_trakt_resume_progress_only_marks_watched_at_100_percent(self) -> None:
+    def test_trakt_resume_progress_marks_ge80_percent_as_watched(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="",
@@ -1158,21 +1158,12 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(resume_stats.items_added, 2)
         self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(resume_stats.items_skipped_duplicate, 0)
-        self.assertEqual(pmdb.resume_batches, [[{
-            "tmdb_id": 904,
-            "media_type": "tv",
-            "position_ms": 3_000_000,
-            "runtime_ms": 3_600_000,
-            "season": 2,
-            "episode": 5,
-        }]])
-        self.assertEqual(pmdb.watched, [{
-            "tmdb_id": 905,
-            "media_type": "tv",
-            "season": 1,
-            "episode": 1,
-            "watched_at": None,
-        }])
+        # Both items are ≥80% — neither goes to the resume endpoint.
+        self.assertEqual(pmdb.resume_batches, [])
+        self.assertEqual(pmdb.watched, [
+            {"tmdb_id": 904, "media_type": "tv", "season": 2, "episode": 5, "watched_at": None},
+            {"tmdb_id": 905, "media_type": "tv", "season": 1, "episode": 1, "watched_at": None},
+        ])
 
     def test_trakt_resume_progress_skips_existing_resume_and_completed_duplicates(self) -> None:
         config = AppConfig(
@@ -2407,14 +2398,15 @@ class SyncServiceTests(unittest.TestCase):
 
         resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
-        # Both items stay as resume points (neither is at 100%).
-        # Both match existing PMDB resume points → skipped as duplicates.
+        # Item at 50%  → resume point, matches existing PMDB entry → skipped duplicate.
+        # Item at 83.3% (≥80%) → submitted as watched (no progress sent to PMDB).
         self.assertEqual(resume_stats.items_fetched, 2)
-        self.assertEqual(resume_stats.items_resolved, 2)
-        self.assertEqual(resume_stats.items_added, 0)
+        self.assertEqual(resume_stats.items_resolved, 1)
+        self.assertEqual(resume_stats.items_added, 1)
         self.assertEqual(resume_stats.items_removed, 0)
-        self.assertEqual(resume_stats.items_skipped_duplicate, 2)
-        self.assertEqual(len(pmdb.watched), 0)
+        self.assertEqual(resume_stats.items_skipped_duplicate, 1)
+        self.assertEqual(len(pmdb.watched), 1)
+        self.assertEqual(pmdb.watched[0]["tmdb_id"], 904)
 
     def test_trakt_resume_auth_error_is_reported_as_result_error(self) -> None:
         config = AppConfig(
