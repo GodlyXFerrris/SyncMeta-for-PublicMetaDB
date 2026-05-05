@@ -1498,21 +1498,26 @@ class SyncService:
         stats.items_fetched = len(items)
 
         normalized_items: list[dict] = []
+        near_complete_items: list[dict] = []
         for item in items:
             self._check_cancelled()
-            # Skip items at ≥80% progress — Trakt marks these as "watched" and
-            # PMDB would normalize them to DROPPED (unsupported) when there is no
-            # next episode.  The user has effectively finished the episode/movie.
             raw_progress = item.get("progress")
             if raw_progress is not None:
                 try:
-                    if float(raw_progress) >= 80.0:
-                        stats.items_skipped_duplicate += 1
-                        logger.debug(
-                            "Skip resume for %s (progress=%.0f%% ≥ 80%%)",
-                            item.get("title", "unknown"),
-                            float(raw_progress),
-                        )
+                    pct = float(raw_progress)
+                    if pct >= 80.0:
+                        # At ≥80% the user has effectively finished — submit as
+                        # watched instead of a resume point so PMDB shows it
+                        # as completed rather than "in progress".
+                        resolved = self._resolve_activity_item(item)
+                        if resolved.get("tmdb_id"):
+                            near_complete_items.append(resolved)
+                            logger.debug(
+                                "Treating resume for %s (progress=%.0f%%) as watched",
+                                item.get("title", "unknown"), pct,
+                            )
+                        else:
+                            stats.items_skipped_unresolved += 1
                         continue
                 except (TypeError, ValueError):
                     pass
@@ -1525,8 +1530,22 @@ class SyncService:
             stats.items_resolved += 1
 
         if self._config.sync.dry_run:
-            stats.items_added = len(normalized_items)
+            stats.items_added = len(normalized_items) + len(near_complete_items)
             return stats
+
+        if near_complete_items:
+            self._set_status("Writing near-complete Trakt items as watched to PublicMetaDB")
+            existing_watched = {}
+            try:
+                existing_watched = self._count_watched_history_identities(self._pmdb.get_watched_history())
+            except Exception:
+                pass
+            self._write_watched_history_items(
+                near_complete_items,
+                existing_watched,
+                stats,
+                "Writing near-complete Trakt items as watched",
+            )
 
         if not normalized_items:
             return stats

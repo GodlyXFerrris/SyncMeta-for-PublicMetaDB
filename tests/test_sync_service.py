@@ -2275,11 +2275,15 @@ class SyncServiceTests(unittest.TestCase):
 
         resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
+        # Item at 50% → stays as resume point, matches existing → skipped duplicate.
+        # Item at 83.3% → converted to watched entry (submitted via mark_watched).
         self.assertEqual(resume_stats.items_fetched, 2)
-        self.assertEqual(resume_stats.items_resolved, 2)
-        self.assertEqual(resume_stats.items_added, 0)
+        self.assertEqual(resume_stats.items_resolved, 1)
+        self.assertEqual(resume_stats.items_added, 1)   # 83.3% item → watched
         self.assertEqual(resume_stats.items_removed, 0)
-        self.assertEqual(resume_stats.items_skipped_duplicate, 2)
+        self.assertEqual(resume_stats.items_skipped_duplicate, 1)  # 50% item → existing resume point
+        self.assertEqual(len(pmdb.watched), 1)
+        self.assertEqual(pmdb.watched[0]["tmdb_id"], 904)
 
     def test_trakt_resume_auth_error_is_reported_as_result_error(self) -> None:
         config = AppConfig(
