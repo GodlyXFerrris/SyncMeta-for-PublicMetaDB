@@ -1413,12 +1413,10 @@ class SyncService:
             source_name="Trakt",
         )
         cursor = self._config.sync.trakt_history_cursor or ""
-        full_sync = self._config.sync.full_history_sync or not cursor
-        since = None if full_sync else cursor
 
         self._set_status("Fetching Trakt watched history…")
         try:
-            items = self._trakt.get_watched_history(since=since, status_callback=self._set_status)
+            items = self._trakt.get_watched_history(since=None, status_callback=self._set_status)
         except TraktAuthenticationError as exc:
             stats.errors.append(str(exc))
             return stats
@@ -1498,21 +1496,23 @@ class SyncService:
         stats.items_fetched = len(items)
 
         normalized_items: list[dict] = []
-        fully_watched_items: list[dict] = []
+        effectively_watched_items: list[dict] = []
         for item in items:
             self._check_cancelled()
             raw_progress = item.get("progress")
             if raw_progress is not None:
                 try:
                     pct = float(raw_progress)
-                    if pct >= 100.0:
-                        # Exactly 100% — submit as watched rather than a resume point.
+                    if pct >= 80.0:
+                        # ≥80% — PMDB dev guidance: do not submit as a resume point
+                        # (which would show "80% in progress"). Submit as watched so
+                        # PMDB marks it completed with no leftover progress entry.
                         resolved = self._resolve_activity_item(item)
                         if resolved.get("tmdb_id"):
-                            fully_watched_items.append(resolved)
+                            effectively_watched_items.append(resolved)
                             logger.debug(
-                                "Treating resume for %s (progress=100%%) as watched",
-                                item.get("title", "unknown"),
+                                "Treating resume for %s (progress=%.0f%%) as watched",
+                                item.get("title", "unknown"), pct,
                             )
                         else:
                             stats.items_skipped_unresolved += 1
@@ -1528,22 +1528,31 @@ class SyncService:
             stats.items_resolved += 1
 
         if self._config.sync.dry_run:
-            stats.items_added = len(normalized_items) + len(fully_watched_items)
+            stats.items_added = len(normalized_items) + len(effectively_watched_items)
             return stats
 
-        if fully_watched_items:
-            self._set_status("Writing 100%-complete Trakt items as watched to PublicMetaDB")
+        if effectively_watched_items:
+            self._set_status("Writing near-complete Trakt items as watched to PublicMetaDB")
             existing_watched = {}
             try:
                 existing_watched = self._count_watched_history_identities(self._pmdb.get_watched_history())
             except Exception:
                 pass
-            self._write_watched_history_items(
-                fully_watched_items,
-                existing_watched,
-                stats,
-                "Writing 100%-complete Trakt items as watched",
-            )
+            # Pre-filter items already marked watched in PMDB (by identity, regardless of timestamp).
+            filtered_effective: list[dict] = []
+            for item in effectively_watched_items:
+                identity_key = self._watched_identity_key(item)
+                if identity_key and existing_watched.get(identity_key, 0) > 0:
+                    stats.items_skipped_duplicate += 1
+                else:
+                    filtered_effective.append(item)
+            if filtered_effective:
+                self._write_watched_history_items(
+                    filtered_effective,
+                    existing_watched,
+                    stats,
+                    "Writing near-complete Trakt items as watched",
+                )
 
         if not normalized_items:
             return stats
@@ -2224,7 +2233,7 @@ class SyncService:
         pmdb_read_elapsed = time.perf_counter() - pmdb_read_started
         stats.phase_timings["pmdb_read_seconds"] = round(pmdb_read_elapsed, 4)
         desired_keys: set[str] = set()
-        desired_key_titles: dict[str, str] = {}  # key → title, for debug logging only
+        desired_key_owners: dict[str, dict] = {}  # key → first item that claimed it
         pending_adds: list[tuple[dict, int, str, str]] = []
         for item in resolved:
             self._check_cancelled()
@@ -2232,22 +2241,28 @@ class SyncService:
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
-                # PMDB (like Trakt) stores one entry per show covering all
-                # seasons — TMDB 203737 represents "Oshi no Ko" regardless of
-                # which season from SIMKL resolved to it.  A second anime item
-                # resolving to the same TMDB ID is not an error; the show is
-                # already in the desired set, so it is simply a duplicate.
-                stats.items_skipped_duplicate += 1
-                logger.debug(
-                    "Duplicate TMDB %s:%s — '%s' (%s) already covered by '%s'",
-                    tmdb_id, media_type,
-                    item.get("title"), item.get("year"),
-                    desired_key_titles.get(key, "?"),
-                )
+                owner = desired_key_owners.get(key, {})
+                owner_root = owner.get("root_anilist_id") or owner.get("root_mal_id") or owner.get("anilist_id") or owner.get("mal_id")
+                this_root = item.get("root_anilist_id") or item.get("root_mal_id") or item.get("anilist_id") or item.get("mal_id")
+                is_collision = bool(owner_root and this_root and owner_root != this_root)
+                if is_collision:
+                    # Different source IDs mapping to the same TMDB entry — bad
+                    # community mapping.  Flag as collision so the user can fix it.
+                    stats.items_skipped_unresolved += 1
+                    unresolved_summary = _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason="tmdb_collision")
+                    unresolved_summary["candidate_tmdb_id"] = tmdb_id
+                    stats.unresolved_items.append(unresolved_summary)
+                    logger.warning(
+                        "TMDB collision: '%s' and '%s' both map to %s:%s",
+                        owner.get("title"), item.get("title"), tmdb_id, media_type,
+                    )
+                else:
+                    # Same franchise or no IDs to compare — legitimate duplicate.
+                    stats.items_skipped_duplicate += 1
                 self._publish_progress([stats])
                 continue
             desired_keys.add(key)
-            desired_key_titles[key] = f"{item.get('title')} ({item.get('year')})"
+            desired_key_owners[key] = item
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1
