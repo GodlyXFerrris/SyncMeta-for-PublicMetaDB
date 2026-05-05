@@ -517,6 +517,7 @@ class SyncRunner:
         self._lock = threading.Lock()
         self._started = False
         self._running_profile_ids: set[str] = set()
+        self._skip_ids: set[str] = set()
 
     def start(self) -> None:
         with self._lock:
@@ -561,12 +562,31 @@ class SyncRunner:
             "profile_running": bool(profile_id and str(profile_id).strip() in running_ids),
         }
 
+    def cancel_if_queued(self, profile_id: str) -> bool:
+        """Mark a queued-but-not-yet-running profile for immediate cancellation.
+
+        Returns True if the profile is queued (worker hasn't started it yet) so
+        the caller should call record_sync_cancelled immediately.  Returns False
+        if a worker is actively running the sync, in which case the caller should
+        use the graceful-stop path (request_sync_cancel).
+        """
+        with self._lock:
+            if profile_id in self._running_profile_ids:
+                return False
+            self._skip_ids.add(profile_id)
+            return True
+
     def _worker_loop(self) -> None:
         while True:
             profile, dry_run, sync_modes = self._queue.get()
             profile_id = str(profile.get("profile_id", "")).strip()
             if profile_id:
                 with self._lock:
+                    if profile_id in self._skip_ids:
+                        # Cancelled while queued — already recorded by stop endpoint.
+                        self._skip_ids.discard(profile_id)
+                        self._queue.task_done()
+                        continue
                     self._running_profile_ids.add(profile_id)
             try:
                 _run_profile_sync(profile, dry_run=dry_run, sync_modes=sync_modes)
@@ -1602,9 +1622,22 @@ def api_profile_sync_stop():
         return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
     try:
-        profile = _profile_store.request_sync_cancel(profile_id)
+        raw = _profile_store.get_private_profile_by_id(profile_id)
     except KeyError:
         return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+
+    if not raw.get("sync_running"):
+        return _json_error("No sync is currently running", 409)
+
+    if _sync_runner.cancel_if_queued(profile_id):
+        # Queued but not yet running — record cancellation immediately so the
+        # profile is freed for a new sync without waiting for a worker slot.
+        sync_modes = raw.get("pending_sync_modes")
+        profile = _profile_store.record_sync_cancelled(profile_id, sync_modes=sync_modes)
+        return jsonify({"status": "stopped", "profile": profile})
+
+    try:
+        profile = _profile_store.request_sync_cancel(profile_id)
     except RuntimeError as exc:
         return _json_error(str(exc), 409)
 
