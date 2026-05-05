@@ -1413,12 +1413,10 @@ class SyncService:
             source_name="Trakt",
         )
         cursor = self._config.sync.trakt_history_cursor or ""
-        full_sync = self._config.sync.full_history_sync or not cursor
-        since = None if full_sync else cursor
 
         self._set_status("Fetching Trakt watched history…")
         try:
-            items = self._trakt.get_watched_history(since=since, status_callback=self._set_status)
+            items = self._trakt.get_watched_history(since=None, status_callback=self._set_status)
         except TraktAuthenticationError as exc:
             stats.errors.append(str(exc))
             return stats
@@ -2195,7 +2193,7 @@ class SyncService:
         pmdb_read_elapsed = time.perf_counter() - pmdb_read_started
         stats.phase_timings["pmdb_read_seconds"] = round(pmdb_read_elapsed, 4)
         desired_keys: set[str] = set()
-        desired_key_titles: dict[str, str] = {}  # key → title, for debug logging only
+        desired_key_owners: dict[str, dict] = {}  # key → first item that claimed it
         pending_adds: list[tuple[dict, int, str, str]] = []
         for item in resolved:
             self._check_cancelled()
@@ -2203,22 +2201,28 @@ class SyncService:
             media_type = item["media_type"]
             key = f"{tmdb_id}:{media_type}"
             if key in desired_keys:
-                # PMDB (like Trakt) stores one entry per show covering all
-                # seasons — TMDB 203737 represents "Oshi no Ko" regardless of
-                # which season from SIMKL resolved to it.  A second anime item
-                # resolving to the same TMDB ID is not an error; the show is
-                # already in the desired set, so it is simply a duplicate.
-                stats.items_skipped_duplicate += 1
-                logger.debug(
-                    "Duplicate TMDB %s:%s — '%s' (%s) already covered by '%s'",
-                    tmdb_id, media_type,
-                    item.get("title"), item.get("year"),
-                    desired_key_titles.get(key, "?"),
-                )
+                owner = desired_key_owners.get(key, {})
+                owner_root = owner.get("root_anilist_id") or owner.get("root_mal_id") or owner.get("anilist_id") or owner.get("mal_id")
+                this_root = item.get("root_anilist_id") or item.get("root_mal_id") or item.get("anilist_id") or item.get("mal_id")
+                is_collision = bool(owner_root and this_root and owner_root != this_root)
+                if is_collision:
+                    # Different source IDs mapping to the same TMDB entry — bad
+                    # community mapping.  Flag as collision so the user can fix it.
+                    stats.items_skipped_unresolved += 1
+                    unresolved_summary = _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason="tmdb_collision")
+                    unresolved_summary["candidate_tmdb_id"] = tmdb_id
+                    stats.unresolved_items.append(unresolved_summary)
+                    logger.warning(
+                        "TMDB collision: '%s' and '%s' both map to %s:%s",
+                        owner.get("title"), item.get("title"), tmdb_id, media_type,
+                    )
+                else:
+                    # Same franchise or no IDs to compare — legitimate duplicate.
+                    stats.items_skipped_duplicate += 1
                 self._publish_progress([stats])
                 continue
             desired_keys.add(key)
-            desired_key_titles[key] = f"{item.get('title')} ({item.get('year')})"
+            desired_key_owners[key] = item
 
             if key in existing_map:
                 stats.items_skipped_duplicate += 1

@@ -229,6 +229,8 @@ class TraktClient:
         history: list[dict] = []
         history.extend(self._get_paginated_history("/sync/history/movies", self._normalize_movie_history_entry, since=since, status_callback=status_callback, label="movies"))
         history.extend(self._get_paginated_history("/sync/history/episodes", self._normalize_episode_history_entry, since=since, status_callback=status_callback, label="episodes"))
+        if since:
+            history = [item for item in history if self._is_history_after(item, since)]
         return history
 
     def get_playback_progress(self) -> list[dict]:

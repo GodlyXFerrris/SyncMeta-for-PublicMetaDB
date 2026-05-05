@@ -166,7 +166,9 @@ class AniListClientTests(unittest.TestCase):
         results = client.get_statuses(["COMPLETED_OVA", "COMPLETED_ONA", "COMPLETED"])
 
         self.assertEqual(calls, ["COMPLETED"])
-        self.assertEqual(len(results["COMPLETED"]), 2)
+        # All items are OVA or ONA so they're excluded from the plain COMPLETED bucket
+        # (which only holds formats not claimed by a synthetic sibling).
+        self.assertEqual(len(results["COMPLETED"]), 0)
         self.assertEqual(len(results["COMPLETED_OVA"]), 1)
         self.assertEqual(results["COMPLETED_OVA"][0]["anilist_format"], "OVA")
         self.assertEqual(len(results["COMPLETED_ONA"]), 1)

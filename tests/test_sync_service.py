@@ -181,7 +181,7 @@ class StubTraktClient:
     def get_liked_lists(self) -> list[dict]:
         return []
 
-    def get_watched_history(self, since: str | None = None) -> list[dict]:
+    def get_watched_history(self, since: str | None = None, status_callback=None) -> list[dict]:
         self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
@@ -196,7 +196,7 @@ class StubTraktClient:
 
 
 class StubRepeatedWatchTraktClient(StubTraktClient):
-    def get_watched_history(self, since: str | None = None) -> list[dict]:
+    def get_watched_history(self, since: str | None = None, status_callback=None) -> list[dict]:
         self.last_history_since = since
         return [
             {"tmdb_id": 901, "media_type": "movie", "watched_at": "2026-04-01T12:00:00Z", "title": "Watched Movie"},
@@ -474,6 +474,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -505,6 +507,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = DirectAnimeMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -544,6 +547,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -574,6 +579,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = DirectAnimeMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -602,6 +608,8 @@ class SyncServiceTests(unittest.TestCase):
         service._pmdb = pmdb
 
         class StubAniListClient:
+            _FORMAT_FILTER_MAP: dict = {}
+
             def __init__(self, *_args, **_kwargs) -> None:
                 pass
 
@@ -645,6 +653,7 @@ class SyncServiceTests(unittest.TestCase):
 
         service._matcher = TypeAwareMatcher()
 
+        service._simkl = StubSimklClient()
         from unittest.mock import patch
         with patch("src.anilist_client.AniListClient", StubAniListClient):
             results = service.run()
@@ -1095,12 +1104,14 @@ class SyncServiceTests(unittest.TestCase):
 
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
-        self.assertEqual(len(pmdb.watched), 2)
+        # 904 at 83.3% is submitted as watched (not as a resume point).
+        self.assertEqual(len(pmdb.watched), 3)
         self.assertEqual(resume_stats.items_fetched, 2)
-        self.assertEqual(resume_stats.items_added, 1)
-        self.assertEqual(resume_stats.items_removed, 1)
+        # 904 → watched, 903 (50%) → resume batch saved.
+        self.assertEqual(resume_stats.items_added, 2)
+        self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(len(pmdb.resume_batches), 1)
-        self.assertEqual(watched_stats.history_cursor, "")
+        self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
 
     def test_syncs_simkl_watched_history_when_enabled(self) -> None:
         config = AppConfig(
