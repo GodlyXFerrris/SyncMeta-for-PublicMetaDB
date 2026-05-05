@@ -713,11 +713,19 @@ def _apply_unresolved_resolution(
     remaining = _profile_store.resolve_item_manually(profile_id, cache_key, tmdb_id)
 
     pmdb_result = None
+    pmdb_skip_reason: str | None = None
     if target_item:
         try:
             credentials = normalize_credentials(private_profile.get("credentials", {}))
             pmdb_api_key = credentials.get("pmdb", {}).get("api_key", "")
-            if pmdb_api_key:
+            if not pmdb_api_key:
+                pmdb_skip_reason = "no_pmdb_api_key"
+                logger.warning(
+                    "[manual-map] ✗ skipping immediate PMDB add for tmdb_id=%s"
+                    " — no PMDB API key configured (profile=%s); will add on next sync",
+                    tmdb_id, profile_id[:8],
+                )
+            else:
                 pmdb = PublicMetaDBClient(PublicMetaDBConfig(api_key=pmdb_api_key))
                 _contribute_manual_resolution_mapping(pmdb, target_item, tmdb_id)
                 media_type = str(target_item.get("media_type") or "").strip()
@@ -728,19 +736,42 @@ def _apply_unresolved_resolution(
                     if str(ml.get("list_name", "")).strip() == list_name:
                         pmdb_list_id = ml.get("list_id")
                         break
-                if pmdb_list_id and media_type:
-                    pmdb_result = pmdb.add_item_to_list(str(pmdb_list_id), tmdb_id, media_type)
-                    logger.info(
-                        "[manual-map] ✓ added tmdb_id=%s (%s) to list '%s' (pmdb_list=%s) profile=%s → pmdb_result=%s",
-                        tmdb_id, media_type, list_name, pmdb_list_id, profile_id[:8], pmdb_result,
+                if not media_type:
+                    pmdb_skip_reason = "missing_media_type"
+                    logger.warning(
+                        "[manual-map] ✗ skipping immediate PMDB add for tmdb_id=%s"
+                        " — target item has no media_type (list=%r profile=%s); will add on next sync",
+                        tmdb_id, list_name, profile_id[:8],
+                    )
+                elif not pmdb_list_id:
+                    pmdb_skip_reason = "list_not_found"
+                    logger.warning(
+                        "[manual-map] ✗ skipping immediate PMDB add for tmdb_id=%s (%s)"
+                        " — list %r not found in managed_lists (profile=%s, %d managed lists);"
+                        " will add on next sync",
+                        tmdb_id, media_type, list_name, profile_id[:8], len(managed_lists),
                     )
                 else:
-                    logger.warning(
-                        "[manual-map] ✗ could not add to PMDB: list_name=%r pmdb_list_id=%s media_type=%r",
-                        list_name, pmdb_list_id, media_type,
+                    pmdb_result = pmdb.add_item_to_list(str(pmdb_list_id), tmdb_id, media_type)
+                    logger.info(
+                        "[manual-map] ✓ added tmdb_id=%s (%s) to list '%s'"
+                        " (pmdb_list=%s profile=%s) → pmdb_result=%s",
+                        tmdb_id, media_type, list_name, pmdb_list_id, profile_id[:8], pmdb_result,
                     )
         except Exception as exc:
-            logger.warning("Failed to instantly add resolved item to PMDB list: %s", exc)
+            pmdb_skip_reason = "api_error"
+            logger.warning(
+                "[manual-map] ✗ failed to immediately add tmdb_id=%s to PMDB list (profile=%s): %s"
+                " — override is saved, will retry on next sync",
+                tmdb_id, profile_id[:8], exc,
+            )
+    else:
+        pmdb_skip_reason = "item_not_in_unresolved"
+        logger.warning(
+            "[manual-map] target item not found in unresolved list for cache_key=%s (profile=%s);"
+            " override stored in manual_resolution_cache — will apply on next sync",
+            cache_key, profile_id[:8],
+        )
 
     try:
         updated_profile = _profile_store.get_profile_by_id(profile_id, include_credentials=False)
@@ -751,6 +782,7 @@ def _apply_unresolved_resolution(
         "status": "resolved",
         "tmdb_id": tmdb_id,
         "pmdb_added": pmdb_result is not None,
+        "pmdb_skip_reason": pmdb_skip_reason,
         "items": remaining,
         "profile": updated_profile,
     }

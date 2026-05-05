@@ -2407,11 +2407,14 @@ class SyncServiceTests(unittest.TestCase):
 
         resume_stats = next(item for item in results if item.display_name == "Resume Progress")
 
+        # Both items stay as resume points (neither is at 100%).
+        # Both match existing PMDB resume points → skipped as duplicates.
         self.assertEqual(resume_stats.items_fetched, 2)
         self.assertEqual(resume_stats.items_resolved, 2)
         self.assertEqual(resume_stats.items_added, 0)
         self.assertEqual(resume_stats.items_removed, 0)
         self.assertEqual(resume_stats.items_skipped_duplicate, 2)
+        self.assertEqual(len(pmdb.watched), 0)
 
     def test_trakt_resume_auth_error_is_reported_as_result_error(self) -> None:
         config = AppConfig(
