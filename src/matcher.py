@@ -725,26 +725,28 @@ class ItemMatcher:
             tmdb_raw = item.get("tmdb_id")
             if tmdb_raw:
                 from . import fribb_client
-                exact_match = self._try_exact_anime_fribb_lookup(item)
-                if exact_match.tmdb_id is not None:
-                    return int(tmdb_raw) == int(exact_match.tmdb_id)
-                anilist_id = item.get("anilist_id") or (item.get("ids") or {}).get("anilist")
-                mal_id = item.get("mal_id") or (item.get("ids") or {}).get("mal")
-                anidb_id = item.get("anidb_id") or (item.get("ids") or {}).get("anidb")
-                simkl_id = (item.get("ids") or {}).get("simkl")
-                imdb_id = item.get("imdb_id") or (item.get("ids") or {}).get("imdb")
+                ids = item.get("ids") or {}
+                lookup_order = (
+                    (item.get("anilist_id") or ids.get("anilist"), fribb_client.lookup_by_anilist, False),
+                    (item.get("mal_id") or ids.get("mal"), fribb_client.lookup_by_mal, False),
+                    (item.get("anidb_id") or ids.get("anidb"), fribb_client.lookup_by_anidb, False),
+                    (ids.get("simkl"), fribb_client.lookup_by_simkl, False),
+                    (item.get("imdb_id") or ids.get("imdb"), fribb_client.lookup_by_imdb, True),
+                )
                 exact_entry = None
-                if anilist_id:
-                    exact_entry = fribb_client.lookup_by_anilist(int(anilist_id))
-                if exact_entry is None and mal_id:
-                    exact_entry = fribb_client.lookup_by_mal(int(mal_id))
-                if exact_entry is None and anidb_id:
-                    exact_entry = fribb_client.lookup_by_anidb(int(anidb_id))
-                if exact_entry is None and simkl_id:
-                    exact_entry = fribb_client.lookup_by_simkl(int(simkl_id))
-                if exact_entry is None and imdb_id:
-                    exact_entry = fribb_client.lookup_by_imdb(str(imdb_id))
+                for raw_id, lookup_fn, is_str in lookup_order:
+                    if not raw_id:
+                        continue
+                    try:
+                        exact_entry = lookup_fn(str(raw_id) if is_str else int(raw_id))
+                    except (TypeError, ValueError):
+                        exact_entry = None
+                    if exact_entry is not None:
+                        break
                 if exact_entry is not None:
+                    fribb_tmdb = exact_entry.get("themoviedb")
+                    if fribb_tmdb:
+                        return int(tmdb_raw) == int(fribb_tmdb)
                     fribb_type = str(exact_entry.get("type") or "").strip().lower()
                     expected_media_type = "movie" if fribb_type == "movie" else "tv"
                     item_media_type = str(item.get("media_type") or "").strip().lower()

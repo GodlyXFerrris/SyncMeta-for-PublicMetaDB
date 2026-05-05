@@ -451,7 +451,7 @@ class TraktClient:
         progress = entry.get("progress")
         if not tmdb_id or runtime in (None, 0) or progress is None:
             return None
-        runtime_ms = int(float(runtime) * 60_000)
+        runtime_ms = int(runtime) * 60_000
         position_ms = int(round(runtime_ms * (float(progress) / 100.0)))
         # No useful resume point if position is zero (just started or rounding).
         if position_ms <= 0:
@@ -484,7 +484,7 @@ class TraktClient:
         # Episode 0 = pre-season specials/pilots stored as E0 — skip these too.
         if int(season) == 0 or int(number) == 0:
             return None
-        runtime_ms = int(float(runtime) * 60_000)
+        runtime_ms = int(runtime) * 60_000
         position_ms = int(round(runtime_ms * (float(progress) / 100.0)))
         # No useful resume point if position is zero (just started or rounding).
         if position_ms <= 0:

@@ -934,6 +934,7 @@ class SyncService:
                 str(item.get("mal_id") or ""),
                 str(item.get("root_mal_id") or ""),
                 offset,
+                simkl_season,
                 episode,
             )
             self._anime_history_remap_cache[cache_key] = {"tmdb_id": None}
@@ -946,6 +947,7 @@ class SyncService:
             str(item.get("mal_id") or ""),
             str(item.get("root_mal_id") or ""),
             offset,
+            simkl_season,
             episode,
         )
         cached = self._anime_history_remap_cache.get(cache_key)
