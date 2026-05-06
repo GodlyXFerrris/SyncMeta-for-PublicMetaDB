@@ -851,7 +851,7 @@
     let profileDraftDirty = false;
     let pollingIntervalMs = 0;
     let statusFetchInFlight = null;
-    const POLL_RUNNING_MS = 5000;
+    const POLL_RUNNING_MS = 2000;
     const POLL_IDLE_MS = 30000;
 
     function el(id) { return document.getElementById(id); }
@@ -2940,6 +2940,7 @@
     function renderUnresolvedPanel(items) {
       const panel = el('unresolved-panel');
       const body = el('unresolved-body');
+      if (!panel || !body) return;
       panel.style.display = '';
       if (!items || items.length === 0) {
         body.innerHTML = '<div class="empty">No unresolved items.</div>';
@@ -3053,6 +3054,7 @@
       } else {
         if (autoBtn) autoBtn.disabled = false;
         if (mapBtn) { mapBtn.disabled = false; mapBtn.textContent = 'Map'; }
+        showToast(result.data?.error || 'Failed to save mapping', true);
       }
     }
 
@@ -3076,6 +3078,7 @@
       if (autoBtn) { autoBtn.disabled = false; autoBtn.textContent = 'Auto Map'; }
       if (mapBtn) mapBtn.disabled = false;
       if (input) input.disabled = false;
+      showToast(result.data?.error || 'Auto-resolve failed', true);
     }
 
     async function dismissUnresolvedItem(row) {

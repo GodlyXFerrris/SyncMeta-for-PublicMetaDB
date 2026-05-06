@@ -603,14 +603,29 @@ class ItemMatcher:
 
     def _resolve_root_series(self, item: dict, ids: dict, media_type: str) -> MatchResult:
         title = item.get("title", "Unknown")
+        root_title = item.get("root_title") or title
         lookup_unavailable = False
         for id_type, item_key in _ROOT_LOOKUP_CHAIN:
             ext_id = item.get(item_key) or ids.get(item_key) or ids.get(f"root_{id_type}")
             if not ext_id:
                 continue
             ext_id = str(ext_id)
-            tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
+            tmdb_id, status, _votes, mapped_title = self._lookup_external_mapping(id_type, ext_id, media_type)
             if tmdb_id:
+                if tmdb_id in _BLOCKED_ANIME_PMDB_TMDB_IDS:
+                    logger.warning(
+                        "[resolve] root-series '%s' — PMDB %s=%s returned blocked TMDB %d"
+                        " (known bad mapping); skipping",
+                        title, id_type, ext_id, tmdb_id,
+                    )
+                    continue
+                if mapped_title and not self._titles_are_compatible(root_title, mapped_title):
+                    logger.warning(
+                        "[resolve] root-series '%s' — PMDB %s=%s returned incompatible title %r"
+                        " for tmdb=%d; skipping",
+                        title, id_type, ext_id, mapped_title, tmdb_id,
+                    )
+                    continue
                 logger.info(
                     "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
                     title, id_type, ext_id, tmdb_id,
@@ -821,6 +836,13 @@ class ItemMatcher:
             if root_ext_id:
                 tmdb_id, status, _votes, _mapped_title = self._lookup_external_mapping(id_type, str(root_ext_id), media_type)
                 if tmdb_id:
+                    if tmdb_id in _BLOCKED_ANIME_PMDB_TMDB_IDS:
+                        logger.warning(
+                            "[resolve] root-chain '%s' — PMDB %s=%s returned blocked TMDB %d"
+                            " (known bad mapping); skipping",
+                            title, id_type, root_ext_id, tmdb_id,
+                        )
+                        continue
                     logger.info(
                         "Resolved '%s' via root-series %s lookup (%s -> %d, root='%s')",
                         title, id_type, root_ext_id, tmdb_id,
