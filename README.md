@@ -3,58 +3,58 @@
 [![Deploy to Docker](https://github.com/Febsho/SyncMeta-for-PublicMetaDB/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Febsho/SyncMeta-for-PublicMetaDB/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Selbstgehostete Web-App, die Watchlists, Watch-History und Resume-Fortschritt von SIMKL, AniList, Trakt und MDBList automatisch in [PublicMetaDB](https://publicmetadb.com) synchronisiert.
+Self-hosted web app that automatically syncs watchlists, watch history, and resume progress from SIMKL, AniList, Trakt, and MDBList into [PublicMetaDB](https://publicmetadb.com).
 
-## Kernfunktionen
+## Features
 
-- **Multi-Source-Sync** – Watchlists und History von SIMKL, AniList, Trakt und MDBList in einem Lauf
-- **Watch History** – Importiert abgeschlossene Titel aus SIMKL und Trakt; Einträge mit ≥ 80 % Trakt-Fortschritt werden direkt als gesehen markiert
-- **Resume Progress** – Speichert den Trakt-Wiedergabefortschritt als PMDB-Resumepunkt
-- **PMDB-Watchlist** – Führt Plan-to-Watch-Einträge aus mehreren Quellen in der nativen PMDB-Watchlist zusammen
-- **Anime-Spezialisierung** – Prequel-Chain-Cache, Fribb-Mapping, AniList-/MAL-Auflösung und PMDB-Episode-Fallback
-- **Multi-Profil** – Jedes Profil hat eigene, AES-verschlüsselte Zugangsdaten und ein eigenes Passwort
-- **Admin-Panel** – Profilübersicht, manuelle Syncs, Queue-Ansicht (via `ADMIN_PASSWORD`)
-- **Hintergrund-Scheduler** – Automatischer Sync im konfigurierbaren Intervall
+- **Multi-source sync** — Watchlists and history from SIMKL, AniList, Trakt, and MDBList in a single run
+- **Watch history** — Imports completed titles from SIMKL and Trakt; Trakt entries at ≥ 80% progress are marked as watched automatically
+- **Resume progress** — Saves Trakt playback progress as PMDB resume points
+- **PMDB watchlist** — Merges plan-to-watch entries from multiple sources into the native PMDB watchlist
+- **Anime support** — Prequel-chain cache, Fribb mapping, AniList/MAL resolution, and per-episode PMDB fallback
+- **Multi-profile** — Each profile has its own AES-encrypted credentials and password
+- **Admin panel** — Profile overview, manual syncs, and queue view (enabled via `ADMIN_PASSWORD`)
+- **Background scheduler** — Automatic sync on a configurable interval
 
-## Schnellstart
+## Quick Start
 
 ```bash
 git clone https://github.com/Febsho/SyncMeta-for-PublicMetaDB
 cd SyncMeta-for-PublicMetaDB
-cp .env.example .env   # Werte anpassen (siehe unten)
+cp .env.example .env   # adjust values as needed
 docker compose up -d syncmeta
 ```
 
-Die App ist dann unter `http://127.0.0.1:8080` erreichbar.
+The app is available at `http://127.0.0.1:8080`.
 
-1. **Profil erstellen** – Im Web-UI UUID und Passwort vergeben
-2. **Quellen verbinden** – API-Keys für PublicMetaDB, SIMKL, AniList, Trakt und/oder MDBList eintragen
-3. **Listen & History wählen** – Statusfilter, History-Sync und Resume-Sync aktivieren
-4. **Sync auslösen** – Manuell per Dashboard oder automatisch per Scheduler
+1. **Create a profile** — Set a UUID and password in the web UI
+2. **Connect sources** — Enter API keys for PublicMetaDB, SIMKL, AniList, Trakt, and/or MDBList
+3. **Choose lists & history** — Enable status filters, history sync, and resume sync
+4. **Run a sync** — Trigger manually from the dashboard or let the scheduler handle it
 
-## Wichtige Umgebungsvariablen
+## Environment Variables
 
-Alle Sync-Einstellungen (API-Keys, Listen, History) werden pro Profil im Web-UI gespeichert. Die folgenden Server-Variablen werden einmalig in der `.env` gesetzt:
+All sync settings (API keys, lists, history) are stored per-profile in the web UI. The following server-level variables are set once in `.env`:
 
-| Variable | Pflicht | Beschreibung |
+| Variable | Required | Description |
 |---|---|---|
-| `SYNCMETA_MASTER_KEY` | Empfohlen | Verschlüsselungsschlüssel für Profildaten. Stabil halten – sonst gehen gespeicherte Zugangsdaten verloren. Wird automatisch generiert, wenn leer. |
-| `ADMIN_PASSWORD` | Optional | Aktiviert das Admin-Panel (`/admin`). Ohne diesen Wert ist das Panel deaktiviert. |
-| `SITE_ACCESS_PASSWORD` | Optional | Globales Zugriffspasswort vor dem Laden der App. |
-| `SYNCMETA_MAX_CONCURRENT_SYNCS` | Optional | Maximale Anzahl gleichzeitiger Profil-Syncs (Standard: `4`). |
-| `PROFILE_STORE_FILE` | Optional | Pfad zur Profil-Datenbankdatei (Standard: `/app/data/profiles.json`). |
-| `DISABLE_PROFILE_SCHEDULER` | Optional | Auf `1` setzen, um den Hintergrund-Scheduler zu deaktivieren. |
+| `SYNCMETA_MASTER_KEY` | Recommended | Encryption key for profile credentials. Keep this stable across restarts — losing it invalidates all saved credentials. Auto-generated if left empty. |
+| `ADMIN_PASSWORD` | Optional | Enables the admin panel at `/admin`. The panel is fully disabled when this is not set. |
+| `SITE_ACCESS_PASSWORD` | Optional | Global password gate shown before the app loads. Useful for public-facing deployments. |
+| `SYNCMETA_MAX_CONCURRENT_SYNCS` | Optional | Maximum number of profile syncs running in parallel (default: `4`). |
+| `PROFILE_STORE_FILE` | Optional | Path to the profile database file (default: `/app/data/profiles.json`). |
+| `DISABLE_PROFILE_SCHEDULER` | Optional | Set to `1` to disable the background scheduler entirely. |
 
-Eine vollständige Liste aller Variablen mit Standardwerten steht in `.env.example`.
+See `.env.example` for a full list with defaults and comments.
 
-## Entwicklung
+## Development
 
 ```bash
 pip install -r requirements.txt
-python web.py          # http://127.0.0.1:8080
-python -m unittest discover -v   # Tests ausführen
+python web.py                        # http://127.0.0.1:8080
+python -m unittest discover -v       # run tests
 ```
 
-## Lizenz
+## License
 
-MIT – Details in der `LICENSE`-Datei.
+MIT — see the `LICENSE` file for details.
