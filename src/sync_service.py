@@ -641,13 +641,15 @@ class SyncService:
         )
         self._set_status("Fetching SIMKL watched history")
         full_sync = self._config.sync.full_history_sync
-        items = self._simkl.get_watched_history()
-
-        try:
-            existing_items = self._pmdb.get_watched_history()
-        except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
-            return stats
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_simkl = pool.submit(self._simkl.get_watched_history)
+            f_pmdb = pool.submit(self._pmdb.get_watched_history)
+            items = f_simkl.result()
+            try:
+                existing_items = f_pmdb.result()
+            except Exception as exc:
+                stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+                return stats
 
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
@@ -1417,8 +1419,13 @@ class SyncService:
         cursor = self._config.sync.trakt_history_cursor or ""
 
         self._set_status("Fetching Trakt watched history…")
+        _executor = ThreadPoolExecutor(max_workers=2)
+        f_trakt = _executor.submit(self._trakt.get_watched_history, since=None, status_callback=self._set_status)
+        f_pmdb = _executor.submit(self._pmdb.get_watched_history)
+        _executor.shutdown(wait=False)
+
         try:
-            items = self._trakt.get_watched_history(since=None, status_callback=self._set_status)
+            items = f_trakt.result()
         except TraktAuthenticationError as exc:
             stats.errors.append(str(exc))
             return stats
@@ -1433,13 +1440,12 @@ class SyncService:
             stats.history_cursor = latest if latest > cursor else cursor
         else:
             # Nothing new — keep existing cursor and return immediately.
-            # Skip the expensive PMDB history fetch when there's nothing to add.
             stats.history_cursor = cursor
             logger.info("Trakt history: no new events since cursor — skipping PMDB fetch")
             return stats
 
         try:
-            existing_items = self._pmdb.get_watched_history()
+            existing_items = f_pmdb.result()
         except Exception as exc:
             stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
             return stats

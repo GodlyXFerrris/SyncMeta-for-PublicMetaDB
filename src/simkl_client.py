@@ -528,12 +528,15 @@ class SimklClient:
 
     def get_watched_history(self, since: str | None = None) -> list[dict]:
         """Fetch SIMKL completed history as watched-once records."""
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_movies = pool.submit(self._get_completed_movie_history, since=since)
+            f_shows = pool.submit(self._get_show_history, "shows", since=since)
+            f_anime = pool.submit(self._get_show_history, "anime", since=since)
+            movie_history = f_movies.result()
+            show_history = f_shows.result()
+            anime_history = f_anime.result()
         history: list[dict] = []
-        movie_history = self._get_completed_movie_history(since=since)
-        self._check_cancelled()
-        show_history = self._get_show_history("shows", since=since)
-        self._check_cancelled()
-        anime_history = self._get_show_history("anime", since=since)
         history.extend(movie_history)
         history.extend(show_history)
         history.extend(anime_history)
