@@ -3,70 +3,58 @@
 [![Deploy to Docker](https://github.com/Febsho/SyncMeta-for-PublicMetaDB/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Febsho/SyncMeta-for-PublicMetaDB/actions/workflows/docker-publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-SyncMeta ist eine selbstgehostete Web-App zur Synchronisierung deiner Watchlists und des Verlaufs von verschiedenen Quellen (SIMKL, AniList, Trakt, MDBList) in PublicMetaDB.
+Selbstgehostete Web-App, die Watchlists, Watch-History und Resume-Fortschritt von SIMKL, AniList, Trakt und MDBList automatisch in [PublicMetaDB](https://publicmetadb.com) synchronisiert.
 
 ## Kernfunktionen
 
-- **Multisource-Sync:** Synchronisiert Watchlists und den Verlauf von SIMKL, AniList, Trakt und MDBList.
-- **Anime-Spezialisierung:** Verbesserte Handhabung von Anime-Listen, inklusive Prequel-Chain-Cache und PMDB-Mapping.
-- **Watch History & Resume Progress:** Importiert den Verlauf und den Wiedergabefortschritt (Trakt).
-- **Sichere Profile:** Jedes Benutzerprofil hat verschlüsselte Anmeldeinformationen und ist durch UUIDs und Passwörter geschützt.
-- **Automatischer Hintergrund-Sync:** Konfigurierbarer automatischer Sync von Listen.
+- **Multi-Source-Sync** – Watchlists und History von SIMKL, AniList, Trakt und MDBList in einem Lauf
+- **Watch History** – Importiert abgeschlossene Titel aus SIMKL und Trakt; Einträge mit ≥ 80 % Trakt-Fortschritt werden direkt als gesehen markiert
+- **Resume Progress** – Speichert den Trakt-Wiedergabefortschritt als PMDB-Resumepunkt
+- **PMDB-Watchlist** – Führt Plan-to-Watch-Einträge aus mehreren Quellen in der nativen PMDB-Watchlist zusammen
+- **Anime-Spezialisierung** – Prequel-Chain-Cache, Fribb-Mapping, AniList-/MAL-Auflösung und PMDB-Episode-Fallback
+- **Multi-Profil** – Jedes Profil hat eigene, AES-verschlüsselte Zugangsdaten und ein eigenes Passwort
+- **Admin-Panel** – Profilübersicht, manuelle Syncs, Queue-Ansicht (via `ADMIN_PASSWORD`)
+- **Hintergrund-Scheduler** – Automatischer Sync im konfigurierbaren Intervall
 
 ## Schnellstart
 
-Die empfohlene Bereitstellung erfolgt über das vorgefertigte Docker-Image.
+```bash
+git clone https://github.com/Febsho/SyncMeta-for-PublicMetaDB
+cd SyncMeta-for-PublicMetaDB
+cp .env.example .env   # Werte anpassen (siehe unten)
+docker compose up -d syncmeta
+```
 
-1.  **Repository klonen:**
-    ```bash
-    git clone https://github.com/Febsho/SyncMeta-for-PublicMetaDB
-    cd SyncMeta-for-PublicMetaDB
-    ```
+Die App ist dann unter `http://127.0.0.1:8080` erreichbar.
 
-2.  **SyncMeta starten:**
-    ```bash
-    docker compose up -d syncmeta
-    ```
-    Die Anwendung ist dann unter `http://127.0.0.1:8080` verfügbar.
+1. **Profil erstellen** – Im Web-UI UUID und Passwort vergeben
+2. **Quellen verbinden** – API-Keys für PublicMetaDB, SIMKL, AniList, Trakt und/oder MDBList eintragen
+3. **Listen & History wählen** – Statusfilter, History-Sync und Resume-Sync aktivieren
+4. **Sync auslösen** – Manuell per Dashboard oder automatisch per Scheduler
 
-3.  **Profil einrichten:**
-    Im Web-UI kannst du ein Profil mit UUID und Passwort erstellen.
+## Wichtige Umgebungsvariablen
 
-4.  **Konten verbinden & Listen wählen:**
-    Verbinde deine API-Keys/Zugangsdaten für PublicMetaDB, SIMKL, AniList, Trakt und MDBList. Wähle aus, welche Listen synchronisiert werden sollen.
+Alle Sync-Einstellungen (API-Keys, Listen, History) werden pro Profil im Web-UI gespeichert. Die folgenden Server-Variablen werden einmalig in der `.env` gesetzt:
 
-5.  **Manuelle Steuerung:**
-    Über das Dashboard kannst du manuelle Syncs aller Listen, Watch History oder Resume Progress auslösen.
+| Variable | Pflicht | Beschreibung |
+|---|---|---|
+| `SYNCMETA_MASTER_KEY` | Empfohlen | Verschlüsselungsschlüssel für Profildaten. Stabil halten – sonst gehen gespeicherte Zugangsdaten verloren. Wird automatisch generiert, wenn leer. |
+| `ADMIN_PASSWORD` | Optional | Aktiviert das Admin-Panel (`/admin`). Ohne diesen Wert ist das Panel deaktiviert. |
+| `SITE_ACCESS_PASSWORD` | Optional | Globales Zugriffspasswort vor dem Laden der App. |
+| `SYNCMETA_MAX_CONCURRENT_SYNCS` | Optional | Maximale Anzahl gleichzeitiger Profil-Syncs (Standard: `4`). |
+| `PROFILE_STORE_FILE` | Optional | Pfad zur Profil-Datenbankdatei (Standard: `/app/data/profiles.json`). |
+| `DISABLE_PROFILE_SCHEDULER` | Optional | Auf `1` setzen, um den Hintergrund-Scheduler zu deaktivieren. |
 
-## Umgebungsvariablen
-
-Die meisten Standardeinstellungen können über die `.env.example` oder direkt im Web-UI konfiguriert werden.
-
-| Variable                   | Zweck                                           |
-| :------------------------- | :---------------------------------------------- |
-| `SYNCMETA_MASTER_KEY`      | Verschlüsselungsschlüssel für gespeicherte Anmeldeinformationen. |
-| `PROFILE_STORE_FILE`       | Pfad zum JSON-Speicher der Profile.             |
-| `SITE_ACCESS_PASSWORD`     | Optionales geteiltes Passwort zum Website-Zugriff. |
-| `DISABLE_PROFILE_SCHEDULER`| Deaktiviert den automatischen Hintergrund-Sync. |
-
-Für eine vollständige Liste der Variablen und ihrer Standardwerte siehe die `src/config.py`.
+Eine vollständige Liste aller Variablen mit Standardwerten steht in `.env.example`.
 
 ## Entwicklung
 
 ```bash
-# Abhängigkeiten installieren
 pip install -r requirements.txt
-
-# Flask-App starten
-python web.py
-```
-App ist dann unter `http://127.0.0.1:8080` verfügbar.
-
-### Tests ausführen
-```bash
-python -m unittest discover -v
+python web.py          # http://127.0.0.1:8080
+python -m unittest discover -v   # Tests ausführen
 ```
 
 ## Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz. Details siehe `LICENSE` Datei.
+MIT – Details in der `LICENSE`-Datei.
