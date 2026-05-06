@@ -498,25 +498,43 @@ class SyncService:
 
     def _sync_pmdb_watchlist(self) -> SyncStats | None:
         """Merge selected watchlist items from enabled providers into the PMDB native watchlist."""
-        all_items: list[dict] = []
+        # Collect which sources are active, then fetch them concurrently.
+        fetch_jobs: list[tuple[str, object]] = []
+        simkl_enabled = bool(self._config.sync.simkl_sync_to_pmdb_watchlist and self._config.simkl.access_token)
+        trakt_enabled = bool(self._config.sync.trakt_sync_to_pmdb_watchlist and self._config.trakt.enabled)
+        anilist_enabled = bool(self._config.sync.anilist_sync_to_pmdb_watchlist and self._config.anilist.enabled)
 
-        if self._config.sync.simkl_sync_to_pmdb_watchlist and self._config.simkl.access_token:
-            self._set_status("Fetching SIMKL plan-to-watch for PMDB watchlist")
+        def _fetch_simkl_plantowatch() -> list[dict]:
+            result: list[dict] = []
             for simkl_type in self._config.sync.media_types:
-                self._check_cancelled()
                 grouped = self._simkl.get_status("plantowatch", [simkl_type])
-                all_items.extend(grouped.get(simkl_type, []))
+                result.extend(grouped.get(simkl_type, []))
+            return result
 
-        if self._config.sync.trakt_sync_to_pmdb_watchlist and self._config.trakt.enabled:
-            self._set_status("Fetching Trakt watchlist for PMDB watchlist")
-            watchlist = self._trakt.get_watchlist() or []
-            all_items.extend(watchlist)
-
-        if self._config.sync.anilist_sync_to_pmdb_watchlist and self._config.anilist.enabled:
-            self._set_status("Fetching AniList planning for PMDB watchlist")
-            self._check_cancelled()
-            items = self._anilist_root_client.get_status("PLANNING") or []
-            all_items.extend(items)
+        workers = sum([simkl_enabled, trakt_enabled, anilist_enabled])
+        all_items: list[dict] = []
+        if workers == 0:
+            pass
+        elif workers == 1:
+            if simkl_enabled:
+                all_items.extend(_fetch_simkl_plantowatch())
+            elif trakt_enabled:
+                all_items.extend(self._trakt.get_watchlist() or [])
+            else:
+                all_items.extend(self._anilist_root_client.get_status("PLANNING") or [])
+        else:
+            self._set_status("Fetching watchlist sources")
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                futures = []
+                if simkl_enabled:
+                    futures.append(pool.submit(_fetch_simkl_plantowatch))
+                if trakt_enabled:
+                    futures.append(pool.submit(self._trakt.get_watchlist))
+                if anilist_enabled:
+                    futures.append(pool.submit(self._anilist_root_client.get_status, "PLANNING"))
+                for future in futures:
+                    result = future.result()
+                    all_items.extend(result or [])
 
         return self._sync_list(
             all_items,
@@ -641,27 +659,26 @@ class SyncService:
         )
         self._set_status("Fetching SIMKL watched history")
         full_sync = self._config.sync.full_history_sync
-        with ThreadPoolExecutor(max_workers=2) as pool:
+        # Overlap three independent fetches: SIMKL history, PMDB history, and
+        # the SIMKL completed-anime list (used as episode-level fallback later).
+        with ThreadPoolExecutor(max_workers=3) as pool:
             f_simkl = pool.submit(self._simkl.get_watched_history)
             f_pmdb = pool.submit(self._pmdb.get_watched_history)
+            f_completed = pool.submit(self._fetch_simkl_completed_anime)
             items = f_simkl.result()
             try:
                 existing_items = f_pmdb.result()
             except Exception as exc:
                 stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
                 return stats
+            completed_anime = f_completed.result()
 
+        logger.info("  SIMKL completed anime: %d entries", len(completed_anime))
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
         stats.history_cursor = ""
         stats.items_fetched = len(items)
-
-        # Fetch completed anime list up-front so we can use it as a fallback
-        # for shows where SIMKL has no per-episode history records at all.
-        self._set_status("Fetching SIMKL completed anime list")
-        completed_anime = self._fetch_simkl_completed_anime()
-        logger.info("  SIMKL completed anime: %d entries", len(completed_anime))
 
         existing_counts: dict[str, int] = {}
         for existing_item in existing_items:

@@ -290,21 +290,36 @@ class PublicMetaDBClient:
             raise
 
     def _get_paginated_items(self, path: str, per_page: int = 100) -> list[dict]:
+        resp = self._get(path, params={"page": 1, "perPage": per_page})
+        if not resp:
+            return []
+        if isinstance(resp, list):
+            return list(resp)
+        items = list(resp.get("items", []))
+        total_pages = int(resp.get("totalPages", 1) or 1)
+        if total_pages <= 1 or not items:
+            return items
+
+        # Fetch remaining pages concurrently — each is independent.
+        pages_data: dict[int, list] = {1: items}
+        with ThreadPoolExecutor(max_workers=min(8, total_pages - 1)) as pool:
+            futures = {
+                pool.submit(self._get, path, {"page": p, "perPage": per_page}): p
+                for p in range(2, total_pages + 1)
+            }
+            for future in as_completed(futures):
+                page_num = futures[future]
+                page_resp = future.result()
+                if isinstance(page_resp, list):
+                    pages_data[page_num] = page_resp
+                elif page_resp:
+                    pages_data[page_num] = list(page_resp.get("items", []))
+                else:
+                    pages_data[page_num] = []
+
         all_items: list[dict] = []
-        page = 1
-        while True:
-            resp = self._get(path, params={"page": page, "perPage": per_page})
-            if not resp:
-                break
-            if isinstance(resp, list):
-                all_items.extend(resp)
-                break
-            items = list(resp.get("items", []))
-            all_items.extend(items)
-            total_pages = int(resp.get("totalPages", 1) or 1)
-            if page >= total_pages or not items:
-                break
-            page += 1
+        for p in range(1, total_pages + 1):
+            all_items.extend(pages_data.get(p, []))
         return all_items
 
     # ── Mapping lookups ────────────────────────────────────────────
