@@ -1352,11 +1352,12 @@ class SyncService:
         """Remap a Trakt TV episode from TVDB to TMDB numbering via PMDB anime-seasons.
 
         Trakt uses TVDB season/episode numbering; PMDB expects TMDB numbering.
-        This only fires when PMDB has community season mappings for the show's
-        TMDB ID, meaning a confirmed anime remapping exists.
+        PMDB anime-seasons is the canonical source: if the community has added
+        season mappings for this TMDB ID the episode is remapped; otherwise the
+        item is written as-is (TVDB == TMDB for the vast majority of anime).
 
-        Uses Fribb as a cheap local pre-filter so non-anime TV shows never trigger
-        a PMDB API call.
+        Empty PMDB responses are cached per TMDB ID so non-anime shows only pay
+        a single 404 per sync run — no Fribb pre-filter needed.
         """
         if item.get("media_type") != "tv":
             return item
@@ -1369,20 +1370,9 @@ class SyncService:
         if tmdb_id <= 0 or tvdb_season <= 0 or tvdb_episode <= 0:
             return item
 
-        # Fribb lookup is local (no API call) — skip PMDB fetch for non-anime shows.
-        from . import fribb_client
-        cache_key_tmdb = ("tmdb", str(tmdb_id))
-        if cache_key_tmdb in self._fribb_lookup_cache:
-            fribb_entry = self._fribb_lookup_cache[cache_key_tmdb]
-        else:
-            fribb_entry = fribb_client.lookup_by_tmdb(tmdb_id)
-            self._fribb_lookup_cache[cache_key_tmdb] = fribb_entry
-        if fribb_entry is None:
-            return item  # Not in Fribb → not anime → skip
-
         anime_seasons = self._get_cached_anime_seasons(tmdb_id)
         if not anime_seasons:
-            return item
+            return item  # No community mapping → write as-is
 
         remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode)
         if not remapped:
