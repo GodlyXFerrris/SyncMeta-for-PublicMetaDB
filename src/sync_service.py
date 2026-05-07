@@ -1348,6 +1348,56 @@ class SyncService:
             out["tmdb_id"] = tmdb_id
         return out
 
+    def _remap_trakt_anime_episode(self, item: dict) -> dict:
+        """Remap a Trakt TV episode from TVDB to TMDB numbering via PMDB anime-seasons.
+
+        Trakt uses TVDB season/episode numbering; PMDB expects TMDB numbering.
+        This only fires when PMDB has community season mappings for the show's
+        TMDB ID, meaning a confirmed anime remapping exists.
+
+        Uses Fribb as a cheap local pre-filter so non-anime TV shows never trigger
+        a PMDB API call.
+        """
+        if item.get("media_type") != "tv":
+            return item
+        try:
+            tmdb_id = int(item.get("tmdb_id") or 0)
+            tvdb_season = int(item.get("season") or 0)
+            tvdb_episode = int(item.get("episode") or 0)
+        except (TypeError, ValueError):
+            return item
+        if tmdb_id <= 0 or tvdb_season <= 0 or tvdb_episode <= 0:
+            return item
+
+        # Fribb lookup is local (no API call) — skip PMDB fetch for non-anime shows.
+        from . import fribb_client
+        cache_key_tmdb = ("tmdb", str(tmdb_id))
+        if cache_key_tmdb in self._fribb_lookup_cache:
+            fribb_entry = self._fribb_lookup_cache[cache_key_tmdb]
+        else:
+            fribb_entry = fribb_client.lookup_by_tmdb(tmdb_id)
+            self._fribb_lookup_cache[cache_key_tmdb] = fribb_entry
+        if fribb_entry is None:
+            return item  # Not in Fribb → not anime → skip
+
+        anime_seasons = self._get_cached_anime_seasons(tmdb_id)
+        if not anime_seasons:
+            return item
+
+        remapped = self._map_episode_via_tvdb_season(anime_seasons, tvdb_season, tvdb_episode)
+        if not remapped:
+            return item
+        if remapped["season"] == tvdb_season and remapped["episode"] == tvdb_episode:
+            return item  # Numbering already matches — no change
+
+        logger.info(
+            "Remapped Trakt anime '%s' (tmdb=%d) via PMDB seasons: S%dE%d → S%dE%d",
+            item.get("title", "Unknown"), tmdb_id,
+            tvdb_season, tvdb_episode,
+            remapped["season"], remapped["episode"],
+        )
+        return {**item, "season": remapped["season"], "episode": remapped["episode"]}
+
     def _get_cached_anime_seasons(self, tmdb_id: int) -> list[dict]:
         tmdb_id = int(tmdb_id)
         if tmdb_id <= 0:
@@ -1483,6 +1533,7 @@ class SyncService:
             if self._fast_skip_existing_history_item(item, existing_counts, source_seen, stats):
                 continue
             item = self._resolve_activity_item(item)
+            item = self._remap_trakt_anime_episode(item)
             key = self._watched_identity_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
@@ -1545,6 +1596,7 @@ class SyncService:
                 except (TypeError, ValueError):
                     pass
             item = self._resolve_activity_item(item)
+            item = self._remap_trakt_anime_episode(item)
             key = self._resume_key(item)
             if not key:
                 stats.items_skipped_unresolved += 1
