@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip as _gzip
 import logging
 import os
 import queue
@@ -1066,6 +1067,29 @@ def _before_request() -> None:
         # for other requests and clearing it would cascade-lock the user out.
         return make_response(jsonify({"error": "Site password required"}), 401)
     return _clear_access_cookie(make_response(render_template("access.html", error=None), 401))
+
+
+@app.after_request
+def _compress_response(response):
+    if (
+        "gzip" not in request.headers.get("Accept-Encoding", "")
+        or not response.content_type.startswith("application/json")
+        or response.status_code < 200
+        or response.status_code >= 300
+        or response.direct_passthrough
+    ):
+        return response
+    data = response.get_data()
+    if len(data) < 512:
+        return response
+    compressed = _gzip.compress(data, compresslevel=6)
+    if len(compressed) >= len(data):
+        return response
+    response.set_data(compressed)
+    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Vary"] = "Accept-Encoding"
+    response.headers["Content-Length"] = len(compressed)
+    return response
 
 
 @app.route("/")
