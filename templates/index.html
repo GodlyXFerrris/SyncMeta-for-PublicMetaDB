@@ -848,6 +848,7 @@
     let draftSaveTimer = null;
     let credentialsHydrated = false;
     let lastStatusRenderKey = '';
+    let lastSyncRunning = null;
     let profileDraftDirty = false;
     let pollingIntervalMs = 0;
     let statusFetchInFlight = null;
@@ -2930,7 +2931,9 @@
       el('btn-stop').textContent = stopping ? 'Stopping...' : 'Stop';
       el('sync-label').textContent = profile.sync_running ? (stopping ? 'Stopping...' : 'Syncing...') : 'Sync Lists';
       refreshPollingForProfile(profile);
-      if (!profile.sync_running) fetchUnresolved();
+      const nowRunning = !!profile.sync_running;
+      if (lastSyncRunning === true && !nowRunning) fetchUnresolved();
+      lastSyncRunning = nowRunning;
       updateNextSyncBadge();
       ensureNextSyncTicker();
     }
@@ -3367,22 +3370,25 @@
         if (wantsCredentials) {
           populateForm(profile.credentials, profile.options, { profile_id: profile.profile_id }, profile.sync_error || '');
         }
-        const renderKey = JSON.stringify({
-          sync_running: !!profile.sync_running,
-          sync_status: profile.sync_status || '',
-          sync_updated_at: profile.sync_updated_at || '',
-          last_sync: profile.last_sync || '',
-          next_sync_at: profile.next_sync_at || '',
-          sync_error: profile.sync_error || '',
-          last_results: profile.last_results || [],
-          sync_live_results: profile.sync_live_results || [],
-          history: profile.history || [],
-          activity_results: profile.activity_results || {},
-          options: profile.options || {},
-          profile_id: profile.profile_id || '',
-          sync_cancel_requested: !!profile.sync_cancel_requested,
-          queue_status: profile.queue_status || {},
-        });
+        // Cheap fingerprint: avoid JSON.stringify of large arrays.
+        // Large arrays use length as sentinel; content changes that don't alter
+        // length are caught by sync_updated_at (changes on every progress push).
+        const renderKey = [
+          !!profile.sync_running,
+          profile.sync_status || '',
+          profile.sync_updated_at || '',
+          profile.last_sync || '',
+          profile.next_sync_at || '',
+          profile.sync_error || '',
+          (profile.last_results || []).length,
+          (profile.sync_live_results || []).length,
+          (profile.history || []).length,
+          JSON.stringify(profile.activity_results || {}),
+          JSON.stringify(profile.options || {}),
+          profile.profile_id || '',
+          !!profile.sync_cancel_requested,
+          JSON.stringify(profile.queue_status || {}),
+        ].join('\x00');
         if (!wantsCredentials && renderKey === lastStatusRenderKey) {
           return profile;
         }
@@ -3578,6 +3584,7 @@
       renderEmptyDashboard('Signed out. Your server-side profile still exists.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
+      lastSyncRunning = null;
       clearDraftDirty();
       setPollingInterval(POLL_IDLE_MS);
       showToast('Logged out.', false, true);
@@ -3659,6 +3666,7 @@
       renderEmptyDashboard('Profile deleted. Create or load another profile to continue.');
       credentialsHydrated = false;
       lastStatusRenderKey = '';
+      lastSyncRunning = null;
       clearDraftDirty();
       showToast('Profile data deleted.', false, true);
     }
