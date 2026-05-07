@@ -19,10 +19,10 @@ from . import anime_mapping_store
 
 logger = logging.getLogger(__name__)
 
-_LIST_WRITE_WORKERS = 3
-_LIST_RESOLVE_WORKERS = 3
-_ACTIVITY_WRITE_WORKERS = 3
-_MAPPING_WRITE_WORKERS = 3
+_LIST_WRITE_WORKERS = 4
+_LIST_RESOLVE_WORKERS = 6
+_ACTIVITY_WRITE_WORKERS = 4
+_MAPPING_WRITE_WORKERS = 4
 _ANILIST_PREWARM_LIMIT = 200
 _FUTURE_POLL_INTERVAL = 0.25
 
@@ -556,28 +556,47 @@ class SyncService:
         if not media_types:
             return stats
 
-        all_items_by_status: list[tuple[str, str, list[dict]]] = []
-        simkl_fetch_started = time.perf_counter()
+        # Build all (type, status) fetch jobs in the canonical order so that
+        # list processing later preserves the expected ordering.
+        fetch_jobs: list[tuple[str, str]] = []
         for simkl_type in media_types:
-            self._check_cancelled()
             statuses = self._config.simkl.selected_statuses.get(simkl_type, [])
-            if not statuses:
-                continue
-            for status_key in statuses:
+            fetch_jobs.extend((simkl_type, sk) for sk in statuses)
+
+        if not fetch_jobs:
+            return stats
+
+        self._set_status("Fetching SIMKL lists")
+        simkl_fetch_started = time.perf_counter()
+
+        def _fetch_one(simkl_type: str, status_key: str) -> tuple[str, str, list[dict]]:
+            t0 = time.perf_counter()
+            grouped = self._simkl.get_status(status_key, [simkl_type])
+            items = grouped.get(simkl_type, [])
+            logger.info(
+                "Fetched SIMKL %s %s in %.2fs (%d items)",
+                _STATUS_LABELS.get(status_key, status_key),
+                simkl_type,
+                time.perf_counter() - t0,
+                len(items),
+            )
+            return (simkl_type, status_key, items)
+
+        job_order = {job: i for i, job in enumerate(fetch_jobs)}
+        all_items_by_status: list[tuple[str, str, list[dict]]] = []
+        with ThreadPoolExecutor(max_workers=min(8, len(fetch_jobs))) as pool:
+            futures = {pool.submit(_fetch_one, t, s): (t, s) for t, s in fetch_jobs}
+            for future in self._iter_completed_futures(futures):
                 self._check_cancelled()
-                self._set_status(f"Fetching SIMKL {_STATUS_LABELS.get(status_key, status_key)} {simkl_type}")
-                fetch_started = time.perf_counter()
-                grouped = self._simkl.get_status(status_key, [simkl_type])
-                items = grouped.get(simkl_type, [])
-                fetch_elapsed = time.perf_counter() - fetch_started
-                logger.info(
-                    "Fetched SIMKL %s %s in %.2fs (%d items)",
-                    _STATUS_LABELS.get(status_key, status_key),
-                    simkl_type,
-                    fetch_elapsed,
-                    len(items),
-                )
-                all_items_by_status.append((simkl_type, status_key, items))
+                try:
+                    all_items_by_status.append(future.result())
+                except SyncCancelled:
+                    raise
+                except Exception as exc:
+                    t, s = futures[future]
+                    logger.error("Failed to fetch SIMKL %s %s: %s", t, s, exc)
+
+        all_items_by_status.sort(key=lambda x: job_order.get((x[0], x[1]), 9999))
         logger.info(
             "Fetched SIMKL selections in %.2fs (%d buckets)",
             time.perf_counter() - simkl_fetch_started,

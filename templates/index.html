@@ -849,6 +849,7 @@
     let credentialsHydrated = false;
     let lastStatusRenderKey = '';
     let lastSyncRunning = null;
+    let _statusGeneration = 0; // bumped to discard renders from stale in-flight polls
     let profileDraftDirty = false;
     let pollingIntervalMs = 0;
     let statusFetchInFlight = null;
@@ -3355,6 +3356,8 @@
 
     async function fetchStatus(includeCredentials) {
       const wantsCredentials = !!includeCredentials;
+      const myGen = _statusGeneration; // capture before any await
+
       if (!wantsCredentials && statusFetchInFlight) {
         try {
           return await statusFetchInFlight;
@@ -3382,6 +3385,11 @@
           sessionProfileId = profile.profile_id;
           el('profile-id').value = profile.profile_id;
           localStorage.setItem(PROFILE_KEY, profile.profile_id);
+        }
+        // Discard render if a newer forced refresh has been issued (e.g. post-sync).
+        // This prevents a stale poll from overwriting the "Syncing..." state.
+        if (!wantsCredentials && myGen !== _statusGeneration) {
+          return profile;
         }
         refreshPollingForProfile(profile);
         if (wantsCredentials) {
@@ -3433,6 +3441,13 @@
       return await request;
     }
 
+    function _forceStatusRefresh() {
+      // Bump generation so any in-flight poll response is discarded, then fetch fresh.
+      _statusGeneration++;
+      statusFetchInFlight = null;
+      fetchStatus(false);
+    }
+
     async function triggerSync(dryRun) {
       // Immediate feedback before any async work.
       const syncBtn = el('btn-sync');
@@ -3460,8 +3475,8 @@
           if (result.status === 409) {
             showToast('A sync is already in progress — opening dashboard.', false, true);
             switchView('dashboard');
-            fetchStatus();
             setPollingInterval(POLL_RUNNING_MS);
+            _forceStatusRefresh();
           } else {
             showToast(formatApiError(result.data, 'Unable to start sync.'), true, false);
           }
@@ -3470,8 +3485,8 @@
 
         showToast(dryRun ? 'List dry run started.' : 'List sync started.', false, true);
         switchView('dashboard');
-        fetchStatus();
         setPollingInterval(POLL_RUNNING_MS);
+        _forceStatusRefresh();
       } catch {
         if (syncBtn) syncBtn.disabled = false;
         if (dryBtn) dryBtn.disabled = false;
@@ -3507,20 +3522,21 @@
           if (result.status === 409) {
             showToast('A sync is already in progress — opening dashboard.', false, true);
             switchView('dashboard');
-            fetchStatus();
             setPollingInterval(POLL_RUNNING_MS);
+            _forceStatusRefresh();
           } else {
             showToast(formatApiError(result.data, 'Unable to start activity sync.'), true, false);
           }
           return;
         }
 
+        if (targetBtn) targetBtn.textContent = origLabel;
         showToast(mode === 'history' ? 'Watch history sync started.' : 'Resume progress sync started.', false, true);
         switchView('dashboard');
         pendingClearWatchHistory = false;
         clearingWatchHistory = false;
-        fetchStatus();
         setPollingInterval(POLL_RUNNING_MS);
+        _forceStatusRefresh();
       } catch {
         if (histBtn) histBtn.disabled = false;
         if (resumeBtn) resumeBtn.disabled = false;
@@ -3574,7 +3590,7 @@
           false,
           true
         );
-        fetchStatus();
+        _forceStatusRefresh();
       } catch {
         clearingWatchHistory = false;
         pendingClearWatchHistory = false;
@@ -3610,7 +3626,7 @@
         // then ensure polling is running so we catch the moment sync_running flips to false.
         if (result.data.profile) renderDashboard(result.data.profile);
         setPollingInterval(POLL_RUNNING_MS);
-        fetchStatus();
+        _forceStatusRefresh();
       } catch {
         el('btn-stop').disabled = false;
         el('btn-stop').textContent = 'Stop';
