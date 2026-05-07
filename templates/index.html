@@ -3269,6 +3269,10 @@
         return null;
       }
 
+      // Immediate feedback on the explicit Save button (not on silent auto-saves).
+      const saveBtns = announce ? Array.from(document.querySelectorAll('button[onclick="saveProfile()"]')) : [];
+      saveBtns.forEach(b => { b.disabled = true; b.dataset.origText = b.textContent; b.textContent = 'Saving...'; });
+
       try {
         const payload = {
           profile_id: auth.profile_id,
@@ -3279,6 +3283,7 @@
         const result = await apiPost('/api/profile/save', payload);
 
         if (!result.ok) {
+          saveBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Save Profile'; });
           showToast(formatApiError(result.data, 'Unable to save profile.'), true, false);
           return null;
         }
@@ -3288,6 +3293,7 @@
         renderDashboard(profile);
         clearDraftDirty();
         flashSaved();
+        saveBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Save Profile'; });
         if (shouldRefreshSources && profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
@@ -3297,6 +3303,7 @@
         if (announce) showToast(result.data.created ? 'Profile created.' : 'Profile updated.', false, true);
         return profile;
       } catch {
+        saveBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Save Profile'; });
         showToast('Network error while saving profile.', true, false);
         return null;
       }
@@ -3310,9 +3317,14 @@
         return null;
       }
 
+      // Immediate feedback on the explicit Load button.
+      const loadBtns = silent ? [] : Array.from(document.querySelectorAll('button[onclick="loadProfile()"]'));
+      loadBtns.forEach(b => { b.disabled = true; b.dataset.origText = b.textContent; b.textContent = 'Loading...'; });
+
       try {
         const result = await apiPost('/api/profile/login', auth);
         if (!result.ok) {
+          loadBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Load Profile'; });
           if (!silent) showToast(formatApiError(result.data, 'Unable to load profile.'), true, false);
           return null;
         }
@@ -3322,6 +3334,7 @@
         renderDashboard(profile);
         saveDraft(false);
         clearDraftDirty();
+        loadBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Load Profile'; });
         if (profile.credentials && profile.credentials.trakt && profile.credentials.trakt.client_id && profile.credentials.trakt.access_token_saved) {
           refreshTraktLists(true);
         }
@@ -3331,6 +3344,7 @@
         if (!silent) showToast('Profile loaded.', false, true);
         return profile;
       } catch {
+        loadBtns.forEach(b => { b.disabled = false; b.textContent = b.dataset.origText || 'Load Profile'; });
         if (!silent) showToast('Network error while loading profile.', true, false);
         return null;
       }
@@ -3417,13 +3431,29 @@
     }
 
     async function triggerSync(dryRun) {
+      // Immediate feedback before any async work.
+      const syncBtn = el('btn-sync');
+      const dryBtn = el('btn-dry');
+      const syncLabel = el('sync-label');
+      if (syncBtn) syncBtn.disabled = true;
+      if (dryBtn) dryBtn.disabled = true;
+      if (syncLabel) syncLabel.textContent = 'Starting...';
+
       const savedProfile = await ensureProfileReadyForRun();
-      if (!savedProfile) return;
+      if (!savedProfile) {
+        if (syncBtn) syncBtn.disabled = false;
+        if (dryBtn) dryBtn.disabled = false;
+        if (syncLabel) syncLabel.textContent = 'Sync Lists';
+        return;
+      }
 
       try {
         const result = await apiPost('/api/profile/sync', { dry_run: dryRun });
 
         if (!result.ok) {
+          if (syncBtn) syncBtn.disabled = false;
+          if (dryBtn) dryBtn.disabled = false;
+          if (syncLabel) syncLabel.textContent = 'Sync Lists';
           if (result.status === 409) {
             showToast('A sync is already in progress — opening dashboard.', false, true);
             switchView('dashboard');
@@ -3440,17 +3470,37 @@
         fetchStatus();
         setPollingInterval(POLL_RUNNING_MS);
       } catch {
+        if (syncBtn) syncBtn.disabled = false;
+        if (dryBtn) dryBtn.disabled = false;
+        if (syncLabel) syncLabel.textContent = 'Sync Lists';
         showToast('Network error while starting sync.', true, false);
       }
     }
 
     async function triggerActivitySync(mode) {
+      // Immediate feedback before any async work.
+      const histBtn = el('btn-sync-history');
+      const resumeBtn = el('btn-sync-resume');
+      const targetBtn = mode === 'history' ? histBtn : resumeBtn;
+      const origLabel = targetBtn ? targetBtn.textContent : '';
+      if (histBtn) histBtn.disabled = true;
+      if (resumeBtn) resumeBtn.disabled = true;
+      if (targetBtn) targetBtn.textContent = 'Starting...';
+
       const savedProfile = await ensureProfileReadyForRun();
-      if (!savedProfile) return;
+      if (!savedProfile) {
+        if (histBtn) histBtn.disabled = false;
+        if (resumeBtn) resumeBtn.disabled = false;
+        if (targetBtn) targetBtn.textContent = origLabel;
+        return;
+      }
 
       try {
         const result = await apiPost('/api/profile/activity/sync', { mode });
         if (!result.ok) {
+          if (histBtn) histBtn.disabled = false;
+          if (resumeBtn) resumeBtn.disabled = false;
+          if (targetBtn) targetBtn.textContent = origLabel;
           if (result.status === 409) {
             showToast('A sync is already in progress — opening dashboard.', false, true);
             switchView('dashboard');
@@ -3469,6 +3519,9 @@
         fetchStatus();
         setPollingInterval(POLL_RUNNING_MS);
       } catch {
+        if (histBtn) histBtn.disabled = false;
+        if (resumeBtn) resumeBtn.disabled = false;
+        if (targetBtn) targetBtn.textContent = origLabel;
         showToast('Network error while starting activity sync.', true, false);
       }
     }
