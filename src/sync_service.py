@@ -91,6 +91,10 @@ class SyncStats:
     # Populated only on dry-run list syncs. Each entry is a compact record of a
     # resolved item so the dashboard can show a preview of what would be added.
     dry_run_preview: list[dict] = field(default_factory=list)
+    # Keys (tmdb_id:media_type) that this sync wrote to the list.  Only populated
+    # for the PMDB Watchlist row so the profile store can persist them and use them
+    # on the next run to distinguish SyncMeta-managed entries from manually-added ones.
+    synced_keys: list[str] = field(default_factory=list)
 
 
 # Cap preview items per list to keep the dry-run payload bounded even for
@@ -546,6 +550,7 @@ class SyncService:
             list_type="watchlist",
             force_remove_missing=True,
             allow_empty_sync=True,
+            managed_keys=frozenset(self._config.sync.pmdb_watchlist_managed_keys),
         )
 
     def _sync_simkl(self) -> list[SyncStats]:
@@ -2189,6 +2194,7 @@ class SyncService:
         list_type: str = "custom",
         force_remove_missing: bool = False,
         allow_empty_sync: bool = False,
+        managed_keys: frozenset[str] | None = None,
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         actual_list_name = self._resolve_managed_list_name(list_name, source_name or "", selection)
@@ -2403,9 +2409,12 @@ class SyncService:
             finally:
                 pool.shutdown(wait=shutdown_wait, cancel_futures=not shutdown_wait)
 
+        # Expose the keys this sync owns so callers (e.g. watchlist) can persist them.
+        stats.synced_keys = sorted(desired_keys)
+
         if should_remove_missing:
             self._set_status(f"Removing stale items from {actual_list_name}")
-            stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys)
+            stats.items_removed = self._remove_stale(list_id, existing_items, desired_keys, managed_keys)
             self._publish_progress([stats], force=True)
 
         if pending_mapping_contributions:
@@ -2685,12 +2694,26 @@ class SyncService:
                 return False
         return True
 
-    def _remove_stale(self, list_id: str, existing_items: list[dict], desired_keys: set[str]) -> int:
+    def _remove_stale(
+        self,
+        list_id: str,
+        existing_items: list[dict],
+        desired_keys: set[str],
+        managed_keys: frozenset[str] | None = None,
+    ) -> int:
         stale_items: list[dict] = []
         for item in existing_items:
             self._check_cancelled()
             key = f"{item.get('tmdb_id')}:{item.get('media_type')}"
             if key not in desired_keys:
+                # When managed_keys is provided AND non-empty, only remove items that
+                # SyncMeta previously added.  Items added directly in PMDB are not in
+                # managed_keys and are therefore preserved.
+                # An empty managed_keys means this is the first sync (no history yet),
+                # so fall back to removing all stale items as usual.
+                if managed_keys:
+                    if key not in managed_keys:
+                        continue
                 stale_items.append(item)
 
         removed = 0

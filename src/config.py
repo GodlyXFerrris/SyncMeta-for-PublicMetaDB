@@ -107,6 +107,7 @@ class SyncConfig:
     simkl_sync_to_pmdb_watchlist: bool = False
     trakt_sync_to_pmdb_watchlist: bool = False
     anilist_sync_to_pmdb_watchlist: bool = False
+    pmdb_watchlist_managed_keys: list[str] = field(default_factory=list)
 
 
 @dataclass

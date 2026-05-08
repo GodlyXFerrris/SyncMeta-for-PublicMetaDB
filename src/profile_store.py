@@ -101,12 +101,15 @@ def _normalize_activity_state(raw_state: dict | None) -> dict:
             "trakt_history_cursor": "",
             "simkl_activities_ts": "",
             "trakt_activities_ts": "",
+            "pmdb_watchlist_managed_keys": [],
         }
+    raw_keys = raw_state.get("pmdb_watchlist_managed_keys")
     return {
         "simkl_history_cursor": str(raw_state.get("simkl_history_cursor", "") or "").strip(),
         "trakt_history_cursor": str(raw_state.get("trakt_history_cursor", "") or "").strip(),
         "simkl_activities_ts": str(raw_state.get("simkl_activities_ts", "") or "").strip(),
         "trakt_activities_ts": str(raw_state.get("trakt_activities_ts", "") or "").strip(),
+        "pmdb_watchlist_managed_keys": sorted({str(k) for k in raw_keys if k}) if isinstance(raw_keys, list) else [],
     }
 
 
@@ -906,6 +909,12 @@ class ProfileStore:
                     state["simkl_activities_ts"] = activities_ts
                 if "trakt" in source_name:
                     state["trakt_activities_ts"] = activities_ts
+            # Persist watchlist managed keys so the next sync can distinguish
+            # SyncMeta-added entries from manually-added ones.
+            if str(row.get("display_name", "")).strip() == "PMDB Watchlist":
+                synced_keys = row.get("synced_keys")
+                if isinstance(synced_keys, list):
+                    state["pmdb_watchlist_managed_keys"] = sorted({str(k) for k in synced_keys if k})
         profile["activity_results"] = merged
         profile["activity_state"] = state
 

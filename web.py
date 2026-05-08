@@ -248,6 +248,7 @@ def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict 
             simkl_sync_to_pmdb_watchlist=options["simkl_sync_to_pmdb_watchlist"],
             trakt_sync_to_pmdb_watchlist=options["trakt_sync_to_pmdb_watchlist"],
             anilist_sync_to_pmdb_watchlist=options["anilist_sync_to_pmdb_watchlist"],
+            pmdb_watchlist_managed_keys=list(activity_state.get("pmdb_watchlist_managed_keys") or []),
         ),
     )
 
