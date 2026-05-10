@@ -56,7 +56,7 @@ class WebTests(unittest.TestCase):
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
         self.assertIn("Watchlist, watch history, resume progress, and device auth.", html)
         self.assertIn("Native MDBList watchlist/history writes are not exposed by this app", html)
-        self.assertIn("data-nav=\"mapping\"", html)
+        self.assertNotIn("data-nav=\"mapping\"", html)
         self.assertIn("Activity Sync", html)
         self.assertIn("Sync watch history automatically in the background", html)
         self.assertIn("Auto-Sync Every (Seconds)", html)
