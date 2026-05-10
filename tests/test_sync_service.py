@@ -1255,7 +1255,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_fetched, 2)
         self.assertEqual(watched_stats.items_added, 2)
         self.assertEqual(watched_stats.source_name, "SIMKL")
-        self.assertEqual(watched_stats.history_cursor, "")
+        self.assertEqual(watched_stats.history_cursor, "2026-04-01T13:00:00Z")
 
     def test_simkl_history_anime_only_filters_non_anime_entries(self) -> None:
         config = AppConfig(
@@ -1549,7 +1549,7 @@ class SyncServiceTests(unittest.TestCase):
         self.assertEqual(watched_stats.items_added, 1)
         self.assertEqual([(item["season"], item["episode"]) for item in pmdb.watched], [(1, 15)])
 
-    def test_history_sync_always_fetches_full_source_history(self) -> None:
+    def test_history_sync_uses_saved_cursors_for_incremental_fetches(self) -> None:
         config = AppConfig(
             simkl=SimklConfig(
                 client_id="simkl-client",
@@ -1584,8 +1584,8 @@ class SyncServiceTests(unittest.TestCase):
 
         service.run()
 
-        self.assertIsNone(simkl.last_history_since)
-        self.assertIsNone(trakt.last_history_since)
+        self.assertEqual(simkl.last_history_since, "2026-04-01T00:00:00Z")
+        self.assertEqual(trakt.last_history_since, "2026-04-02T00:00:00Z")
 
     def test_simkl_activity_resolves_show_and_anime_without_direct_tmdb_ids(self) -> None:
         class NoTmdbSimklClient(StubSimklClient):

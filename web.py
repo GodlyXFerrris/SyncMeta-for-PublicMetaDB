@@ -1098,6 +1098,11 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    return jsonify({"ok": True, "service": "syncmeta"})
+
+
 @app.route("/api/site/stats", methods=["GET"])
 def api_site_stats():
     return jsonify(_profile_store.get_site_stats())

@@ -683,12 +683,20 @@ class SyncService:
         )
         self._set_status("Fetching SIMKL watched history")
         full_sync = self._config.sync.full_history_sync
+        cursor = str(self._config.sync.simkl_history_cursor or "").strip()
+        since = None if full_sync or not cursor else cursor
         # Overlap three independent fetches: SIMKL history, PMDB history, and
         # the SIMKL completed-anime list (used as episode-level fallback later).
+        # The fallback scans a whole status list, so skip it for cursor-based
+        # incremental runs where the changed history rows are enough context.
         with ThreadPoolExecutor(max_workers=3) as pool:
-            f_simkl = pool.submit(self._simkl.get_watched_history)
+            f_simkl = pool.submit(self._simkl.get_watched_history, since=since)
             f_pmdb = pool.submit(self._pmdb.get_watched_history)
-            f_completed = pool.submit(self._fetch_simkl_completed_anime)
+            f_completed = (
+                pool.submit(self._fetch_simkl_completed_anime)
+                if full_sync or not cursor
+                else pool.submit(lambda: [])
+            )
             items = f_simkl.result()
             try:
                 existing_items = f_pmdb.result()
@@ -701,7 +709,7 @@ class SyncService:
         if self._config.sync.simkl_history_anime_only:
             items = [item for item in items if str(item.get("simkl_type", "")).strip().lower() == "anime"]
         items = self._expand_simkl_aggregate_history(items)
-        stats.history_cursor = ""
+        stats.history_cursor = self._latest_history_cursor(items, cursor)
         stats.items_fetched = len(items)
 
         existing_counts: dict[str, int] = {}
@@ -1498,10 +1506,11 @@ class SyncService:
             source_name="Trakt",
         )
         cursor = self._config.sync.trakt_history_cursor or ""
+        since = None if self._config.sync.full_history_sync or not cursor else cursor
 
         self._set_status("Fetching Trakt watched history…")
         _executor = ThreadPoolExecutor(max_workers=2)
-        f_trakt = _executor.submit(self._trakt.get_watched_history, since=None, status_callback=self._set_status)
+        f_trakt = _executor.submit(self._trakt.get_watched_history, since=since, status_callback=self._set_status)
         f_pmdb = _executor.submit(self._pmdb.get_watched_history)
         _executor.shutdown(wait=False)
 
@@ -3159,8 +3168,6 @@ class SyncService:
 
     @staticmethod
     def _latest_history_cursor(items: list[dict], existing_cursor: str = "") -> str:
-        if not existing_cursor:
-            return ""
         latest = str(existing_cursor).strip()
         for item in items or []:
             watched_at = str(item.get("watched_at", "") or "").strip()

@@ -278,6 +278,12 @@
       </a>
       <div class="nav-links">
         <button class="nav-link" data-nav="dashboard" style="display:none">Dashboard</button>
+        <button class="nav-link" data-nav="connections" style="display:none">Connections</button>
+        <button class="nav-link" data-nav="rules" style="display:none">Sync Rules</button>
+        <button class="nav-link" data-nav="sync-now" style="display:none">Sync Now</button>
+        <button class="nav-link" data-nav="mapping" style="display:none">Mapping Issues</button>
+        <button class="nav-link" data-nav="history" style="display:none">History</button>
+        <button class="nav-link" data-nav="logs" style="display:none">Logs</button>
         <button class="nav-link" data-nav="stats" style="display:none">Stats</button>
         <button class="nav-link" data-nav="settings" style="display:none">Settings</button>
         <a class="nav-external" href="https://github.com/Febsho/SyncMeta-for-PublicMetaDB" target="_blank" rel="noopener">GitHub</a>
@@ -348,7 +354,7 @@
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel" id="logs-panel">
           <div class="panel-header"><span>Latest Sync Results</span><span id="results-time" class="history-time"></span></div>
           <div class="panel-body" style="padding-bottom:0">
             <div id="results-filters" style="display:flex;gap:8px;flex-wrap:wrap"></div>
@@ -358,10 +364,14 @@
           <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
         </div>
         <div class="panel" id="unresolved-panel">
-          <div class="panel-header"><span>Unresolved Items</span><button class="btn btn-sm" type="button" id="btn-unresolved-refresh" style="margin-left:auto">Refresh</button></div>
+          <div class="panel-header">
+            <span>Unresolved Items</span>
+            <input type="text" id="unresolved-search" placeholder="Search mappings..." autocomplete="off" style="margin-left:auto;min-width:180px;max-width:260px;padding:6px 10px;border:1px solid var(--z800);border-radius:6px;background:var(--z900);color:var(--z100);font-size:12px">
+            <button class="btn btn-sm" type="button" id="btn-unresolved-refresh">Refresh</button>
+          </div>
           <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
         </div>
-        <div class="panel">
+        <div class="panel" id="sync-history-panel">
           <div class="panel-header">Sync History</div>
           <div id="history-body"><div class="empty">No history yet.</div></div>
         </div>
@@ -497,7 +507,7 @@
                 </div>
                 <div class="conn-card form-section">
                   <div class="conn-card-title"><span class="dot" id="dot-trakt"></span> Trakt <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
-                  <div class="conn-card-desc">Watchlist, liked lists, personal lists, history, and device auth.</div>
+                  <div class="conn-card-desc">Watchlist, watch history, resume progress, and device auth. Custom Trakt lists are legacy imports.</div>
                   <input type="checkbox" id="trakt-watchlist-movies-toggle" checked class="hidden">
                   <input type="checkbox" id="trakt-watchlist-shows-toggle" checked class="hidden">
                   <div class="hint" style="margin-bottom:10px">Create an app at <a href="https://trakt.tv/oauth/applications" target="_blank" rel="noopener">trakt.tv/oauth/applications</a>, then paste the credentials below. Use the redirect URI if asked.</div>
@@ -538,7 +548,7 @@
                 </div>
                 <div class="conn-card form-section">
                   <div class="conn-card-title"><span class="dot" id="dot-mdblist"></span> MDBList <span style="font-size:11px;color:var(--z600);font-weight:400;margin-left:auto">Optional</span></div>
-                  <div class="conn-card-desc">Custom catalog lists from MDBList.</div>
+                  <div class="conn-card-desc">Selected MDBList catalog lists. MDBList watch status sync is handled by MDBList's own Trakt/Plex integrations.</div>
                   <div class="form-row" style="margin-bottom:0"><label>API Key</label><input type="password" id="mdblist-api-key" placeholder="From mdblist.com settings" autocomplete="off"><div class="hint"><a href="https://mdblist.com/" target="_blank" rel="noopener">Open MDBList</a> and copy the API key from settings.</div></div>
                 </div>
               </div>
@@ -573,7 +583,7 @@
               <div class="lists-subtab" id="lsub-trakt">
                 <div class="settings-group form-section">
                   <div class="settings-group-title">Trakt Catalogs</div>
-                  <div class="settings-group-desc">Default covers watchlists and recommendations. My Lists loads your personal and liked lists. Discover searches public Trakt lists.</div>
+                  <div class="settings-group-desc">Primary sync rules are Trakt watchlists and watched history. Recommendation, personal, liked, and public lists remain available as legacy list imports.</div>
                   <div class="catalog-tabs">
                     <button class="catalog-tab active" type="button" data-trakt-tab="default" onclick="switchTraktTab('default')">Default</button>
                     <button class="catalog-tab" type="button" data-trakt-tab="enabled" onclick="switchTraktTab('enabled')">Enabled</button>
@@ -599,7 +609,7 @@
               <div class="lists-subtab" id="lsub-mdblist">
                 <div class="settings-group form-section">
                   <div class="settings-group-title">MDBList Lists</div>
-                  <div class="settings-group-desc">Choose personal or public-style catalog lists from MDBList. Use My Lists for your account, or search public MDBList lists in Discover.</div>
+                  <div class="settings-group-desc">Imports selected MDBList catalog lists into PublicMetaDB. Native MDBList watchlist/history writes are not exposed by this app; use MDBList's Trakt integration for that path.</div>
                   <div class="catalog-tabs">
                     <button class="catalog-tab active" type="button" data-mdblist-tab="my-lists" onclick="switchMdbListTab('my-lists')">My Lists</button>
                     <button class="catalog-tab" type="button" data-mdblist-tab="discover" onclick="switchMdbListTab('discover')">Discover</button>
@@ -639,14 +649,14 @@
               </div>
               <div class="settings-group form-section">
                 <div class="settings-group-title">PMDB Native Watchlist</div>
-                <div class="settings-group-desc">Select which services contribute their "plan to watch" items to your PublicMetaDB native Watchlist. All enabled sources are merged on every list sync.</div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>SIMKL — Plan to Watch</label></div>
-                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Trakt — Watchlist</label></div>
-                <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>AniList — Planning</label></div>
+                <div class="settings-group-desc">Select which services contribute their "plan to watch" items to your PublicMetaDB native Watchlist. Arrows show the sync direction.</div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-simkl-pmdb-watchlist"><span class="slider"></span></label><label>SIMKL Plan to Watch -&gt; PublicMetaDB Watchlist</label></div>
+                <div class="toggle-row"><label class="toggle"><input type="checkbox" id="opt-trakt-pmdb-watchlist"><span class="slider"></span></label><label>Trakt Watchlist -&gt; PublicMetaDB Watchlist</label></div>
+                <div class="toggle-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-anilist-pmdb-watchlist"><span class="slider"></span></label><label>AniList Planning -&gt; PublicMetaDB Watchlist</label></div>
               </div>
               <div class="settings-group form-section">
                 <div class="settings-group-title">Watch History</div>
-                <div class="settings-group-desc">Import your watched history into PublicMetaDB. Only adds items not already marked watched. Run manually from the dashboard or on a background schedule.</div>
+                <div class="settings-group-desc">Import watched history into PublicMetaDB. The selected source is the only write direction for this rule.</div>
                 <div class="form-row">
                   <label>Source</label>
                   <select id="opt-activity-history-source">
@@ -849,6 +859,7 @@
     let credentialsHydrated = false;
     let lastStatusRenderKey = '';
     let lastSyncRunning = null;
+    let lastUnresolvedItems = [];
     let _statusGeneration = 0; // bumped to discard renders from stale in-flight polls
     let profileDraftDirty = false;
     let pollingIntervalMs = 0;
@@ -1502,12 +1513,32 @@
     }
 
     function switchView(name) {
+      const navTarget = name;
+      if (['connections', 'rules'].includes(name)) {
+        name = 'settings';
+      } else if (['sync-now', 'mapping', 'history', 'logs'].includes(name)) {
+        name = 'dashboard';
+      }
       document.querySelectorAll('.nav-link').forEach(link => {
-        link.classList.toggle('active', link.dataset.nav === name);
+        link.classList.toggle('active', link.dataset.nav === navTarget || (name === 'dashboard' && link.dataset.nav === 'dashboard'));
       });
       el('view-dashboard').style.display = name === 'dashboard' ? 'block' : 'none';
       el('view-stats').style.display = name === 'stats' ? 'block' : 'none';
       el('view-settings').style.display = name === 'settings' ? 'block' : 'none';
+      if (navTarget === 'connections') {
+        showSettingsTab('connections');
+      } else if (navTarget === 'rules') {
+        showSettingsTab('behavior');
+      } else if (navTarget === 'sync-now') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else if (navTarget === 'mapping') {
+        fetchUnresolved();
+        setTimeout(() => el('unresolved-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+      } else if (navTarget === 'history') {
+        setTimeout(() => el('sync-history-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+      } else if (navTarget === 'logs') {
+        setTimeout(() => el('logs-panel').scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+      }
       if (name === 'stats') {
         fetchSiteStats();
         if (!siteStatsPolling) {
@@ -2946,8 +2977,24 @@
       const body = el('unresolved-body');
       if (!panel || !body) return;
       panel.style.display = '';
+      lastUnresolvedItems = Array.isArray(items) ? items.slice() : [];
+      const search = String(el('unresolved-search') && el('unresolved-search').value || '').trim().toLowerCase();
+      if (search) {
+        items = lastUnresolvedItems.filter(item => [
+          item.title,
+          item.list_name,
+          item.media_type,
+          item.simkl_type,
+          item.unresolved_reason,
+          item.anime_conflict_reason,
+          item.imdb_id,
+          item.mal_id,
+          item.anilist_id,
+          item.candidate_tmdb_id,
+        ].some(value => String(value || '').toLowerCase().includes(search)));
+      }
       if (!items || items.length === 0) {
-        body.innerHTML = '<div class="empty">No unresolved items.</div>';
+        body.innerHTML = `<div class="empty">${search ? 'No mapping issues match this search.' : 'No unresolved items.'}</div>`;
         return;
       }
       const animeItems = items.filter(item => String(item.simkl_type || '').toLowerCase() === 'anime');
@@ -3095,6 +3142,8 @@
 
     const refreshBtn = el('btn-unresolved-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', fetchUnresolved);
+    const unresolvedSearch = el('unresolved-search');
+    if (unresolvedSearch) unresolvedSearch.addEventListener('input', () => renderUnresolvedPanel(lastUnresolvedItems));
 
     // ──────────────────────────────────────────────────────────────────────────
 

@@ -54,8 +54,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("Delete User Records", html)
         self.assertIn("Danger Zone", html)
         self.assertIn("Stored securely for this profile. Leave blank to keep it.", html)
-        self.assertIn("Watchlist, liked lists, personal lists, history, and device auth.", html)
-        self.assertIn("personal or public-style catalog lists", html)
+        self.assertIn("Watchlist, watch history, resume progress, and device auth.", html)
+        self.assertIn("Native MDBList watchlist/history writes are not exposed by this app", html)
+        self.assertIn("data-nav=\"mapping\"", html)
         self.assertIn("Activity Sync", html)
         self.assertIn("Sync watch history automatically in the background", html)
         self.assertIn("Auto-Sync Every (Seconds)", html)
@@ -68,9 +69,10 @@ class WebTests(unittest.TestCase):
         self.assertIn("Sync Watch History", html)
         self.assertIn("Clear PMDB History", html)
         self.assertIn("Sync Resume Progress", html)
-        self.assertIn("Import your watched history into PublicMetaDB. Only adds items not already marked watched. Run manually from the dashboard or on a background schedule.", html)
+        self.assertIn("Import watched history into PublicMetaDB. The selected source is the only write direction for this rule.", html)
         self.assertIn("Import continue-watching progress. When background sync is on, this refreshes automatically on its own schedule.", html)
-        self.assertIn("Queued · position", html)
+        self.assertIn("Queued", html)
+        self.assertIn("position", html)
         self.assertIn("RESULTS_PAGE_SIZE = 25", html)
         self.assertIn("results-prev-page", html)
         self.assertIn('id="btn-stop"', html)
@@ -79,6 +81,9 @@ class WebTests(unittest.TestCase):
         self.assertIn("Choose which movie, show, and anime statuses should sync from SIMKL.", html)
         self.assertIn("Choose which anime lists should sync into PublicMetaDB.", html)
         self.assertIn("Delete PublicMetaDB lists when disabled in SyncMeta", html)
+        self.assertIn("SIMKL Plan to Watch -&gt; PublicMetaDB Watchlist", html)
+        self.assertIn("Trakt Watchlist -&gt; PublicMetaDB Watchlist", html)
+        self.assertIn("AniList Planning -&gt; PublicMetaDB Watchlist", html)
         self.assertNotIn('href="/impressum"', html)
         self.assertNotIn('href="/datenschutz"', html)
         self.assertNotIn('href="/terms"', html)
@@ -86,6 +91,12 @@ class WebTests(unittest.TestCase):
         self.assertNotIn("Sync Series", html)
         self.assertNotIn("Sync Movies", html)
         self.assertNotIn("Sync Anime", html)
+
+    def test_healthz(self) -> None:
+        response = self.client.get("/healthz")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["ok"], True)
 
     def test_parse_tmdb_id_accepts_slug_or_url(self) -> None:
         self.assertEqual(web._parse_tmdb_id("1600672"), 1600672)
