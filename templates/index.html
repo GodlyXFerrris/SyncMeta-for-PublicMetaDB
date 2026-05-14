@@ -357,13 +357,28 @@
           <div id="dry-run-preview-container" class="hidden"></div>
           <div id="results-body"><div class="empty">No sync results yet. Save a valid profile and the scheduler will run it automatically.</div></div>
         </div>
-        <div class="panel" id="unresolved-panel">
+        <div class="panel" id="issues-panel">
           <div class="panel-header">
-            <span>Unresolved Items</span>
-            <input type="text" id="unresolved-search" placeholder="Search mappings..." autocomplete="off" style="margin-left:auto;min-width:180px;max-width:260px;padding:6px 10px;border:1px solid var(--z800);border-radius:6px;background:var(--z900);color:var(--z100);font-size:12px">
+            <span>Issues & Errors</span>
+            <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap">
+              <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" type="button" id="issues-tab-unresolved">Unresolved</button>
+                <button class="btn btn-sm" type="button" id="issues-tab-errors">Errors</button>
+              </div>
+              <input type="text" id="unresolved-search" placeholder="Search issues..." autocomplete="off" style="min-width:180px;max-width:260px;padding:6px 10px;border:1px solid var(--z800);border-radius:6px;background:var(--z900);color:var(--z100);font-size:12px">
+            </div>
             <button class="btn btn-sm" type="button" id="btn-unresolved-refresh">Refresh</button>
           </div>
-          <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
+          <div id="unresolved-panel">
+            <div id="unresolved-body"><div class="empty">No unresolved items.</div></div>
+          </div>
+          <div id="errors-panel" class="hidden">
+            <div id="errors-body"><div class="empty">No sync errors.</div></div>
+          </div>
+        </div>
+        <div class="panel hidden" id="run-detail-panel">
+          <div class="panel-header"><span>Run Details</span><button class="btn btn-sm" type="button" id="btn-run-detail-close">Close</button></div>
+          <div id="run-detail-body"><div class="empty">Select a sync row or history entry to inspect details.</div></div>
         </div>
         <div class="panel" id="sync-history-panel">
           <div class="panel-header">Sync History</div>
@@ -854,6 +869,9 @@
     let lastStatusRenderKey = '';
     let lastSyncRunning = null;
     let lastUnresolvedItems = [];
+    let currentIssueTab = 'unresolved';
+    let runDetailsCache = {};
+    let latestDetailedRuns = [];
     let _statusGeneration = 0; // bumped to discard renders from stale in-flight polls
     let profileDraftDirty = false;
     let pollingIntervalMs = 0;
@@ -2848,9 +2866,9 @@
       // Wire Issues card to open the unresolved panel
       const issuesCard = el('card-issues');
       if (issuesCard && totals.unresolved > 0) {
-        issuesCard.onclick = () => { fetchUnresolved(); el('unresolved-panel').scrollIntoView({ behavior: 'smooth' }); };
+        issuesCard.onclick = () => { switchIssuesTab('unresolved'); fetchUnresolved(); el('issues-panel').scrollIntoView({ behavior: 'smooth' }); };
       } else if (issuesCard) {
-        issuesCard.onclick = null;
+        issuesCard.onclick = () => { switchIssuesTab('errors'); el('issues-panel').scrollIntoView({ behavior: 'smooth' }); };
       }
 
       const nextSyncText = options.auto_sync === false
@@ -2894,6 +2912,9 @@
               `unresolved ${Object.entries(unresolvedReasons).map(([key, value]) => `${key}:${value}`).join(', ')}`
             );
           }
+          if ((row.items_skipped_fingerprint || 0) > 0) {
+            notes.push(`unchanged ${row.items_skipped_fingerprint}`);
+          }
           return notes.filter(Boolean).map(note => `<div class="catalog-note">${esc(note)}</div>`).join('');
         };
         const totalPages = Math.max(1, Math.ceil(filteredResults.length / RESULTS_PAGE_SIZE));
@@ -2903,7 +2924,7 @@
         const pagerHtml = totalPages > 1
           ? `<div class="table-pager"><div class="table-pager-actions"><span>Showing ${startIndex + 1}-${startIndex + pagedResults.length} of ${filteredResults.length}</span><span>·</span><span>Page ${currentResultsPage} of ${totalPages}</span><button class="btn btn-sm" type="button" id="results-prev-page" ${currentResultsPage <= 1 ? 'disabled' : ''}>Previous</button><button class="btn btn-sm" type="button" id="results-next-page" ${currentResultsPage >= totalPages ? 'disabled' : ''}>Next</button></div></div>`
           : '';
-        el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${pagedResults.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)}</div>` : ''}${formatResultDiagnostics(row)}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-red' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>${pagerHtml}`;
+        el('results-body').innerHTML = `<div class="table-scroll"><table><thead><tr><th>List</th><th class="num">Fetched</th><th class="num">Resolved</th><th class="num">Added</th><th class="num">Removed</th><th class="num">Dup</th><th class="num">Unresolved</th><th class="num">Errors</th><th class="table-actions">Action</th></tr></thead><tbody>${pagedResults.map(row => `<tr><td>${esc(row.display_name || row.list_name || '')}${row.source_name ? `<div class="catalog-note">${esc(row.source_name)} · ${esc(row.row_type || 'status_list')}</div>` : row.row_type ? `<div class="catalog-note">${esc(row.row_type)}</div>` : ''}${formatResultDiagnostics(row)}</td><td class="num">${row.items_fetched || 0}</td><td class="num">${row.items_resolved || 0}</td><td class="num ${(row.items_added || 0) > 0 ? 'c-green' : 'c-dim'}">${row.items_added || 0}</td><td class="num ${(row.items_removed || 0) > 0 ? 'c-red' : 'c-dim'}">${row.items_removed || 0}</td><td class="num c-dim">${row.items_skipped_duplicate || 0}</td><td class="num ${(row.items_skipped_unresolved || 0) > 0 ? 'c-orange' : 'c-dim'}">${row.items_skipped_unresolved || 0}</td><td class="num ${(row.error_count || 0) > 0 ? 'c-red' : 'c-dim'}">${row.error_count || 0}</td><td class="table-actions">${buildDeleteActions(row)}</td></tr>`).join('')}</tbody></table></div>${pagerHtml}`;
         document.querySelectorAll('[data-delete-list]').forEach(node => {
           node.addEventListener('click', () => armDeleteManagedList(node.dataset.deleteList));
         });
@@ -2912,6 +2933,9 @@
         });
         document.querySelectorAll('[data-delete-cancel]').forEach(node => {
           node.addEventListener('click', () => cancelDeleteManagedList(node.dataset.deleteCancel));
+        });
+        document.querySelectorAll('[data-row-detail]').forEach(node => {
+          node.addEventListener('click', () => openRunDetails(node.dataset.rowDetail, node.dataset.rowKey || ''));
         });
         const prevPage = el('results-prev-page');
         const nextPage = el('results-next-page');
@@ -2941,12 +2965,23 @@
           const statsHtml = entryStatus === 'failed' && !summary.added && !summary.removed && !summary.errors
             ? `${errorDetail}`
             : `<span class="c-green">+${summary.added}</span><span class="c-red">-${summary.removed}</span>${summary.errors > 0 ? `<span class="c-red">${summary.errors} err</span>` : errorDetail}`;
-          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}${statusBadge}</span><div class="history-stats">${statsHtml}</div></div>`;
+          const detailAction = entry.run_id ? `<button class="btn btn-sm" type="button" data-history-run="${esc(entry.run_id)}">Details</button>` : '';
+          return `<div class="history-item"><span class="history-time">${new Date(entry.timestamp).toLocaleString()}${mode}${statusBadge}</span><div class="history-stats">${statsHtml}${detailAction}</div></div>`;
         }).join('');
         const historyNote = history.length > visibleHistory.length
           ? `<div class="panel-body" style="padding-top:12px;padding-bottom:0;color:var(--z500);font-size:12px">Showing the newest ${visibleHistory.length} of ${history.length} sync runs.</div>`
           : '';
         el('history-body').innerHTML = `${historyHtml}${historyNote}`;
+        document.querySelectorAll('[data-history-run]').forEach(node => {
+          node.addEventListener('click', () => openRunDetails(node.dataset.historyRun, ''));
+        });
+      }
+
+      switchIssuesTab(currentIssueTab);
+      if (profile.latest_run_id && !runDetailsCache[profile.latest_run_id]) {
+        fetchRunDetail(profile.latest_run_id).then(() => renderErrorsPanel(profile));
+      } else {
+        renderErrorsPanel(profile);
       }
 
       const stopping = !!profile.sync_cancel_requested;
@@ -2962,6 +2997,87 @@
       lastSyncRunning = nowRunning;
       updateNextSyncBadge();
       ensureNextSyncTicker();
+    }
+
+    function switchIssuesTab(tab) {
+      currentIssueTab = tab === 'errors' ? 'errors' : 'unresolved';
+      el('unresolved-panel').classList.toggle('hidden', currentIssueTab !== 'unresolved');
+      el('errors-panel').classList.toggle('hidden', currentIssueTab !== 'errors');
+      el('issues-tab-unresolved').classList.toggle('btn-primary', currentIssueTab === 'unresolved');
+      el('issues-tab-errors').classList.toggle('btn-primary', currentIssueTab === 'errors');
+    }
+
+    async function fetchSyncRuns() {
+      const result = await apiPost('/api/profile/sync/runs', { page: 1, page_size: 25 });
+      if (!result.ok) return [];
+      latestDetailedRuns = Array.isArray(result.data.items) ? result.data.items : [];
+      return latestDetailedRuns;
+    }
+
+    async function fetchRunDetail(runId) {
+      if (!runId) return null;
+      if (runDetailsCache[runId]) return runDetailsCache[runId];
+      const result = await apiPost('/api/profile/sync/run-details', { run_id: runId });
+      if (!result.ok) return null;
+      runDetailsCache[runId] = result.data.run || null;
+      return runDetailsCache[runId];
+    }
+
+    function renderErrorsPanel(profile) {
+      const body = el('errors-body');
+      if (!body) return;
+      const latestRunId = profile && profile.latest_run_id;
+      const run = latestRunId ? runDetailsCache[latestRunId] : null;
+      const rows = run && Array.isArray(run.rows) ? run.rows.filter(row => (row.error_count || 0) > 0 || (row.errors || []).length) : [];
+      const search = String(el('unresolved-search') && el('unresolved-search').value || '').trim().toLowerCase();
+      const filtered = search ? rows.filter(row => [row.display_name, row.source_name, (row.errors || []).join(' '), (row.sample_failed_titles || []).join(' '), row.row_type].some(value => String(value || '').toLowerCase().includes(search))) : rows;
+      if (!filtered.length) {
+        body.innerHTML = `<div class="empty">${search ? 'No errors match this search.' : 'No sync errors.'}</div>`;
+        return;
+      }
+      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Row</th><th>Stage</th><th>Errors</th><th>Failed Items</th></tr></thead><tbody>${filtered.map(row => `
+        <tr>
+          <td>${esc(row.display_name || row.list_name || '')}<div class="catalog-note">${esc(row.source_name || row.row_type || '')}</div></td>
+          <td>${esc(Object.entries(row.error_stage_counts || {}).map(([key, value]) => `${key}:${value}`).join(', ') || 'general')}</td>
+          <td>${(row.errors || []).map(err => `<div class="catalog-note" style="color:var(--red)">${esc(err)}</div>`).join('')}</td>
+          <td>${esc((row.sample_failed_titles || []).join(', ') || '-')}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    }
+
+    async function openRunDetails(runId, rowKey) {
+      const panel = el('run-detail-panel');
+      const body = el('run-detail-body');
+      if (!panel || !body) return;
+      panel.classList.remove('hidden');
+      body.innerHTML = '<div class="empty">Loading run details...</div>';
+      const run = await fetchRunDetail(runId);
+      if (!run) {
+        body.innerHTML = '<div class="empty">Could not load run details.</div>';
+        return;
+      }
+      const rows = Array.isArray(run.rows) ? run.rows : [];
+      const selectedRows = rowKey ? rows.filter(row => (row.row_key || '') === rowKey) : rows;
+      const renderRows = selectedRows.length ? selectedRows : rows;
+      body.innerHTML = `
+        <div class="panel-body" style="padding-bottom:0">
+          <div class="catalog-note">${esc(new Date(run.timestamp).toLocaleString())} · ${esc(run.status || 'completed')}${run.error_message ? ` · ${esc(run.error_message)}` : ''}</div>
+        </div>
+        <div class="table-scroll"><table><thead><tr><th>Row</th><th>Diagnostics</th><th>Errors</th></tr></thead><tbody>${renderRows.map(row => `
+          <tr>
+            <td>${esc(row.display_name || row.list_name || '')}<div class="catalog-note">${esc(row.source_name || row.row_type || '')}</div></td>
+            <td>
+              <div class="catalog-note">fetched ${row.items_fetched || 0}, resolved ${row.items_resolved || 0}, added ${row.items_added || 0}, removed ${row.items_removed || 0}</div>
+              ${(row.items_skipped_fingerprint || 0) > 0 ? `<div class="catalog-note">unchanged ${row.items_skipped_fingerprint}</div>` : ''}
+              ${Object.keys(row.unresolved_reason_counts || {}).length ? `<div class="catalog-note">unresolved ${esc(Object.entries(row.unresolved_reason_counts || {}).map(([key, value]) => `${key}:${value}`).join(', '))}</div>` : ''}
+              ${Object.keys(row.phase_timings || {}).length ? `<div class="catalog-note">${esc(Object.entries(row.phase_timings || {}).map(([key, value]) => `${key.replace(/_seconds$/, '').replace(/_/g, ' ')} ${Number(value || 0).toFixed(2)}s`).join(' · '))}</div>` : ''}
+            </td>
+            <td>
+              ${(row.errors || []).length ? (row.errors || []).map(err => `<div class="catalog-note" style="color:var(--red)">${esc(err)}</div>`).join('') : '<span class="c-dim">None</span>'}
+              ${(row.sample_failed_titles || []).length ? `<div class="catalog-note">items: ${esc((row.sample_failed_titles || []).join(', '))}</div>` : ''}
+              ${(row.sample_unresolved_titles || []).length ? `<div class="catalog-note">unresolved items: ${esc((row.sample_unresolved_titles || []).join(', '))}</div>` : ''}
+            </td>
+          </tr>`).join('')}</tbody></table></div>`;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     // ── Unresolved items panel ─────────────────────────────────────────────────
@@ -3135,9 +3251,30 @@
     }
 
     const refreshBtn = el('btn-unresolved-refresh');
-    if (refreshBtn) refreshBtn.addEventListener('click', fetchUnresolved);
+    if (refreshBtn) refreshBtn.addEventListener('click', async () => {
+      await fetchUnresolved();
+      if (lastDashboardProfile && lastDashboardProfile.latest_run_id) {
+        await fetchRunDetail(lastDashboardProfile.latest_run_id);
+        renderErrorsPanel(lastDashboardProfile);
+      }
+    });
     const unresolvedSearch = el('unresolved-search');
-    if (unresolvedSearch) unresolvedSearch.addEventListener('input', () => renderUnresolvedPanel(lastUnresolvedItems));
+    if (unresolvedSearch) unresolvedSearch.addEventListener('input', () => {
+      renderUnresolvedPanel(lastUnresolvedItems);
+      if (lastDashboardProfile) renderErrorsPanel(lastDashboardProfile);
+    });
+    const issuesTabUnresolved = el('issues-tab-unresolved');
+    const issuesTabErrors = el('issues-tab-errors');
+    const runDetailClose = el('btn-run-detail-close');
+    if (issuesTabUnresolved) issuesTabUnresolved.addEventListener('click', () => switchIssuesTab('unresolved'));
+    if (issuesTabErrors) issuesTabErrors.addEventListener('click', async () => {
+      switchIssuesTab('errors');
+      if (lastDashboardProfile && lastDashboardProfile.latest_run_id && !runDetailsCache[lastDashboardProfile.latest_run_id]) {
+        await fetchRunDetail(lastDashboardProfile.latest_run_id);
+      }
+      if (lastDashboardProfile) renderErrorsPanel(lastDashboardProfile);
+    });
+    if (runDetailClose) runDetailClose.addEventListener('click', () => el('run-detail-panel').classList.add('hidden'));
 
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -3284,13 +3421,18 @@
 
     function buildDeleteActions(row) {
       const listName = row.list_name || '';
-      if (!listName) return '';
+      const runId = row.run_id || '';
+      const rowKey = row.row_key || '';
+      const detailBtn = row.has_details && runId
+        ? `<button class="btn btn-sm" type="button" data-row-detail="${esc(runId)}" data-row-key="${esc(rowKey)}">Details</button>`
+        : '';
+      if (!listName) return detailBtn ? `<div class="inline-actions">${detailBtn}</div>` : '';
       const label = row.display_name || row.list_name || '';
       const busy = deletingManagedListName === listName;
       if (pendingDeleteListName === listName) {
-        return `<div class="inline-actions"><button class="btn btn-sm btn-danger" type="button" data-delete-confirm="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>${busy ? 'Deleting...' : 'Confirm'}</button><button class="btn btn-sm btn-ghost" type="button" data-delete-cancel="${esc(listName)}" ${busy ? 'disabled' : ''}>Cancel</button></div>`;
+        return `<div class="inline-actions">${detailBtn}<button class="btn btn-sm btn-danger" type="button" data-delete-confirm="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>${busy ? 'Deleting...' : 'Confirm'}</button><button class="btn btn-sm btn-ghost" type="button" data-delete-cancel="${esc(listName)}" ${busy ? 'disabled' : ''}>Cancel</button></div>`;
       }
-      return `<div class="inline-actions"><button class="btn btn-sm" type="button" data-delete-list="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>Delete</button></div>`;
+      return `<div class="inline-actions">${detailBtn}<button class="btn btn-sm" type="button" data-delete-list="${esc(listName)}" data-delete-label="${esc(label)}" ${busy ? 'disabled' : ''}>Delete</button></div>`;
     }
 
     function armDeleteManagedList(listName) {

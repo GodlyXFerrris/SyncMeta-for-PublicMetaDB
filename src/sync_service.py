@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -74,12 +76,15 @@ class SyncStats:
     list_name: str = ""
     display_name: str = ""
     source_name: str = ""
+    row_key: str = ""
+    row_type: str = "status_list"
     items_fetched: int = 0
     items_resolved: int = 0
     items_added: int = 0
     items_removed: int = 0
     items_skipped_duplicate: int = 0
     items_skipped_unresolved: int = 0
+    items_skipped_fingerprint: int = 0
     errors: list[str] = field(default_factory=list)
     history_cursor: str = ""
     activities_ts: str = ""  # last-seen source activities timestamp (for freshness skip)
@@ -87,7 +92,10 @@ class SyncStats:
     phase_timings: dict[str, float] = field(default_factory=dict)
     match_breakdown: dict[str, int] = field(default_factory=dict)
     unresolved_reason_counts: dict[str, int] = field(default_factory=dict)
+    error_stage_counts: dict[str, int] = field(default_factory=dict)
     pmdb_metrics: dict[str, int] = field(default_factory=dict)
+    sample_failed_titles: list[str] = field(default_factory=list)
+    sample_unresolved_titles: list[str] = field(default_factory=list)
     # Populated only on dry-run list syncs. Each entry is a compact record of a
     # resolved item so the dashboard can show a preview of what would be added.
     dry_run_preview: list[dict] = field(default_factory=list)
@@ -102,6 +110,7 @@ class SyncStats:
 _DRY_RUN_PREVIEW_LIMIT = 50
 _WATCHED_HISTORY_VERIFY_RETRIES = 3
 _WATCHED_HISTORY_VERIFY_DELAY_SECONDS = 0.75
+_SAMPLE_TITLES_LIMIT = 5
 
 
 def _unresolved_item_summary(item: dict, list_name: str = "", unresolved_reason: str = "") -> dict:
@@ -158,6 +167,23 @@ def _anime_conflict_reason(item: dict, unresolved_reason: str = "") -> str:
     return "missing fribb mapping"
 
 
+def _stable_item_identity(item: dict) -> dict:
+    ids = item.get("ids") or {}
+    return {
+        "title": str(item.get("title") or "").strip(),
+        "year": item.get("year"),
+        "media_type": str(item.get("media_type") or "").strip().lower(),
+        "simkl_type": str(item.get("simkl_type") or "").strip().lower(),
+        "tmdb_id": item.get("tmdb_id"),
+        "imdb_id": item.get("imdb_id") or ids.get("imdb"),
+        "mal_id": item.get("mal_id") or ids.get("mal"),
+        "anilist_id": item.get("anilist_id") or ids.get("anilist"),
+        "tvdb_id": item.get("tvdb_id") or ids.get("tvdb"),
+        "simkl_id": ids.get("simkl"),
+        "status": str(item.get("status") or "").strip().lower(),
+    }
+
+
 class SyncService:
     """Orchestrates one-way sync into PublicMetaDB."""
 
@@ -177,6 +203,7 @@ class SyncService:
         resolution_cache: dict | None = None,
         failed_resolution_cache: dict | None = None,
         manual_list_additions: dict | None = None,
+        list_state: dict | None = None,
     ):
         self._config = config
         self._simkl = SimklClient(config.simkl, cancel_requested_callback=cancel_requested_callback)
@@ -209,6 +236,12 @@ class SyncService:
         self._pmdb_cache_lock = threading.Lock()
         self._pmdb_run_list_index: dict[str, dict] | None = None
         self._pmdb_list_items_cache: dict[str, list[dict]] = {}
+        self._list_state: dict[str, dict] = {
+            str(key): dict(value)
+            for key, value in (list_state or {}).items()
+            if key and isinstance(value, dict)
+        }
+        self._current_source_activities: dict[str, str] = {}
 
     def _make_anime_root_resolver(self):
         """Return a callable used by ItemMatcher to lazily walk AniList prequel chains."""
@@ -225,6 +258,91 @@ class SyncService:
             return None
 
         return resolver
+
+    @property
+    def list_state(self) -> dict[str, dict]:
+        return {
+            str(key): dict(value)
+            for key, value in self._list_state.items()
+            if key and isinstance(value, dict)
+        }
+
+    @staticmethod
+    def _make_row_key(source_name: str, list_name: str, row_type: str, selection: dict | None = None) -> str:
+        source = str(source_name or "").strip().lower() or "unknown"
+        list_part = str(list_name or "").strip().lower()
+        selection_part = ""
+        if isinstance(selection, dict) and selection:
+            selection_part = json.dumps(selection, sort_keys=True, separators=(",", ":"))
+        payload = "|".join([source, row_type, list_part, selection_part])
+        return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _infer_row_type(source_name: str, selection: dict | None = None, display_name: str = "") -> str:
+        source = str((selection or {}).get("source") or source_name or "").strip().lower()
+        kind = str((selection or {}).get("kind") or "").strip().lower()
+        display = str(display_name or "").strip().lower()
+        if display in {"watch history", "simkl watch history", "trakt watch history"}:
+            return "history"
+        if display in {"resume progress", "trakt resume progress", "simkl resume progress"}:
+            return "resume"
+        if display == "pmdb watchlist":
+            return "core_rule"
+        if source == "trakt" and kind in {"watchlist"}:
+            return "core_rule"
+        if source in {"trakt", "mdblist"} and kind in {"selected-list", "default", "liked-auto"}:
+            return "catalog_import"
+        if source == "mdblist":
+            return "catalog_import"
+        return "status_list"
+
+    @staticmethod
+    def _compute_source_fingerprint(source_items: list[dict], activities_ts: str = "") -> str:
+        normalized = [
+            _stable_item_identity(item)
+            for item in source_items or []
+            if isinstance(item, dict)
+        ]
+        normalized.sort(key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")))
+        payload = {
+            "activities_ts": str(activities_ts or "").strip(),
+            "count": len(normalized),
+            "items": normalized,
+        }
+        return hashlib.sha1(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _append_unique_sample(target: list[str], value: str, limit: int = _SAMPLE_TITLES_LIMIT) -> None:
+        text = str(value or "").strip()
+        if not text or text in target or len(target) >= limit:
+            return
+        target.append(text)
+
+    def _record_error(self, stats: SyncStats, stage: str, message: str, item_title: str = "") -> None:
+        stats.errors.append(str(message))
+        stage_key = str(stage or "unknown").strip().lower() or "unknown"
+        stats.error_stage_counts[stage_key] = int(stats.error_stage_counts.get(stage_key, 0)) + 1
+        if item_title:
+            self._append_unique_sample(stats.sample_failed_titles, item_title)
+
+    def _remember_list_state(
+        self,
+        stats: SyncStats,
+        source_fingerprint: str,
+        desired_keys: set[str] | None = None,
+    ) -> None:
+        if not stats.row_key or self._config.sync.dry_run:
+            return
+        next_state = {
+            "fingerprint": str(source_fingerprint or "").strip(),
+            "activities_ts": str(stats.activities_ts or "").strip(),
+            "updated_at": str(time.time()),
+            "item_count": int(stats.items_fetched or 0),
+            "last_resolved_count": int(stats.items_resolved or 0),
+        }
+        if desired_keys:
+            next_state["write_keys"] = sorted(str(key) for key in desired_keys if key)
+        self._list_state[stats.row_key] = next_state
 
     @property
     def resolution_cache(self) -> dict[str, int]:
@@ -369,6 +487,10 @@ class SyncService:
         force = self._config.sync.full_history_sync
         simkl_ts = self._fetch_simkl_activities_ts()
         trakt_ts = self._fetch_trakt_activities_ts()
+        self._current_source_activities = {
+            "simkl": simkl_ts,
+            "trakt": trakt_ts,
+        }
         simkl_unchanged = bool(
             not force
             and simkl_ts
@@ -551,6 +673,7 @@ class SyncService:
             force_remove_missing=True,
             allow_empty_sync=True,
             managed_keys=frozenset(self._config.sync.pmdb_watchlist_managed_keys),
+            selection={"source": "pmdb", "kind": "watchlist-merge"},
         )
 
     def _sync_simkl(self) -> list[SyncStats]:
@@ -641,6 +764,7 @@ class SyncService:
                     description,
                     display_name=display_name,
                     source_name="SIMKL",
+                    activities_ts=self._current_source_activities.get("simkl", ""),
                     is_public=self._config.sync.simkl_visibility == "public",
                     force_remove_missing=(simkl_type == "anime"),
                     selection={
@@ -680,6 +804,8 @@ class SyncService:
             list_name="",
             display_name="SIMKL Watch History",
             source_name="SIMKL",
+            row_key=self._make_row_key("simkl", "watch_history", "history", {"mode": "history"}),
+            row_type="history",
         )
         self._set_status("Fetching SIMKL watched history")
         full_sync = self._config.sync.full_history_sync
@@ -701,7 +827,7 @@ class SyncService:
             try:
                 existing_items = f_pmdb.result()
             except Exception as exc:
-                stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+                self._record_error(stats, "pmdb_read", f"Failed to load PublicMetaDB watched history: {exc}")
                 return stats
             completed_anime = f_completed.result()
 
@@ -1504,6 +1630,8 @@ class SyncService:
             list_name="",
             display_name="Trakt Watch History",
             source_name="Trakt",
+            row_key=self._make_row_key("trakt", "watch_history", "history", {"mode": "history"}),
+            row_type="history",
         )
         cursor = self._config.sync.trakt_history_cursor or ""
         since = None if self._config.sync.full_history_sync or not cursor else cursor
@@ -1517,7 +1645,7 @@ class SyncService:
         try:
             items = f_trakt.result()
         except TraktAuthenticationError as exc:
-            stats.errors.append(str(exc))
+            self._record_error(stats, "fetch", str(exc))
             return stats
 
         stats.items_fetched = len(items)
@@ -1537,7 +1665,7 @@ class SyncService:
         try:
             existing_items = f_pmdb.result()
         except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            self._record_error(stats, "pmdb_read", f"Failed to load PublicMetaDB watched history: {exc}")
             return stats
 
         existing_counts: dict[str, int] = {}
@@ -1585,12 +1713,14 @@ class SyncService:
             list_name="",
             display_name="Trakt Resume Progress",
             source_name="Trakt",
+            row_key=self._make_row_key("trakt", "resume_progress", "resume", {"mode": "resume"}),
+            row_type="resume",
         )
         self._set_status("Fetching Trakt playback progress")
         try:
             items = self._trakt.get_playback_progress()
         except TraktAuthenticationError as exc:
-            stats.errors.append(str(exc))
+            self._record_error(stats, "fetch", str(exc))
             return stats
         stats.items_fetched = len(items)
 
@@ -1660,13 +1790,13 @@ class SyncService:
         try:
             existing_resume_points = self._pmdb.get_resume_points()
         except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB resume points: {exc}")
+            self._record_error(stats, "pmdb_read", f"Failed to load PublicMetaDB resume points: {exc}")
             return stats
 
         try:
             existing_watched_items = self._pmdb.get_watched_history()
         except Exception as exc:
-            stats.errors.append(f"Failed to load PublicMetaDB watched history: {exc}")
+            self._record_error(stats, "pmdb_read", f"Failed to load PublicMetaDB watched history: {exc}")
             return stats
 
         existing_resume_by_key: dict[str, dict] = {}
@@ -1741,7 +1871,7 @@ class SyncService:
             except SyncCancelled:
                 raise
             except Exception as exc:
-                stats.errors.append(f"Failed to sync resume batch: {exc}")
+                self._record_error(stats, "pmdb_write", f"Failed to sync resume batch: {exc}")
                 continue
         return stats
 
@@ -1899,6 +2029,7 @@ class SyncService:
                         "Auto-synced Trakt movie watchlist",
                         display_name=_display_status_name("movies", "watchlist"),
                         source_name="Trakt",
+                        activities_ts=self._current_source_activities.get("trakt", ""),
                         is_public=self._config.sync.trakt_personal_visibility == "public",
                         selection={
                             "source": "trakt",
@@ -1916,6 +2047,7 @@ class SyncService:
                         "Auto-synced Trakt show watchlist",
                         display_name=_display_status_name("shows", "watchlist"),
                         source_name="Trakt",
+                        activities_ts=self._current_source_activities.get("trakt", ""),
                         is_public=self._config.sync.trakt_personal_visibility == "public",
                         selection={
                             "source": "trakt",
@@ -1954,6 +2086,7 @@ class SyncService:
                         description,
                         display_name=liked_list["name"],
                         source_name=f"Trakt by {liked_list['user']}",
+                        activities_ts=self._current_source_activities.get("trakt", ""),
                         is_public=self._config.sync.trakt_public_visibility == "public",
                         selection={
                             "source": "trakt",
@@ -2002,6 +2135,7 @@ class SyncService:
                     description,
                     display_name=trakt_list["name"],
                     source_name=source_name,
+                    activities_ts=self._current_source_activities.get("trakt", ""),
                     is_public=is_public,
                     selection=selection,
                 )
@@ -2200,6 +2334,7 @@ class SyncService:
         source_name: str | None = None,
         is_public: bool = False,
         selection: dict | None = None,
+        activities_ts: str = "",
         list_type: str = "custom",
         force_remove_missing: bool = False,
         allow_empty_sync: bool = False,
@@ -2207,21 +2342,43 @@ class SyncService:
     ) -> SyncStats:
         """Sync a single source list to a PublicMetaDB list."""
         actual_list_name = self._resolve_managed_list_name(list_name, source_name or "", selection)
+        row_type = self._infer_row_type(source_name or "", selection, display_name or list_name)
+        row_key = self._make_row_key(source_name or "", actual_list_name, row_type, selection)
         stats = SyncStats(
             list_name=actual_list_name,
             display_name=display_name or list_name,
             source_name=source_name or "",
+            row_key=row_key,
+            row_type=row_type,
             items_fetched=len(source_items),
+            activities_ts=str(activities_ts or "").strip(),
         )
         self._remember_progress_row(stats)
         self._set_status(f"Processing {actual_list_name}")
         logger.info("  ┌ '%s'  (%d source items)", actual_list_name, len(source_items))
 
         should_remove_missing = self._config.sync.remove_missing or force_remove_missing
+        source_fingerprint = self._compute_source_fingerprint(source_items, stats.activities_ts)
+        previous_state = self._list_state.get(row_key, {})
 
         if not source_items and not allow_empty_sync:
             logger.debug("  │ No items, skipping '%s'", actual_list_name)
             self._publish_progress([stats], force=True)
+            return stats
+
+        if (
+            previous_state
+            and previous_state.get("fingerprint")
+            and previous_state.get("fingerprint") == source_fingerprint
+        ):
+            stats.items_skipped_fingerprint = len(source_items)
+            stats.match_breakdown["skipped:fingerprint"] = len(source_items)
+            stats.phase_timings["resolve_seconds"] = 0.0
+            stats.phase_timings["pmdb_read_seconds"] = 0.0
+            stats.phase_timings["pmdb_write_seconds"] = 0.0
+            self._remember_list_state(stats, source_fingerprint, set(previous_state.get("write_keys") or []))
+            self._publish_progress([stats], force=True)
+            logger.info("  │ Fingerprint match, skipping unchanged row '%s'", actual_list_name)
             return stats
 
         self._set_status(f"Resolving IDs for {actual_list_name}")
@@ -2282,6 +2439,7 @@ class SyncService:
                         if match_result.candidate_tmdb_id:
                             unresolved_summary["candidate_tmdb_id"] = match_result.candidate_tmdb_id
                         stats.unresolved_items.append(unresolved_summary)
+                        self._append_unique_sample(stats.sample_unresolved_titles, item.get("title") or "Unknown")
                     self._publish_progress([stats])
             except SyncCancelled:
                 resolve_pool.shutdown(wait=False, cancel_futures=True)
@@ -2320,7 +2478,7 @@ class SyncService:
         except SyncCancelled:
             raise
         except Exception as exc:
-            stats.errors.append(f"Failed to get/create list: {exc}")
+            self._record_error(stats, "pmdb_list", f"Failed to get/create list: {exc}")
             logger.error("Failed to get/create list '%s': %s", actual_list_name, exc)
             self._publish_progress([stats], force=True)
             return stats
@@ -2353,6 +2511,7 @@ class SyncService:
                     unresolved_summary = _unresolved_item_summary(item, list_name=stats.list_name, unresolved_reason="tmdb_collision")
                     unresolved_summary["candidate_tmdb_id"] = tmdb_id
                     stats.unresolved_items.append(unresolved_summary)
+                    self._append_unique_sample(stats.sample_unresolved_titles, item.get("title") or "Unknown")
                     logger.warning(
                         "TMDB collision: '%s' and '%s' both map to %s:%s",
                         owner.get("title"), item.get("title"), tmdb_id, media_type,
@@ -2410,7 +2569,12 @@ class SyncService:
                     except SyncCancelled:
                         raise
                     except Exception as exc:
-                        stats.errors.append(f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}")
+                        self._record_error(
+                            stats,
+                            "pmdb_write",
+                            f"Failed to add '{item['title']}' (tmdb={tmdb_id}): {exc}",
+                            item_title=item.get("title", "Unknown"),
+                        )
                     self._publish_progress([stats], force=True)
             except SyncCancelled:
                 shutdown_wait = False
@@ -2435,6 +2599,7 @@ class SyncService:
         pmdb_stats_after = pmdb_stats_snapshot() if callable(pmdb_stats_snapshot) else {}
         if pmdb_stats_before or pmdb_stats_after:
             stats.pmdb_metrics = self._delta_counter_snapshot(pmdb_stats_after, pmdb_stats_before)
+        self._remember_list_state(stats, source_fingerprint, desired_keys)
 
         logger.info(
             "  └ '%s'  resolved=%d  added=%d  dup=%d  unresolved=%d  removed=%d%s  [resolve=%.2fs pmdb_read=%.2fs pmdb_write=%.2fs cache_hit=%.0f%% unresolved=%.0f%%]",
@@ -2636,8 +2801,11 @@ class SyncService:
                 except SyncCancelled:
                     raise
                 except Exception as exc:
-                    stats.errors.append(
-                        f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}"
+                    self._record_error(
+                        stats,
+                        "pmdb_write",
+                        f"Failed to import watched item '{item.get('title', 'Unknown')}': {exc}",
+                        item_title=item.get("title", "Unknown"),
                     )
         except SyncCancelled:
             shutdown_wait = False
@@ -2836,12 +3004,16 @@ class SyncService:
             "list_name": row.list_name,
             "display_name": row.display_name,
             "source_name": row.source_name,
+            "row_key": row.row_key,
+            "row_type": row.row_type,
+            "has_details": bool(row.errors or row.unresolved_items or row.sample_failed_titles or row.sample_unresolved_titles),
             "items_fetched": row.items_fetched,
             "items_resolved": row.items_resolved,
             "items_added": row.items_added,
             "items_removed": row.items_removed,
             "items_skipped_duplicate": row.items_skipped_duplicate,
             "items_skipped_unresolved": row.items_skipped_unresolved,
+            "items_skipped_fingerprint": row.items_skipped_fingerprint,
             "error_count": len(row.errors),
             "phase_timings": dict(row.phase_timings),
             "match_breakdown": dict(row.match_breakdown),
@@ -3106,8 +3278,7 @@ class SyncService:
     def _chunked(items: list[dict], size: int) -> list[list[dict]]:
         return [items[index:index + size] for index in range(0, len(items), size)]
 
-    @staticmethod
-    def _merge_activity_stats(rows: list[SyncStats]) -> list[SyncStats]:
+    def _merge_activity_stats(self, rows: list[SyncStats]) -> list[SyncStats]:
         grouped: dict[str, SyncStats] = {}
 
         for row in rows:
@@ -3122,7 +3293,13 @@ class SyncService:
 
             aggregate = grouped.get(key)
             if not aggregate:
-                aggregate = SyncStats(list_name="", display_name=display_name, source_name="")
+                aggregate = SyncStats(
+                    list_name="",
+                    display_name=display_name,
+                    source_name="",
+                    row_key=self._make_row_key("activity", display_name, key, {"mode": key}),
+                    row_type="history" if key == "watch_history" else "resume",
+                )
                 grouped[key] = aggregate
 
             aggregate.items_fetched += row.items_fetched
@@ -3131,7 +3308,16 @@ class SyncService:
             aggregate.items_removed += row.items_removed
             aggregate.items_skipped_duplicate += row.items_skipped_duplicate
             aggregate.items_skipped_unresolved += row.items_skipped_unresolved
+            aggregate.items_skipped_fingerprint += row.items_skipped_fingerprint
             aggregate.errors.extend(list(row.errors))
+            for key, value in (row.error_stage_counts or {}).items():
+                aggregate.error_stage_counts[key] = int(aggregate.error_stage_counts.get(key, 0)) + int(value or 0)
+            for title in row.sample_failed_titles or []:
+                SyncService._append_unique_sample(aggregate.sample_failed_titles, title)
+            for title in row.sample_unresolved_titles or []:
+                SyncService._append_unique_sample(aggregate.sample_unresolved_titles, title)
+            aggregate.row_type = row.row_type or aggregate.row_type
+            aggregate.row_key = row.row_key or aggregate.row_key
             if row.history_cursor:
                 aggregate.history_cursor = row.history_cursor
 

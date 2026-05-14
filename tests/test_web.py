@@ -883,6 +883,144 @@ class WebTests(unittest.TestCase):
         self.assertEqual(enqueue_args[1], False)
         self.assertEqual(enqueue_args[2], {"lists": True, "history": False, "resume": False})
 
+    def test_sync_run_endpoints_return_summaries_and_details(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {"username": "", "access_token": "", "selected_statuses": []},
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {"api_key": "", "selected_lists": []},
+            "pmdb": {"api_key": "pmdb-key"},
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        claimed = web._profile_store.claim_profile_for_sync(profile["profile_id"], "secret")
+        run_id = claimed["sync_job_id"]
+        web._profile_store.record_sync_success(
+            profile["profile_id"],
+            [{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "has_details": True,
+                "run_id": run_id,
+                "error_count": 1,
+            }],
+            detailed_results=[{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "errors": ["Bearer secret-token failed"],
+                "error_count": 1,
+                "sample_failed_titles": ["Demo Show"],
+            }],
+        )
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        runs_response = self.client.post("/api/profile/sync/runs", json={"page": 1, "page_size": 10})
+        runs_data = runs_response.get_json()
+        self.assertEqual(runs_response.status_code, 200)
+        self.assertEqual(runs_data["items"][0]["run_id"], run_id)
+
+        detail_response = self.client.post("/api/profile/sync/run-details", json={"run_id": run_id})
+        detail_data = detail_response.get_json()
+        self.assertEqual(detail_response.status_code, 200)
+        self.assertEqual(detail_data["run"]["run_id"], run_id)
+        self.assertEqual(detail_data["run"]["rows"][0]["errors"], ["Bearer=[redacted] failed"])
+
+    def test_status_summary_omits_verbose_error_arrays(self) -> None:
+        profile = web._profile_store.create_profile("secret", {
+            "simkl": {
+                "client_id": "simkl-client",
+                "client_secret": "",
+                "access_token": "simkl-token",
+                "selected_statuses": {"shows": ["watching"], "movies": [], "anime": []},
+            },
+            "anilist": {"username": "", "access_token": "", "selected_statuses": []},
+            "trakt": {
+                "client_id": "",
+                "client_secret": "",
+                "access_token": "",
+                "refresh_token": "",
+                "sync_watchlist": False,
+                "sync_liked_lists": False,
+                "selected_lists": [],
+            },
+            "mdblist": {"api_key": "", "selected_lists": []},
+            "pmdb": {"api_key": "pmdb-key"},
+        }, {
+            "auto_sync": True,
+            "interval_seconds": 1800,
+            "remove_missing": False,
+            "delete_disabled_lists": False,
+            "media_types": ["shows"],
+        })
+
+        claimed = web._profile_store.claim_profile_for_sync(profile["profile_id"], "secret")
+        web._profile_store.record_sync_success(
+            profile["profile_id"],
+            [{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "has_details": True,
+                "run_id": claimed["sync_job_id"],
+                "error_count": 1,
+            }],
+            detailed_results=[{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "errors": ["Authorization: Bearer super-secret"],
+                "error_count": 1,
+            }],
+        )
+
+        login_response = self.client.post("/api/profile/login", json={
+            "profile_id": profile["profile_id"],
+            "password": "secret",
+        })
+        self.assertEqual(login_response.status_code, 200)
+
+        response = self.client.post("/api/profile/status", json={})
+        data = response.get_json()
+        row = data["profile"]["last_results"][0]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(row["row_key"], "simkl|watching-series|status_list")
+        self.assertTrue(row["has_details"])
+        self.assertNotIn("errors", row)
+
     @patch("web.PublicMetaDBClient.add_item_to_list")
     @patch("web._resolve_unresolved_item_automatically")
     def test_unresolved_auto_resolve_endpoint_maps_and_adds_item(self, mock_auto_resolve, mock_add_item_to_list) -> None:

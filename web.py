@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import gzip as _gzip
 import logging
 import os
@@ -167,11 +168,71 @@ _access_store = ServerSessionStore()
 _access_limiter = LoginAttemptLimiter(max_attempts=ACCESS_MAX_ATTEMPTS, window_seconds=ACCESS_WINDOW_SECONDS)
 
 
-def _stats_to_dict(stats: SyncStats) -> dict:
+_SECRET_PATTERNS = [
+    re.compile(r"(?i)(api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|authorization)\s*[:=]\s*([^\s,;]+)"),
+    re.compile(r"(?i)(bearer)\s+[A-Za-z0-9._\-]+"),
+]
+
+
+def _sanitize_error_text(text: str) -> str:
+    cleaned = str(text or "").strip()
+    if not cleaned:
+        return ""
+    for pattern in _SECRET_PATTERNS:
+        cleaned = pattern.sub(lambda match: f"{match.group(1)}=[redacted]", cleaned)
+    return cleaned
+
+
+def _stats_to_summary_dict(stats: SyncStats, run_id: str = "") -> dict:
     data = asdict(stats)
     data["error_count"] = len(data.pop("errors", []))
-    # Keep unresolved_items for persistence but don't bloat live progress payloads.
+    data.pop("unresolved_items", None)
+    data.pop("dry_run_preview", None)
+    data.pop("sample_failed_titles", None)
+    data.pop("sample_unresolved_titles", None)
+    data["has_details"] = bool(
+        data.get("error_count")
+        or data.get("items_skipped_unresolved")
+        or data.get("items_skipped_fingerprint")
+    )
+    if run_id:
+        data["run_id"] = run_id
     return data
+
+
+def _stats_to_detail_dict(stats: SyncStats) -> dict:
+    data = asdict(stats)
+    data["errors"] = [_sanitize_error_text(item) for item in data.get("errors", []) if str(item or "").strip()]
+    data["error_count"] = len(data["errors"])
+    data["sample_failed_titles"] = [str(item) for item in data.get("sample_failed_titles", []) if str(item or "").strip()]
+    data["sample_unresolved_titles"] = [str(item) for item in data.get("sample_unresolved_titles", []) if str(item or "").strip()]
+    data["has_details"] = bool(
+        data.get("errors")
+        or data.get("unresolved_items")
+        or data.get("sample_failed_titles")
+        or data.get("sample_unresolved_titles")
+        or data.get("items_skipped_fingerprint")
+    )
+    return data
+
+
+def _sanitize_run_detail(run: dict) -> dict:
+    sanitized = copy.deepcopy(run or {})
+    sanitized["error_message"] = _sanitize_error_text(str(sanitized.get("error_message", "") or ""))
+    rows = []
+    for row in sanitized.get("rows", []) or []:
+        if not isinstance(row, dict):
+            continue
+        next_row = copy.deepcopy(row)
+        next_row["errors"] = [_sanitize_error_text(item) for item in (next_row.get("errors") or []) if str(item or "").strip()]
+        next_row["error_count"] = len(next_row["errors"])
+        rows.append(next_row)
+    sanitized["rows"] = rows
+    return sanitized
+
+
+def _stats_to_dict(stats: SyncStats) -> dict:
+    return _stats_to_summary_dict(stats)
 
 
 def _config_from_profile(profile: dict, dry_run: bool = False, sync_modes: dict | None = None) -> AppConfig:
@@ -489,9 +550,12 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             },
             failed_resolution_cache=profile.get("failed_resolution_cache", {}),
             manual_list_additions=profile.get("manual_list_additions", {}),
+            list_state=profile.get("list_state", {}),
         )
         results = service.run()
-        result_dicts = [_stats_to_dict(stats) for stats in results]
+        run_id = str(profile.get("sync_job_id", "") or "")
+        result_dicts = [_stats_to_summary_dict(stats, run_id=run_id) for stats in results]
+        detailed_result_dicts = [_stats_to_detail_dict(stats) for stats in results]
         _profile_store.record_sync_success(
             profile_id,
             result_dicts,
@@ -500,13 +564,20 @@ def _run_profile_sync(profile: dict, dry_run: bool = False, sync_modes: dict | N
             sync_modes=modes,
             resolution_cache=service.resolution_cache,
             failed_resolution_cache=service.failed_resolution_cache,
+            detailed_results=detailed_result_dicts,
+            list_state=service.list_state,
         )
     except SyncCancelled:
         logger.info("Sync stopped for profile %s", profile_id[:8])
         _profile_store.record_sync_cancelled(profile_id, dry_run=dry_run, sync_modes=modes)
     except Exception as exc:  # pragma: no cover - exercised in integration use
         logger.exception("Sync failed for profile %s", profile_id[:8])
-        _profile_store.record_sync_error(profile_id, str(exc), dry_run=dry_run, sync_modes=modes)
+        _profile_store.record_sync_error(
+            profile_id,
+            _sanitize_error_text(str(exc)),
+            dry_run=dry_run,
+            sync_modes=modes,
+        )
 
 
 class SyncRunner:
@@ -1509,6 +1580,39 @@ def api_profile_status():
         return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
 
     return _profile_response(profile, include_credentials=include_credentials)
+
+
+@app.route("/api/profile/sync/runs", methods=["POST"])
+def api_profile_sync_runs():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    page = body.get("page", 1)
+    page_size = body.get("page_size", 25)
+    try:
+        payload = _profile_store.get_sync_runs(profile_id, page=page, page_size=page_size)
+    except KeyError:
+        return _clear_session_cookie(_json_error("Profile not found", 404)[0]), 404
+    except ValueError as exc:
+        return _json_error(str(exc), 400)
+    return jsonify(payload)
+
+
+@app.route("/api/profile/sync/run-details", methods=["POST"])
+def api_profile_sync_run_details():
+    profile_id = _current_profile_id()
+    if not profile_id:
+        return _clear_session_cookie(_json_error("Sign in first", 401)[0]), 401
+    body = request.get_json(silent=True) or {}
+    run_id = str(body.get("run_id", "")).strip()
+    if not run_id:
+        return _json_error("run_id is required", 400)
+    try:
+        payload = _profile_store.get_sync_run_detail(profile_id, run_id)
+    except KeyError:
+        return _json_error("Run not found", 404)
+    return jsonify({"run": _sanitize_run_detail(payload)})
 
 
 @app.route("/api/profile/list/delete", methods=["POST"])

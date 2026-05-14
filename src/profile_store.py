@@ -24,6 +24,7 @@ MIN_RESUME_SYNC_INTERVAL_SECONDS = 3600
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MAX_HISTORY_ITEMS = 20
+MAX_DETAILED_RUNS = 25
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "COMPLETED_ONA", "COMPLETED_OVA", "COMPLETED_MOVIE"}
 ALLOWED_VISIBILITIES = {"private", "public"}
@@ -111,6 +112,48 @@ def _normalize_activity_state(raw_state: dict | None) -> dict:
         "trakt_activities_ts": str(raw_state.get("trakt_activities_ts", "") or "").strip(),
         "pmdb_watchlist_managed_keys": sorted({str(k) for k in raw_keys if k}) if isinstance(raw_keys, list) else [],
     }
+
+
+def _normalize_list_state(raw_state: dict | None) -> dict:
+    if not isinstance(raw_state, dict):
+        return {}
+    normalized: dict[str, dict] = {}
+    for row_key, value in raw_state.items():
+        if not row_key or not isinstance(value, dict):
+            continue
+        normalized[str(row_key)] = {
+            "fingerprint": str(value.get("fingerprint", "") or "").strip(),
+            "activities_ts": str(value.get("activities_ts", "") or "").strip(),
+            "updated_at": str(value.get("updated_at", "") or "").strip(),
+            "item_count": int(value.get("item_count") or 0),
+            "last_resolved_count": int(value.get("last_resolved_count") or 0),
+            "write_keys": sorted({str(key) for key in (value.get("write_keys") or []) if key}) if isinstance(value.get("write_keys"), list) else [],
+        }
+    return normalized
+
+
+def _normalize_detailed_runs(raw_runs: list | None) -> list[dict]:
+    if not isinstance(raw_runs, list):
+        return []
+    normalized: list[dict] = []
+    for raw in raw_runs[:MAX_DETAILED_RUNS]:
+        if not isinstance(raw, dict):
+            continue
+        rows = []
+        for row in raw.get("rows", []):
+            if isinstance(row, dict):
+                rows.append(copy.deepcopy(row))
+        normalized.append({
+            "run_id": str(raw.get("run_id", "") or "").strip(),
+            "timestamp": raw.get("timestamp"),
+            "status": str(raw.get("status", "completed") or "completed"),
+            "dry_run": bool(raw.get("dry_run", False)),
+            "sync_modes": copy.deepcopy(raw.get("sync_modes", {})) if isinstance(raw.get("sync_modes"), dict) else {},
+            "totals": copy.deepcopy(raw.get("totals", {})) if isinstance(raw.get("totals"), dict) else {},
+            "rows": rows,
+            "error_message": str(raw.get("error_message", "") or "").strip(),
+        })
+    return normalized
 
 
 def _result_totals(rows: list[dict] | None) -> dict[str, int]:
@@ -669,6 +712,8 @@ class ProfileStore:
             "last_sync_job_snapshot": _normalize_sync_job_snapshot(raw_profile.get("last_sync_job_snapshot")),
             "sync_job_id": str(raw_profile.get("sync_job_id", "") or "").strip(),
             "unresolved_items": copy.deepcopy(raw_profile.get("unresolved_items", [])) if isinstance(raw_profile.get("unresolved_items"), list) else [],
+            "sync_runs_detailed": _normalize_detailed_runs(raw_profile.get("sync_runs_detailed")),
+            "list_state": _normalize_list_state(raw_profile.get("list_state")),
             "resolution_cache": copy.deepcopy(raw_profile.get("resolution_cache", {})) if isinstance(raw_profile.get("resolution_cache"), dict) else {},
             "failed_resolution_cache": copy.deepcopy(raw_profile.get("failed_resolution_cache", {})) if isinstance(raw_profile.get("failed_resolution_cache"), dict) else {},
             "manual_resolution_cache": copy.deepcopy(raw_profile.get("manual_resolution_cache", {})) if isinstance(raw_profile.get("manual_resolution_cache"), dict) else {},
@@ -716,6 +761,8 @@ class ProfileStore:
             "last_sync_job_snapshot": copy.deepcopy(profile.get("last_sync_job_snapshot", {})),
             "sync_job_id": profile.get("sync_job_id"),
             "unresolved_items": copy.deepcopy(profile.get("unresolved_items", [])),
+            "sync_runs_detailed": copy.deepcopy(profile.get("sync_runs_detailed", []))[:MAX_DETAILED_RUNS],
+            "list_state": copy.deepcopy(profile.get("list_state", {})),
             "resolution_cache": copy.deepcopy(profile.get("resolution_cache", {})),
             "failed_resolution_cache": copy.deepcopy(profile.get("failed_resolution_cache", {})),
             "manual_resolution_cache": copy.deepcopy(profile.get("manual_resolution_cache", {})),
@@ -790,6 +837,7 @@ class ProfileStore:
         results: list[dict] | None = None,
         status: str = "completed",
         error_message: str = "",
+        run_id: str = "",
     ) -> None:
         # Drop the dry_run_preview items from history — it's only useful on the
         # most recent last_results, and keeping it in N history entries bloats
@@ -811,10 +859,58 @@ class ProfileStore:
             "results": trimmed_results,
             "status": str(status or "completed"),
         }
+        if run_id:
+            history_entry["run_id"] = str(run_id)
         if error_message:
             history_entry["error_message"] = str(error_message)
         profile["history"].insert(0, history_entry)
         profile["history"] = profile["history"][:MAX_HISTORY_ITEMS]
+
+    @staticmethod
+    def _append_detailed_run(
+        profile: dict,
+        run_id: str,
+        timestamp: str,
+        dry_run: bool,
+        sync_modes: dict[str, bool],
+        status: str,
+        rows: list[dict] | None = None,
+        error_message: str = "",
+    ) -> None:
+        entry = {
+            "run_id": str(run_id or "").strip(),
+            "timestamp": timestamp,
+            "dry_run": bool(dry_run),
+            "status": str(status or "completed"),
+            "sync_modes": copy.deepcopy(sync_modes or {}),
+            "rows": copy.deepcopy(rows or []),
+            "totals": _result_totals(rows or []),
+        }
+        if error_message:
+            entry["error_message"] = str(error_message)
+        profile["sync_runs_detailed"] = [entry] + list(profile.get("sync_runs_detailed", []))
+        profile["sync_runs_detailed"] = profile["sync_runs_detailed"][:MAX_DETAILED_RUNS]
+
+    @staticmethod
+    def _apply_list_state_updates(profile: dict, rows: list[dict] | None, dry_run: bool) -> None:
+        if dry_run:
+            return
+        current = _normalize_list_state(profile.get("list_state"))
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            row_key = str(row.get("row_key", "") or "").strip()
+            row_state = row.get("row_state")
+            if row_key and isinstance(row_state, dict):
+                current[row_key] = {
+                    "fingerprint": str(row_state.get("fingerprint", "") or "").strip(),
+                    "activities_ts": str(row_state.get("activities_ts", "") or "").strip(),
+                    "updated_at": str(row_state.get("updated_at", "") or "").strip(),
+                    "item_count": int(row_state.get("item_count") or 0),
+                    "last_resolved_count": int(row_state.get("last_resolved_count") or 0),
+                    "write_keys": sorted({str(key) for key in (row_state.get("write_keys") or []) if key}) if isinstance(row_state.get("write_keys"), list) else [],
+                }
+        profile["list_state"] = current
 
     @staticmethod
     def _patch_resolved_stats(profile: dict, resolved_item: dict) -> None:
@@ -947,6 +1043,7 @@ class ProfileStore:
             "options": copy.deepcopy(profile.get("options", {})),
             "last_sync_job_snapshot": copy.deepcopy(profile.get("last_sync_job_snapshot", {})),
             "sync_job_id": profile.get("sync_job_id"),
+            "latest_run_id": str(profile.get("sync_runs_detailed", [{}])[0].get("run_id", "") if profile.get("sync_runs_detailed") else ""),
             "anime_review_summary": {
                 "manual_overrides": len(profile.get("anime_manual_overrides", {})),
                 "reviewed": len(profile.get("anime_review_decisions", {})),
@@ -1099,6 +1196,8 @@ class ProfileStore:
             "last_sync_job_snapshot": _normalize_sync_job_snapshot(None),
             "sync_job_id": "",
             "unresolved_items": [],
+            "sync_runs_detailed": [],
+            "list_state": {},
             "resolution_cache": {},
             "failed_resolution_cache": {},
             "manual_resolution_cache": {},
@@ -1360,6 +1459,8 @@ class ProfileStore:
         sync_modes: dict | None = None,
         resolution_cache: dict | None = None,
         failed_resolution_cache: dict | None = None,
+        detailed_results: list[dict] | None = None,
+        list_state: dict | None = None,
     ) -> dict:
         with self._lock:
             normalized_id = self._normalize_profile_id(profile_id)
@@ -1414,7 +1515,21 @@ class ProfileStore:
                 "totals": _result_totals(results),
             }
 
-            self._append_history_entry(profile, now, dry_run, results=results, status="completed")
+            run_id = str(profile.get("sync_job_id", "") or "")
+            self._append_history_entry(profile, now, dry_run, results=results, status="completed", run_id=run_id)
+            self._append_detailed_run(
+                profile,
+                run_id=run_id,
+                timestamp=now,
+                dry_run=dry_run,
+                sync_modes=normalized_modes,
+                status="completed",
+                rows=detailed_results or results,
+            )
+            if list_state is not None:
+                profile["list_state"] = _normalize_list_state(list_state)
+            else:
+                self._apply_list_state_updates(profile, detailed_results or results, dry_run)
 
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
             self._save_locked()
@@ -1450,12 +1565,24 @@ class ProfileStore:
                 "results": [],
                 "totals": {},
             }
+            run_id = str(profile.get("sync_job_id", "") or "")
             self._append_history_entry(
                 profile,
                 now,
                 dry_run,
                 results=[],
                 status="failed",
+                error_message=error_message,
+                run_id=run_id,
+            )
+            self._append_detailed_run(
+                profile,
+                run_id=run_id,
+                timestamp=now,
+                dry_run=dry_run,
+                sync_modes=normalized_modes,
+                status="failed",
+                rows=[],
                 error_message=error_message,
             )
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
@@ -1589,7 +1716,17 @@ class ProfileStore:
             snapshot["updated_at"] = now
             snapshot["stopped_at"] = now
             profile["last_sync_job_snapshot"] = snapshot
-            self._append_history_entry(profile, now, dry_run, results=[], status="stopped")
+            run_id = str(profile.get("sync_job_id", "") or "")
+            self._append_history_entry(profile, now, dry_run, results=[], status="stopped", run_id=run_id)
+            self._append_detailed_run(
+                profile,
+                run_id=run_id,
+                timestamp=now,
+                dry_run=dry_run,
+                sync_modes=normalized_modes,
+                status="stopped",
+                rows=[],
+            )
             self._apply_next_run_schedule(profile, normalized_modes, dry_run)
             self._save_locked()
             return self._public_profile(profile, include_credentials=True)
@@ -1642,6 +1779,37 @@ class ProfileStore:
             profile["last_sync_job_snapshot"] = snapshot
             # No disk save — progress is in-memory only.
             return self._public_profile(profile, include_credentials=True)
+
+    def get_sync_runs(self, profile_id: str, page: int = 1, page_size: int = 25) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            runs = list(profile.get("sync_runs_detailed", []))
+            page = max(1, int(page or 1))
+            page_size = max(1, min(int(page_size or 25), MAX_DETAILED_RUNS))
+            total = len(runs)
+            start = (page - 1) * page_size
+            paged = runs[start:start + page_size]
+            summaries = [{
+                "run_id": str(run.get("run_id", "") or "").strip(),
+                "timestamp": run.get("timestamp"),
+                "status": str(run.get("status", "completed") or "completed"),
+                "dry_run": bool(run.get("dry_run", False)),
+                "sync_modes": copy.deepcopy(run.get("sync_modes", {})),
+                "totals": copy.deepcopy(run.get("totals", {})),
+                "error_message": str(run.get("error_message", "") or "").strip(),
+            } for run in paged]
+            return {"items": summaries, "total": total, "page": page, "page_size": page_size}
+
+    def get_sync_run_detail(self, profile_id: str, run_id: str) -> dict:
+        with self._lock:
+            normalized_id = self._normalize_profile_id(profile_id)
+            profile = self._profiles[normalized_id]
+            target = str(run_id or "").strip()
+            for run in profile.get("sync_runs_detailed", []):
+                if str(run.get("run_id", "")).strip() == target:
+                    return copy.deepcopy(run)
+            raise KeyError(run_id)
 
     def delete_managed_list_by_id(self, profile_id: str, list_name: str, credentials: dict) -> dict:
         with self._lock:

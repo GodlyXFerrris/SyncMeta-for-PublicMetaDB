@@ -274,6 +274,70 @@ class ProfileStoreTests(unittest.TestCase):
             "watching",
         )
 
+    def test_sync_success_persists_detailed_runs_and_list_state(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+        claimed = self.store.claim_profile_for_sync(created["profile_id"], "secret")
+        run_id = claimed["sync_job_id"]
+
+        updated = self.store.record_sync_success(
+            created["profile_id"],
+            [{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "has_details": True,
+                "run_id": run_id,
+            }],
+            detailed_results=[{
+                "list_name": "Watching - Series",
+                "display_name": "Watching - Series",
+                "source_name": "SIMKL",
+                "row_key": "simkl|watching-series|status_list",
+                "row_type": "status_list",
+                "errors": ["SIMKL list fetch failed"],
+                "sample_failed_titles": ["Demo Show"],
+                "row_state": {
+                    "fingerprint": "fp-1",
+                    "activities_ts": "2026-05-14T12:00:00Z",
+                    "updated_at": "2026-05-14T12:05:00Z",
+                    "item_count": 4,
+                    "last_resolved_count": 3,
+                    "write_keys": ["tmdb:123:tv"],
+                },
+            }],
+        )
+
+        self.assertEqual(updated["latest_run_id"], run_id)
+        runs = self.store.get_sync_runs(created["profile_id"])
+        self.assertEqual(runs["items"][0]["run_id"], run_id)
+        detail = self.store.get_sync_run_detail(created["profile_id"], run_id)
+        self.assertEqual(detail["rows"][0]["errors"], ["SIMKL list fetch failed"])
+        self.assertEqual(
+            self.store._profiles[created["profile_id"]]["list_state"]["simkl|watching-series|status_list"]["fingerprint"],
+            "fp-1",
+        )
+
+    def test_detailed_runs_are_capped_at_25(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, self.options)
+
+        for _ in range(27):
+            claimed = self.store.claim_profile_for_sync(created["profile_id"], "secret")
+            self.store.record_sync_success(
+                created["profile_id"],
+                [{"list_name": "Watching - Series", "display_name": "Watching - Series"}],
+                detailed_results=[{"list_name": "Watching - Series", "display_name": "Watching - Series"}],
+            )
+
+        runs = self.store.get_sync_runs(created["profile_id"], page=1, page_size=25)
+        stored = self.store._profiles[created["profile_id"]]["sync_runs_detailed"]
+
+        self.assertEqual(len(stored), 25)
+        self.assertEqual(runs["total"], 25)
+        self.assertEqual(runs["items"][0]["run_id"], stored[0]["run_id"])
+        self.assertEqual(runs["items"][-1]["run_id"], stored[-1]["run_id"])
+
     def test_delete_managed_list_by_id_removes_selection_and_results(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
         self.store.record_sync_success(created["profile_id"], [{

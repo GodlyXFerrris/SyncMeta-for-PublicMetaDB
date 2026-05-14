@@ -907,6 +907,41 @@ class SyncServiceTests(unittest.TestCase):
         self.assertTrue(unresolved["has_root_ids"])
         self.assertTrue(unresolved["has_anime_ids"])
 
+    def test_sync_list_uses_row_fingerprint_to_skip_unchanged_rows(self) -> None:
+        service = SyncService(
+            AppConfig(
+                simkl=SimklConfig(client_id="simkl-client", access_token="simkl-token", selected_statuses={"shows": ["watching"], "movies": [], "anime": []}),
+                pmdb=PublicMetaDBConfig(api_key="pmdb-key"),
+                sync=SyncConfig(remove_missing=False, delete_disabled_lists=False, dry_run=False, media_types=["shows"]),
+            )
+        )
+        pmdb = StubPMDBClient()
+        service._pmdb = pmdb
+
+        class FingerprintMatcher:
+            def resolve_match(self, item: dict) -> MatchResult:
+                return MatchResult(tmdb_id=222, resolution_kind="external_mapping")
+
+            def resolve_tmdb_id(self, item: dict) -> int | None:
+                return 222
+
+            def stats_snapshot(self) -> dict[str, int]:
+                return {"lookups": 1, "cache_hits": 0, "failed_cache_hits": 0}
+
+        service._matcher = FingerprintMatcher()
+        items = [{"title": "Fingerprint Show", "media_type": "tv", "ids": {"simkl": 1}}]
+
+        first = service._sync_list(items, "Watching - Series", "Demo", source_name="SIMKL", selection={"source": "simkl", "media_type": "shows", "status": "watching"})
+        self.assertEqual(first.items_skipped_fingerprint, 0)
+        self.assertEqual(pmdb.list_item_reads, 1)
+
+        second = service._sync_list(items, "Watching - Series", "Demo", source_name="SIMKL", selection={"source": "simkl", "media_type": "shows", "status": "watching"})
+        self.assertEqual(second.items_skipped_fingerprint, 1)
+        self.assertEqual(second.match_breakdown["skipped:fingerprint"], 1)
+        self.assertEqual(pmdb.list_item_reads, 1)
+        self.assertEqual(first.row_key, second.row_key)
+        self.assertEqual(second.row_type, "status_list")
+
     def test_can_cancel_before_sync_work_starts(self) -> None:
         service, _ = self.build_service(delete_disabled_lists=False)
         service._cancel_requested_callback = lambda: True
