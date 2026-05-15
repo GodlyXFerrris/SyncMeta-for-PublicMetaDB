@@ -53,7 +53,7 @@ class ProfileStoreTests(unittest.TestCase):
         }
         self.options = {
             "auto_sync": True,
-            "interval_seconds": 600,
+            "interval_seconds": MIN_SYNC_INTERVAL_SECONDS,
             "remove_missing": False,
             "delete_disabled_lists": False,
             "simkl_visibility": "private",
@@ -79,9 +79,10 @@ class ProfileStoreTests(unittest.TestCase):
         self.assertNotIn("credentials", payload["profiles"][created["profile_id"]])
         self.assertIn("credentials_encrypted", payload["profiles"][created["profile_id"]])
         self.assertEqual(private_loaded["credentials"]["pmdb"]["api_key"], "pm-key")
-        self.assertEqual(loaded["options"]["interval_seconds"], 600)
+        self.assertEqual(loaded["options"]["interval_seconds"], MIN_SYNC_INTERVAL_SECONDS)
         self.assertEqual(loaded["options"]["trakt_watched_history_interval_seconds"], 86400)
-        self.assertEqual(loaded["options"]["trakt_resume_progress_interval_seconds"], 3600)
+        self.assertEqual(loaded["options"]["trakt_resume_progress_interval_seconds"], 86400)
+        self.assertFalse(loaded["options"]["auto_resume_sync"])
         self.assertFalse(loaded["options"]["delete_disabled_lists"])
         self.assertEqual(loaded["options"]["simkl_visibility"], "private")
         self.assertEqual(loaded["options"]["trakt_public_visibility"], "public")
@@ -135,6 +136,31 @@ class ProfileStoreTests(unittest.TestCase):
             loaded["options"]["trakt_resume_progress_interval_seconds"],
             MIN_RESUME_SYNC_INTERVAL_SECONDS,
         )
+
+    def test_existing_profiles_migrate_resume_to_manual_and_disable_auto_activity(self) -> None:
+        created = self.store.create_profile("secret", self.credentials, {
+            **self.options,
+            "activity_history_source": "trakt",
+            "auto_history_sync": True,
+            "activity_resume_source": "trakt",
+            "auto_resume_sync": True,
+            "trakt_resume_progress_interval_seconds": 86400,
+        })
+
+        store_path = Path(self.tmpdir.name) / "profiles.json"
+        payload = json.loads(store_path.read_text(encoding="utf-8"))
+        raw_profile = payload["profiles"][created["profile_id"]]
+        raw_profile["options_version"] = 1
+        store_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        reloaded = ProfileStore(store_path)
+        loaded = reloaded.get_profile(created["profile_id"], "secret", include_credentials=True)
+
+        self.assertFalse(loaded["options"]["auto_history_sync"])
+        self.assertFalse(loaded["options"]["auto_resume_sync"])
+        self.assertEqual(loaded["options"]["activity_resume_source"], "off")
+        self.assertIsNone(loaded["next_history_sync_at"])
+        self.assertIsNone(loaded["next_resume_sync_at"])
 
     def test_manual_dry_run_does_not_advance_schedule(self) -> None:
         created = self.store.create_profile("secret", self.credentials, self.options)
@@ -490,8 +516,9 @@ class ProfileStoreTests(unittest.TestCase):
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
             "trakt_sync_watched_history": True,
-            "trakt_sync_resume_progress": True,
-            "trakt_resume_progress_interval_seconds": 7200,
+            "activity_resume_source": "trakt",
+            "auto_resume_sync": True,
+            "trakt_resume_progress_interval_seconds": 86400,
         })
 
         loaded = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
@@ -525,14 +552,16 @@ class ProfileStoreTests(unittest.TestCase):
     def test_update_profile_by_id_preserves_existing_next_resume_sync_time(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
-            "trakt_sync_resume_progress": True,
+            "activity_resume_source": "trakt",
+            "auto_resume_sync": True,
         })
         initial = self.store.get_profile(created["profile_id"], "secret", include_credentials=True)
         next_resume_before = initial["next_resume_sync_at"]
 
         updated = self.store.update_profile_by_id(created["profile_id"], self.credentials, {
             **self.options,
-            "trakt_sync_resume_progress": True,
+            "activity_resume_source": "trakt",
+            "auto_resume_sync": True,
         })
 
         self.assertEqual(updated["next_resume_sync_at"], next_resume_before)
@@ -540,8 +569,9 @@ class ProfileStoreTests(unittest.TestCase):
     def test_resume_sync_success_uses_configured_resume_interval_for_next_run(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
-            "trakt_sync_resume_progress": True,
-            "trakt_resume_progress_interval_seconds": 7200,
+            "activity_resume_source": "trakt",
+            "auto_resume_sync": True,
+            "trakt_resume_progress_interval_seconds": 86400,
         })
         self.store.claim_profile_for_sync(created["profile_id"], "secret", {"lists": False, "resume": True})
 
@@ -552,13 +582,13 @@ class ProfileStoreTests(unittest.TestCase):
 
         next_resume = datetime.fromisoformat(updated["next_resume_sync_at"])
         delta_seconds = (next_resume - datetime.now(timezone.utc)).total_seconds()
-        self.assertGreater(delta_seconds, 7000)
-        self.assertLess(delta_seconds, 7300)
+        self.assertGreater(delta_seconds, 86000)
+        self.assertLess(delta_seconds, 86600)
 
     def test_activity_only_sync_keeps_existing_last_list_results(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
-            "trakt_sync_resume_progress": True,
+            "activity_resume_source": "trakt",
         })
         self.store.claim_profile_for_sync(created["profile_id"], "secret")
         self.store.record_sync_success(created["profile_id"], [{

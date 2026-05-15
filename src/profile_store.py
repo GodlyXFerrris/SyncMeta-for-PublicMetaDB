@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import threading
@@ -18,13 +19,15 @@ from .config import ANILIST_DEFAULT_SELECTED_STATUSES, SIMKL_DEFAULT_SELECTED_ST
 ALLOWED_MEDIA_TYPES = {"shows", "movies", "anime"}
 DEFAULT_MEDIA_TYPES = ["shows", "movies", "anime"]
 DEFAULT_SYNC_INTERVAL_SECONDS = 43200  # 12 hours
-MIN_SYNC_INTERVAL_SECONDS = 600
-DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 3600
-MIN_RESUME_SYNC_INTERVAL_SECONDS = 3600
+MIN_SYNC_INTERVAL_SECONDS = 21600
+DEFAULT_RESUME_SYNC_INTERVAL_SECONDS = 86400
+MIN_RESUME_SYNC_INTERVAL_SECONDS = 86400
 DEFAULT_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MIN_WATCHED_HISTORY_INTERVAL_SECONDS = 86400
 MAX_HISTORY_ITEMS = 20
 MAX_DETAILED_RUNS = 25
+OPTIONS_SCHEMA_VERSION = 2
+LIST_SYNC_JITTER_SECONDS = max(0, int(os.getenv("SYNCMETA_LIST_SYNC_JITTER_SECONDS", "900") or "900"))
 SIMKL_ALLOWED_STATUSES = {"watching", "plantowatch", "completed", "hold", "dropped"}
 ANILIST_ALLOWED_STATUSES = {"CURRENT", "PLANNING", "COMPLETED", "PAUSED", "DROPPED", "COMPLETED_ONA", "COMPLETED_OVA", "COMPLETED_MOVIE"}
 ALLOWED_VISIBILITIES = {"private", "public"}
@@ -603,6 +606,7 @@ def normalize_profile_options(options: dict | None) -> dict:
         "activity_history_source": history_source,
         "activity_resume_source": resume_source,
         "auto_history_sync": bool(raw.get("auto_history_sync", False)),
+        "auto_resume_sync": bool(raw.get("auto_resume_sync", False)),
         "simkl_sync_watched_history": history_source == "simkl",
         "simkl_history_anime_only": bool(raw.get("simkl_history_anime_only", False)),
         "simkl_sync_resume_progress": resume_source == "simkl",
@@ -654,8 +658,18 @@ class ProfileStore:
                 profiles[normalized_id] = hydrated
                 if "credentials" in raw_profile and "credentials_encrypted" not in raw_profile:
                     changed = True
+                if normalized_id != profile_id:
+                    changed = True
+                if int(raw_profile.get("options_version") or 0) != OPTIONS_SCHEMA_VERSION:
+                    changed = True
+                if hydrated.get("options") != normalize_profile_options(raw_profile.get("options")):
+                    changed = True
                 # Persist rescheduled next_sync_at so restarts don't re-trigger immediately
                 if hydrated.get("next_sync_at") != raw_profile.get("next_sync_at"):
+                    changed = True
+                if hydrated.get("next_history_sync_at") != raw_profile.get("next_history_sync_at"):
+                    changed = True
+                if hydrated.get("next_resume_sync_at") != raw_profile.get("next_resume_sync_at"):
                     changed = True
 
             self._profiles = profiles
@@ -665,14 +679,20 @@ class ProfileStore:
     def _hydrate_profile(self, profile_id: str, raw_profile: dict) -> dict:
         created_at = raw_profile.get("created_at") or utc_now_iso()
         options = normalize_profile_options(raw_profile.get("options"))
+        if int(raw_profile.get("options_version") or 0) < OPTIONS_SCHEMA_VERSION:
+            options["auto_history_sync"] = False
+            options["auto_resume_sync"] = False
+            options["activity_resume_source"] = "off"
+            options["trakt_sync_resume_progress"] = False
+            options["simkl_sync_resume_progress"] = False
         next_sync_at = raw_profile.get("next_sync_at")
         if not options["auto_sync"]:
             next_sync_at = None
         elif not next_sync_at or (parse_iso_datetime(next_sync_at) or utc_now()) <= utc_now():
             # Missing or past-due: schedule from now + interval instead of firing immediately
-            next_sync_at = (utc_now() + timedelta(seconds=options["interval_seconds"])).isoformat()
+            next_sync_at = self._next_sync_iso(options["interval_seconds"], profile_id)
         next_resume_sync_at = raw_profile.get("next_resume_sync_at")
-        if not options["auto_sync"] or options["activity_resume_source"] == "off":
+        if not options.get("auto_resume_sync", False) or options["activity_resume_source"] == "off":
             next_resume_sync_at = None
         elif not next_resume_sync_at or (parse_iso_datetime(next_resume_sync_at) or utc_now()) <= utc_now():
             next_resume_sync_at = (utc_now() + timedelta(seconds=options["trakt_resume_progress_interval_seconds"])).isoformat()
@@ -736,6 +756,7 @@ class ProfileStore:
         return {
             "password_hash": profile["password_hash"],
             "credentials_encrypted": self._cipher.encrypt(profile["credentials"]),
+            "options_version": OPTIONS_SCHEMA_VERSION,
             "options": copy.deepcopy(profile["options"]),
             "created_at": profile.get("created_at"),
             "updated_at": profile.get("updated_at"),
@@ -783,8 +804,17 @@ class ProfileStore:
             raise ValueError("Invalid profile UUID") from exc
 
     @staticmethod
-    def _next_sync_iso(interval_seconds: int) -> str:
-        return (utc_now() + timedelta(seconds=interval_seconds)).isoformat()
+    def _schedule_jitter_seconds(profile_id: str, label: str, max_seconds: int) -> int:
+        if max_seconds <= 0:
+            return 0
+        seed = f"{profile_id}:{label}".encode("utf-8")
+        digest = hashlib.sha256(seed).digest()
+        return int.from_bytes(digest[:4], "big") % (max_seconds + 1)
+
+    @classmethod
+    def _next_sync_iso(cls, interval_seconds: int, profile_id: str = "") -> str:
+        jitter = cls._schedule_jitter_seconds(profile_id, "lists", LIST_SYNC_JITTER_SECONDS) if profile_id else 0
+        return (utc_now() + timedelta(seconds=interval_seconds + jitter)).isoformat()
 
     @staticmethod
     def _next_resume_sync_iso(interval_seconds: int) -> str:
@@ -809,9 +839,10 @@ class ProfileStore:
         options = profile.get("options", {})
         auto_sync = bool(options.get("auto_sync", True))
         auto_history_sync = bool(options.get("auto_history_sync", False))
+        auto_resume_sync = bool(options.get("auto_resume_sync", False))
         if sync_modes["lists"]:
             profile["last_sync"] = utc_now_iso()
-            profile["next_sync_at"] = self._next_sync_iso(options["interval_seconds"]) if auto_sync else None
+            profile["next_sync_at"] = self._next_sync_iso(options["interval_seconds"], profile.get("profile_id", "")) if auto_sync else None
         if sync_modes["history"]:
             profile["last_history_sync"] = utc_now_iso()
             if auto_history_sync and options.get("activity_history_source") != "off":
@@ -822,7 +853,7 @@ class ProfileStore:
                 profile["next_history_sync_at"] = None
         if sync_modes["resume"]:
             profile["last_resume_sync"] = utc_now_iso()
-            if auto_sync and options.get("activity_resume_source") != "off":
+            if auto_resume_sync and options.get("activity_resume_source") != "off":
                 profile["next_resume_sync_at"] = self._next_resume_sync_iso(
                     options["trakt_resume_progress_interval_seconds"]
                 )
@@ -1172,7 +1203,7 @@ class ProfileStore:
             "sync_updated_at": None,
             "history": [],
             "next_sync_at": (
-                self._next_sync_iso(normalized_options["interval_seconds"])
+                self._next_sync_iso(normalized_options["interval_seconds"], profile_id)
                 if normalized_options["auto_sync"]
                 else None
             ),
@@ -1185,7 +1216,7 @@ class ProfileStore:
             "last_resume_sync": None,
             "next_resume_sync_at": (
                 self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
-                if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off"
+                if normalized_options.get("auto_resume_sync") and normalized_options["activity_resume_source"] != "off"
                 else None
             ),
             "activity_results": {},
@@ -1230,6 +1261,7 @@ class ProfileStore:
             profile = self._authenticate_locked(profile_id, password)
             previous_auto_sync = bool(profile.get("options", {}).get("auto_sync", True))
             previous_next_sync_at = profile.get("next_sync_at")
+            previous_auto_resume_sync = bool(profile.get("options", {}).get("auto_resume_sync", False))
             previous_resume_source = str(profile.get("options", {}).get("activity_resume_source", "off") or "off")
             previous_next_resume_sync_at = profile.get("next_resume_sync_at")
             profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
@@ -1246,7 +1278,7 @@ class ProfileStore:
                     profile["next_sync_at"] = (
                         previous_next_sync_at
                         if previous_auto_sync and previous_next_sync_at
-                        else self._next_sync_iso(normalized_options["interval_seconds"])
+                        else self._next_sync_iso(normalized_options["interval_seconds"], profile_id)
                     )
                 else:
                     profile["next_sync_at"] = None
@@ -1258,10 +1290,10 @@ class ProfileStore:
                     )
                 else:
                     profile["next_history_sync_at"] = None
-                if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off":
+                if normalized_options.get("auto_resume_sync") and normalized_options["activity_resume_source"] != "off":
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
-                        if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
+                        if previous_auto_resume_sync and previous_resume_source != "off" and previous_next_resume_sync_at
                         else self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
                     )
                 else:
@@ -1276,6 +1308,7 @@ class ProfileStore:
             profile = self._get_profile_locked(profile_id)
             previous_auto_sync = bool(profile.get("options", {}).get("auto_sync", True))
             previous_next_sync_at = profile.get("next_sync_at")
+            previous_auto_resume_sync = bool(profile.get("options", {}).get("auto_resume_sync", False))
             previous_resume_source = str(profile.get("options", {}).get("activity_resume_source", "off") or "off")
             previous_next_resume_sync_at = profile.get("next_resume_sync_at")
             profile["credentials"] = merge_credentials(profile.get("credentials"), credentials)
@@ -1292,7 +1325,7 @@ class ProfileStore:
                     profile["next_sync_at"] = (
                         previous_next_sync_at
                         if previous_auto_sync and previous_next_sync_at
-                        else self._next_sync_iso(normalized_options["interval_seconds"])
+                        else self._next_sync_iso(normalized_options["interval_seconds"], profile_id)
                     )
                 else:
                     profile["next_sync_at"] = None
@@ -1304,10 +1337,10 @@ class ProfileStore:
                     )
                 else:
                     profile["next_history_sync_at"] = None
-                if normalized_options["auto_sync"] and normalized_options["activity_resume_source"] != "off":
+                if normalized_options.get("auto_resume_sync") and normalized_options["activity_resume_source"] != "off":
                     profile["next_resume_sync_at"] = (
                         previous_next_resume_sync_at
-                        if previous_auto_sync and previous_resume_source != "off" and previous_next_resume_sync_at
+                        if previous_auto_resume_sync and previous_resume_source != "off" and previous_next_resume_sync_at
                         else self._next_resume_sync_iso(normalized_options["trakt_resume_progress_interval_seconds"])
                     )
                 else:
@@ -1398,7 +1431,7 @@ class ProfileStore:
                 if profile["sync_running"]:
                     continue
                 options = profile.get("options", {})
-                if not options.get("auto_sync", True) and not options.get("auto_history_sync", False):
+                if not options.get("auto_sync", True) and not options.get("auto_history_sync", False) and not options.get("auto_resume_sync", False):
                     continue
                 due_modes = {
                     "lists": False,
@@ -1414,7 +1447,7 @@ class ProfileStore:
                 ):
                     due_modes["history"] = True
                 next_resume_sync_at = parse_iso_datetime(profile.get("next_resume_sync_at"))
-                if options.get("auto_sync", True) and profile.get("options", {}).get("activity_resume_source") != "off" and (
+                if options.get("auto_resume_sync", False) and profile.get("options", {}).get("activity_resume_source") != "off" and (
                     next_resume_sync_at is None or next_resume_sync_at <= now
                 ):
                     due_modes["resume"] = True
