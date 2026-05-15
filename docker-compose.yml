@@ -8,10 +8,23 @@ services:
     environment:
       PROFILE_STORE_FILE: /app/data/profiles.json
       SYNCMETA_MASTER_KEY: ${SYNCMETA_MASTER_KEY:-}
+      SYNCMETA_MAX_CONCURRENT_SYNCS: ${SYNCMETA_MAX_CONCURRENT_SYNCS:-1}
+      SYNCMETA_LIST_RESOLVE_WORKERS: ${SYNCMETA_LIST_RESOLVE_WORKERS:-2}
+      SYNCMETA_LIST_WRITE_WORKERS: ${SYNCMETA_LIST_WRITE_WORKERS:-1}
+      SYNCMETA_ACTIVITY_WRITE_WORKERS: ${SYNCMETA_ACTIVITY_WRITE_WORKERS:-1}
+      SYNCMETA_SOURCE_SYNC_WORKERS: ${SYNCMETA_SOURCE_SYNC_WORKERS:-2}
+      SYNCMETA_SIMKL_FETCH_WORKERS: ${SYNCMETA_SIMKL_FETCH_WORKERS:-2}
+      SYNCMETA_ACTIVITY_SOURCE_WORKERS: ${SYNCMETA_ACTIVITY_SOURCE_WORKERS:-2}
+      SYNCMETA_PREWARM_WORKERS: ${SYNCMETA_PREWARM_WORKERS:-2}
+      SYNCMETA_GUNICORN_WORKERS: ${SYNCMETA_GUNICORN_WORKERS:-1}
+      SYNCMETA_GUNICORN_THREADS: ${SYNCMETA_GUNICORN_THREADS:-2}
       # Optional: add SITE_ACCESS_PASSWORD in your own override or env_file
       # if you want a shared password before the app loads.
     volumes:
       - ./data:/app/data
+    cpus: ${SYNCMETA_CPU_LIMIT:-1.0}
+    mem_limit: ${SYNCMETA_MEMORY_LIMIT:-1536m}
+    mem_reservation: ${SYNCMETA_MEMORY_RESERVATION:-768m}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"]
       interval: 30s

@@ -49,8 +49,8 @@ logger = logging.getLogger("web")
 PROFILE_STORE_FILE = Path(
     os.getenv("PROFILE_STORE_FILE", str(Path(__file__).resolve().parent / "data" / "profiles.json"))
 )
-SCHEDULER_POLL_SECONDS = 5
-MAX_CONCURRENT_SYNCS = max(1, int(os.getenv("SYNCMETA_MAX_CONCURRENT_SYNCS", "4") or "4"))
+SCHEDULER_POLL_SECONDS = max(5, int(os.getenv("SYNCMETA_SCHEDULER_POLL_SECONDS", "5") or "5"))
+MAX_CONCURRENT_SYNCS = max(1, int(os.getenv("SYNCMETA_MAX_CONCURRENT_SYNCS", "1") or "1"))
 SESSION_COOKIE_NAME = "syncmeta_session"
 ACCESS_COOKIE_NAME = "syncmeta_site_access"
 SESSION_TTL_SECONDS = int(os.getenv("SYNCMETA_SESSION_TTL_SECONDS", "2592000"))

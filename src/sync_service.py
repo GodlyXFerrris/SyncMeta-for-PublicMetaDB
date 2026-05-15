@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import logging
 import hashlib
 import json
+import logging
+import os
 import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
@@ -21,10 +22,26 @@ from . import anime_mapping_store
 
 logger = logging.getLogger(__name__)
 
-_LIST_WRITE_WORKERS = 4
-_LIST_RESOLVE_WORKERS = 6
-_ACTIVITY_WRITE_WORKERS = 4
-_MAPPING_WRITE_WORKERS = 4
+def _env_int(name: str, default: int, minimum: int = 1, maximum: int | None = None) -> int:
+    raw = str(os.getenv(name, str(default)) or str(default)).strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    value = max(minimum, value)
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
+_LIST_WRITE_WORKERS = _env_int("SYNCMETA_LIST_WRITE_WORKERS", 1, maximum=4)
+_LIST_RESOLVE_WORKERS = _env_int("SYNCMETA_LIST_RESOLVE_WORKERS", 2, maximum=6)
+_ACTIVITY_WRITE_WORKERS = _env_int("SYNCMETA_ACTIVITY_WRITE_WORKERS", 1, maximum=4)
+_MAPPING_WRITE_WORKERS = _env_int("SYNCMETA_MAPPING_WRITE_WORKERS", 1, maximum=4)
+_SOURCE_SYNC_WORKERS = _env_int("SYNCMETA_SOURCE_SYNC_WORKERS", 2, maximum=3)
+_SIMKL_FETCH_WORKERS = _env_int("SYNCMETA_SIMKL_FETCH_WORKERS", 2, maximum=8)
+_ACTIVITY_SOURCE_WORKERS = _env_int("SYNCMETA_ACTIVITY_SOURCE_WORKERS", 2, maximum=3)
+_PREWARM_WORKERS = _env_int("SYNCMETA_PREWARM_WORKERS", 2, maximum=4)
 _ANILIST_PREWARM_LIMIT = 200
 _FUTURE_POLL_INTERVAL = 0.25
 
@@ -522,7 +539,7 @@ class SyncService:
                     # NOTE: SyncCancelled must be detected via the future's exception
                     # and re-raised here, not swallowed by the generic except clause.
                     cancelled = False
-                    pool = ThreadPoolExecutor(max_workers=2)
+                    pool = ThreadPoolExecutor(max_workers=min(_SOURCE_SYNC_WORKERS, 2))
                     shutdown_wait = True
                     try:
                         future_simkl = pool.submit(self._sync_simkl)
@@ -650,7 +667,7 @@ class SyncService:
                 all_items.extend(self._anilist_root_client.get_status("PLANNING") or [])
         else:
             self._set_status("Fetching watchlist sources")
-            with ThreadPoolExecutor(max_workers=workers) as pool:
+            with ThreadPoolExecutor(max_workers=min(_SOURCE_SYNC_WORKERS, workers)) as pool:
                 futures = []
                 if simkl_enabled:
                     futures.append(pool.submit(_fetch_simkl_plantowatch))
@@ -712,7 +729,7 @@ class SyncService:
 
         job_order = {job: i for i, job in enumerate(fetch_jobs)}
         all_items_by_status: list[tuple[str, str, list[dict]]] = []
-        with ThreadPoolExecutor(max_workers=min(8, len(fetch_jobs))) as pool:
+        with ThreadPoolExecutor(max_workers=min(_SIMKL_FETCH_WORKERS, len(fetch_jobs))) as pool:
             futures = {pool.submit(_fetch_one, t, s): (t, s) for t, s in fetch_jobs}
             for future in self._iter_completed_futures(futures):
                 self._check_cancelled()
@@ -815,7 +832,7 @@ class SyncService:
         # the SIMKL completed-anime list (used as episode-level fallback later).
         # The fallback scans a whole status list, so skip it for cursor-based
         # incremental runs where the changed history rows are enough context.
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=min(_ACTIVITY_SOURCE_WORKERS, 3)) as pool:
             f_simkl = pool.submit(self._simkl.get_watched_history, since=since)
             f_pmdb = pool.submit(self._pmdb.get_watched_history)
             f_completed = (
@@ -1637,7 +1654,7 @@ class SyncService:
         since = None if self._config.sync.full_history_sync or not cursor else cursor
 
         self._set_status("Fetching Trakt watched history…")
-        _executor = ThreadPoolExecutor(max_workers=2)
+        _executor = ThreadPoolExecutor(max_workers=min(_ACTIVITY_SOURCE_WORKERS, 2))
         f_trakt = _executor.submit(self._trakt.get_watched_history, since=since, status_callback=self._set_status)
         f_pmdb = _executor.submit(self._pmdb.get_watched_history)
         _executor.shutdown(wait=False)
@@ -1953,7 +1970,7 @@ class SyncService:
             self._set_status("Pre-warming anime metadata cache")
             get_ctx = getattr(client, "_get_root_context", None)
             if callable(get_ctx):
-                pool = ThreadPoolExecutor(max_workers=4)
+                pool = ThreadPoolExecutor(max_workers=min(_PREWARM_WORKERS, 4))
                 shutdown_wait = True
                 try:
                     futures = {pool.submit(get_ctx, aid): aid for aid in prewarm_ids}
@@ -2207,7 +2224,7 @@ class SyncService:
             return []
 
         results_by_key: dict[tuple[str, str, str, str, str], list[dict]] = {}
-        pool = ThreadPoolExecutor(max_workers=min(4, len(jobs)))
+        pool = ThreadPoolExecutor(max_workers=min(_SOURCE_SYNC_WORKERS, len(jobs)))
         shutdown_wait = True
         try:
             futures = {}
@@ -2262,7 +2279,7 @@ class SyncService:
             self._publish_pending_list(mdblist["name"], mdblist["name"], "MDBList")
 
         results_by_key: dict[tuple[int, str], list[dict]] = {}
-        pool = ThreadPoolExecutor(max_workers=min(4, len(selected_lists)))
+        pool = ThreadPoolExecutor(max_workers=min(_SOURCE_SYNC_WORKERS, len(selected_lists)))
         shutdown_wait = True
         try:
             futures = {
@@ -2663,7 +2680,7 @@ class SyncService:
         if not callable(get_ctx):
             return
 
-        pool = ThreadPoolExecutor(max_workers=4)
+        pool = ThreadPoolExecutor(max_workers=min(_PREWARM_WORKERS, 4))
         shutdown_wait = True
         try:
             futures = {pool.submit(get_ctx, aid): aid for aid in uncached}

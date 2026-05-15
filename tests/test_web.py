@@ -481,7 +481,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(data["profile"]["profile_id"], profile["profile_id"])
         self.assertNotIn("credentials", data["profile"])
         self.assertIn("queue_status", data["profile"])
-        self.assertEqual(data["profile"]["queue_status"]["max_concurrent"], 4)
+        self.assertEqual(data["profile"]["queue_status"]["max_concurrent"], web.MAX_CONCURRENT_SYNCS)
 
     def test_delete_profile_endpoint_removes_signed_in_profile(self) -> None:
         profile = web._profile_store.create_profile("secret", {
