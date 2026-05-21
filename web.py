@@ -646,6 +646,13 @@ class SyncRunner:
         with self._lock:
             if profile_id in self._running_profile_ids:
                 return False
+            queued_ids = {
+                str(item[0].get("profile_id", "")).strip()
+                for item in list(self._queue.queue)
+                if item and isinstance(item[0], dict)
+            }
+            if profile_id not in queued_ids:
+                return False
             self._skip_ids.add(profile_id)
             return True
 
@@ -1991,14 +1998,9 @@ def _admin_stats() -> dict:  # noqa: C901
         last_24h = {}
 
     # ── cache / anime mapping ────────────────────────────────────────────────
-    store = _ams._STORE
-    with store._lock:
-        fribb_loaded = store._fribb_loaded
-        xml_loaded = store._xml_loaded
-        fribb_entries = len(store._fribb_by_anilist) if fribb_loaded else 0
-        xml_entries = len(store._xml_by_anidb) if xml_loaded else 0
-        season_cache = len(store._same_season_group_cache)
-        mapping_str_cache = len(store._mapping_string_cache)
+    mapping_cache_meta = _ams.cache_metadata()
+    fribb_meta = mapping_cache_meta.get("fribb", {})
+    xml_meta = mapping_cache_meta.get("anime_lists_xml", {})
 
     # data dir sizes
     data_dir = PROFILE_STORE_FILE.parent
@@ -2029,12 +2031,21 @@ def _admin_stats() -> dict:  # noqa: C901
     total_unresolved = sum(len(p.get("unresolved_items") or []) for p in profiles_raw)
 
     cache_info = {
-        "fribb_loaded": fribb_loaded,
-        "fribb_entries": fribb_entries,
-        "xml_loaded": xml_loaded,
-        "xml_entries": xml_entries,
-        "season_group_cache": season_cache,
-        "mapping_str_cache": mapping_str_cache,
+        "fribb_loaded": bool(fribb_meta.get("loaded")),
+        "fribb_entries": int(fribb_meta.get("entries") or 0),
+        "fribb_last_checked_at": fribb_meta.get("last_checked_at", ""),
+        "fribb_cache_updated_at": fribb_meta.get("cache_updated_at", ""),
+        "fribb_source_url": fribb_meta.get("source_url", ""),
+        "fribb_etag": fribb_meta.get("etag", ""),
+        "xml_loaded": bool(xml_meta.get("loaded")),
+        "xml_entries": int(xml_meta.get("entries") or 0),
+        "xml_last_checked_at": xml_meta.get("last_checked_at", ""),
+        "xml_cache_updated_at": xml_meta.get("cache_updated_at", ""),
+        "xml_source_url": xml_meta.get("source_url", ""),
+        "xml_etag": xml_meta.get("etag", ""),
+        "mapping_refresh_interval_seconds": int(mapping_cache_meta.get("refresh_interval_seconds") or 0),
+        "season_group_cache": int(mapping_cache_meta.get("season_group_cache") or 0),
+        "mapping_str_cache": int(mapping_cache_meta.get("mapping_string_cache") or 0),
         "resolution_cache_total": total_res,
         "failed_cache_total": total_fail,
         "manual_cache_total": total_manual,
@@ -2254,46 +2265,30 @@ def admin_refresh_anime_mappings():
     if not _is_admin():
         return _json_error("Not authorized", 401)
 
-    import time as _time
     try:
-        from src.anime_mapping_store import _STORE  # noqa: PLC0415
+        from src import anime_mapping_store as _ams  # noqa: PLC0415
     except Exception as exc:
         return jsonify({"ok": False, "error": f"Could not import store: {exc}"}), 500
 
-    results: list[str] = []
-
-    # Reset last-checked timestamps to force a re-check on the next _ensure_* call.
-    with _STORE._lock:
-        _STORE._fribb_last_checked = 0.0
-        _STORE._xml_last_checked = 0.0
-        fribb_was_loaded = _STORE._fribb_loaded
-        xml_was_loaded = _STORE._xml_loaded
-        # Also reset loaded flags so data is fully re-indexed from fresh content.
-        _STORE._fribb_loaded = False
-        _STORE._xml_loaded = False
-
     try:
-        t0 = _time.monotonic()
-        _STORE._ensure_fribb_loaded()
-        fribb_ms = int((_time.monotonic() - t0) * 1000)
-        results.append(f"Fribb: refreshed in {fribb_ms}ms"
-                       f" ({'re-indexed' if not fribb_was_loaded else 'updated or 304'})")
+        refresh = _ams.force_refresh()
     except Exception as exc:
-        results.append(f"Fribb: ERROR — {exc}")
+        return jsonify({"ok": False, "error": f"Could not refresh mappings: {exc}"}), 500
 
-    try:
-        t0 = _time.monotonic()
-        _STORE._ensure_xml_loaded()
-        xml_ms = int((_time.monotonic() - t0) * 1000)
-        results.append(f"Anime-Lists XML: refreshed in {xml_ms}ms"
-                       f" ({'re-indexed' if not xml_was_loaded else 'updated or 304'})")
-    except Exception as exc:
-        results.append(f"Anime-Lists XML: ERROR — {exc}")
+    results = []
+    for item in refresh.get("results", []):
+        source = str(item.get("source") or "mapping")
+        label = "Fribb" if source == "fribb" else "Anime-Lists XML"
+        duration = int(item.get("duration_ms") or 0)
+        if item.get("ok"):
+            results.append(f"{label}: checked in {duration}ms")
+        else:
+            results.append(f"{label}: ERROR - {item.get('error') or 'refresh failed'}")
 
-    ok = not any("ERROR" in r for r in results)
     return jsonify({
-        "ok": ok,
+        "ok": bool(refresh.get("ok")),
         "results": results,
+        "metadata": refresh.get("metadata", {}),
         "message": " | ".join(results),
     })
 

@@ -272,6 +272,14 @@
             {% endif %}
           </span>
         </div>
+        <div class="cache-item" title="{{ stats.cache.fribb_source_url }}">
+          <span class="cache-label">Fribb checked</span>
+          <span class="cache-val" style="font-size:12px">{{ stats.cache.fribb_last_checked_at or 'Never' }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Fribb cache file</span>
+          <span class="cache-val" style="font-size:12px">{{ stats.cache.fribb_cache_updated_at or 'Missing' }}</span>
+        </div>
         <div class="cache-item">
           <span class="cache-label">Anime-Lists XML</span>
           <span>
@@ -282,6 +290,18 @@
             <span class="badge badge-orange">Not loaded</span>
             {% endif %}
           </span>
+        </div>
+        <div class="cache-item" title="{{ stats.cache.xml_source_url }}">
+          <span class="cache-label">XML checked</span>
+          <span class="cache-val" style="font-size:12px">{{ stats.cache.xml_last_checked_at or 'Never' }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">XML cache file</span>
+          <span class="cache-val" style="font-size:12px">{{ stats.cache.xml_cache_updated_at or 'Missing' }}</span>
+        </div>
+        <div class="cache-item">
+          <span class="cache-label">Refresh interval</span>
+          <span class="cache-val">{{ (stats.cache.mapping_refresh_interval_seconds // 86400) if stats.cache.mapping_refresh_interval_seconds else 0 }}d</span>
         </div>
         <div class="cache-item">
           <span class="cache-label">Season group cache</span>

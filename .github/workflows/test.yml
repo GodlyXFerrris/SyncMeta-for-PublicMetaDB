@@ -24,5 +24,4 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run unit tests
-        continue-on-error: true
         run: python -m unittest discover -v

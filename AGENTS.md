@@ -8,10 +8,10 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 # Run the app locally
 python web.py                        # http://127.0.0.1:8080
 
-# Run all tests (excluding known env-broken test)
-python -m unittest discover -v --ignore=tests/test_profile_store.py
+# Run all tests
+python -m unittest discover -v
 # Or with pytest:
-python -m pytest -v --ignore=tests/test_profile_store.py -k "not test_stop_sync_endpoint_marks_profile_as_stopping"
+python -m pytest -v
 
 # Run a single test file
 python -m pytest tests/test_sync_service.py -v
@@ -20,13 +20,11 @@ python -m pytest tests/test_sync_service.py -v
 python -m pytest tests/test_sync_service.py::TestSyncService::test_pmdb_native_watchlist_reconciles_removed_and_added_items -v
 ```
 
-**Known permanent test exclusions:**
-- `tests/test_profile_store.py` — fails due to `cryptography` library CFI backend issue in this environment
-- `test_stop_sync_endpoint_marks_profile_as_stopping` — pre-existing bug; expects `"stopping"`, gets `"stopped"`
+**Known permanent test exclusions:** none. CI should fail on any test failure.
 
 ## Architecture
 
-**Entry point:** `web.py` — Flask app. Owns the `ProfileStore` singleton, `SyncRunner` thread pool, APScheduler background scheduler, and all HTTP routes (`/status`, `/sync`, `/activity`, `/config`, `/admin/*`, etc.). Compresses JSON responses ≥512 bytes via `@app.after_request` gzip hook.
+**Entry point:** `web.py` — Flask app. Owns the `ProfileStore` singleton, `SyncRunner` thread pool, custom `ProfileScheduler`, and all HTTP routes (`/api/profile/status`, `/api/profile/sync`, `/api/profile/activity/sync`, `/api/profile/sync/runs`, `/api/profile/sync/run-details`, `/admin/*`, etc.). Compresses JSON responses ≥512 bytes via `@app.after_request` gzip hook.
 
 **Sync pipeline:** `src/sync_service.py` — `SyncService` is the main orchestrator. Called once per sync run:
 1. `_sync_simkl` / `_sync_trakt` / `_sync_anilist` / `_sync_mdblist` — fetch each source's lists in parallel using `ThreadPoolExecutor`
@@ -39,7 +37,7 @@ python -m pytest tests/test_sync_service.py::TestSyncService::test_pmdb_native_w
 
 **ID resolution:** `src/matcher.py` — `ItemMatcher` resolves cross-provider IDs (TMDB ↔ SIMKL ↔ AniList ↔ MAL ↔ IMDB). Uses Fribb anime mapping (`src/fribb_client.py`), an anime prequel-chain cache (`src/anime_mapping_store.py`), and per-episode PMDB fallback. Thread-safe in-memory cache.
 
-**Profile persistence:** `src/profile_store.py` — JSON-backed store (`/app/data/profiles.json`). Credentials are Fernet-encrypted (AES-128-CBC). `activity_state` dict persists per-profile runtime state: last-sync cursors/timestamps, `pmdb_watchlist_managed_keys` (keys SyncMeta previously wrote to PMDB watchlist — used to avoid removing manually-added entries).
+**Profile persistence:** `src/profile_store.py` — JSON-backed store (`/app/data/profiles.json`). Credentials are Fernet-encrypted. `activity_state` dict persists per-profile runtime state: last-sync cursors/timestamps, `pmdb_watchlist_managed_keys` (keys SyncMeta previously wrote to PMDB watchlist — used to avoid removing manually-added entries). `list_state` persists per-row fingerprints. `sync_runs_detailed` keeps the last 25 detailed diagnostic records.
 
 **Config:** `src/config.py` — dataclass hierarchy: `AppConfig` contains `SimklConfig`, `TraktConfig`, `AniListConfig`, `MdbListConfig`, `PublicMetaDBConfig`, `SyncConfig`. `SyncConfig.pmdb_watchlist_managed_keys: list[str]` is the persisted set of watchlist keys written by SyncMeta.
 
@@ -57,6 +55,8 @@ python -m pytest tests/test_sync_service.py::TestSyncService::test_pmdb_native_w
 
 **Stale poll guard:** `_statusGeneration` is incremented before any forced status refresh. Each `fetchStatus` call captures the generation at start; if it differs when results arrive, the render is discarded. Prevents a queued 2s-poll response from overwriting a just-triggered sync state.
 
-**Parallel SIMKL fetching:** `_sync_simkl` submits all `(media_type, status_key)` combinations to a `ThreadPoolExecutor(max_workers=min(8, len(fetch_jobs)))`, then sorts results back to canonical order by original job index before processing.
+**Parallel SIMKL fetching:** `_sync_simkl` submits all `(media_type, status_key)` combinations to a `ThreadPoolExecutor(max_workers=min(SYNCMETA_SIMKL_FETCH_WORKERS, len(fetch_jobs)))`, then sorts results back to canonical order by original job index before processing.
+
+**Scheduling defaults:** List/catalog sync defaults to 12h and clamps to a 6h minimum. Watch history and resume progress default to manual; when automatic sync is enabled they clamp to a 24h minimum. Automatic list/history/resume schedules add deterministic per-profile jitter so multiple profiles do not all start together on small VPS hosts.
 
 **Anime root resolution:** For anime, `ItemMatcher` walks the prequel chain to find the root title so all seasons/cours resolve to the same PMDB entry. The chain is cached in `anime_mapping_store.py`.

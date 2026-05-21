@@ -3036,12 +3036,21 @@
       const run = latestRunId ? runDetailsCache[latestRunId] : null;
       const rows = run && Array.isArray(run.rows) ? run.rows.filter(row => (row.error_count || 0) > 0 || (row.errors || []).length) : [];
       const search = String(el('unresolved-search') && el('unresolved-search').value || '').trim().toLowerCase();
+      const fatalText = run && run.error_message ? String(run.error_message) : '';
+      const fatalMatches = fatalText && (!search || ['fatal', 'run', fatalText, run.status].some(value => String(value || '').toLowerCase().includes(search)));
       const filtered = search ? rows.filter(row => [row.display_name, row.source_name, (row.errors || []).join(' '), (row.sample_failed_titles || []).join(' '), row.row_type].some(value => String(value || '').toLowerCase().includes(search))) : rows;
-      if (!filtered.length) {
+      if (!filtered.length && !fatalMatches) {
         body.innerHTML = `<div class="empty">${search ? 'No errors match this search.' : 'No sync errors.'}</div>`;
         return;
       }
-      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Row</th><th>Stage</th><th>Errors</th><th>Failed Items</th></tr></thead><tbody>${filtered.map(row => `
+      const fatalRow = fatalMatches ? `
+        <tr>
+          <td>Run failure<div class="catalog-note">${esc(run.status || 'failed')}</div></td>
+          <td>fatal</td>
+          <td><div class="catalog-note" style="color:var(--red)">${esc(fatalText)}</div></td>
+          <td>-</td>
+        </tr>` : '';
+      body.innerHTML = `<div class="table-scroll"><table><thead><tr><th>Row</th><th>Stage</th><th>Errors</th><th>Failed Items</th></tr></thead><tbody>${fatalRow}${filtered.map(row => `
         <tr>
           <td>${esc(row.display_name || row.list_name || '')}<div class="catalog-note">${esc(row.source_name || row.row_type || '')}</div></td>
           <td>${esc(Object.entries(row.error_stage_counts || {}).map(([key, value]) => `${key}:${value}`).join(', ') || 'general')}</td>
@@ -3064,9 +3073,12 @@
       const rows = Array.isArray(run.rows) ? run.rows : [];
       const selectedRows = rowKey ? rows.filter(row => (row.row_key || '') === rowKey) : rows;
       const renderRows = selectedRows.length ? selectedRows : rows;
+      const totals = run.totals || {};
       body.innerHTML = `
         <div class="panel-body" style="padding-bottom:0">
-          <div class="catalog-note">${esc(new Date(run.timestamp).toLocaleString())} · ${esc(run.status || 'completed')}${run.error_message ? ` · ${esc(run.error_message)}` : ''}</div>
+          <div class="catalog-note">${esc(new Date(run.timestamp).toLocaleString())} · ${esc(run.status || 'completed')}${run.dry_run ? ' · dry run' : ''}</div>
+          ${run.error_message ? `<div class="catalog-note" style="color:var(--red)">Fatal: ${esc(run.error_message)}</div>` : ''}
+          <div class="catalog-note">Totals: fetched ${totals.fetched || 0}, resolved ${totals.resolved || 0}, added ${totals.added || 0}, removed ${totals.removed || 0}, unresolved ${totals.unresolved || 0}, errors ${totals.errors || 0}</div>
         </div>
         <div class="table-scroll"><table><thead><tr><th>Row</th><th>Diagnostics</th><th>Errors</th></tr></thead><tbody>${renderRows.map(row => `
           <tr>

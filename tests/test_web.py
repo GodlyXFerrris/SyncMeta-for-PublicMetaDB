@@ -13,16 +13,19 @@ class WebTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = tempfile.TemporaryDirectory()
         self.original_site_access_password = web.SITE_ACCESS_PASSWORD
+        self.original_admin_password = web.ADMIN_PASSWORD
         web._profile_store = web.ProfileStore(Path(self.tmpdir.name) / "profiles.json")
         web._session_store = web.ServerSessionStore(ttl_seconds=3600)
         web._login_limiter = web.LoginAttemptLimiter(max_attempts=5, window_seconds=60)
         web._access_store = web.ServerSessionStore(ttl_seconds=3600)
         web._access_limiter = web.LoginAttemptLimiter(max_attempts=5, window_seconds=60)
         web.SITE_ACCESS_PASSWORD = ""
+        web.ADMIN_PASSWORD = ""
         self.client = web.app.test_client()
 
     def tearDown(self) -> None:
         web.SITE_ACCESS_PASSWORD = self.original_site_access_password
+        web.ADMIN_PASSWORD = self.original_admin_password
         self.tmpdir.cleanup()
 
     def test_index_contains_new_source_sections(self) -> None:
@@ -955,6 +958,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(detail_response.status_code, 200)
         self.assertEqual(detail_data["run"]["run_id"], run_id)
         self.assertEqual(detail_data["run"]["rows"][0]["errors"], ["Bearer=[redacted] failed"])
+
+    def test_admin_stats_include_anime_mapping_cache_metadata(self) -> None:
+        stats = web._admin_stats()
+
+        self.assertIn("fribb_last_checked_at", stats["cache"])
+        self.assertIn("fribb_cache_updated_at", stats["cache"])
+        self.assertIn("fribb_source_url", stats["cache"])
+        self.assertIn("xml_last_checked_at", stats["cache"])
+        self.assertIn("xml_cache_updated_at", stats["cache"])
+        self.assertIn("xml_source_url", stats["cache"])
+        self.assertIn("mapping_refresh_interval_seconds", stats["cache"])
+
+    def test_admin_dashboard_renders_anime_cache_metadata(self) -> None:
+        web.ADMIN_PASSWORD = "secret"
+
+        login = self.client.post("/admin/login", data={"password": "secret"})
+        response = self.client.get("/admin")
+        html = response.get_data(as_text=True)
+
+        self.assertEqual(login.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Fribb checked", html)
+        self.assertIn("XML checked", html)
+        self.assertIn("Refresh interval", html)
 
     def test_status_summary_omits_verbose_error_arrays(self) -> None:
         profile = web._profile_store.create_profile("secret", {

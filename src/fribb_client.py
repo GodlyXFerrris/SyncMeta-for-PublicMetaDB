@@ -31,3 +31,11 @@ def lookup_by_imdb(imdb_id: str) -> dict | None:
 
 def validate_tmdb(entry: dict | None, tmdb_id: int | None) -> bool:
     return _store.validate_tmdb(entry, tmdb_id)
+
+
+def cache_metadata() -> dict:
+    return _store.cache_metadata()
+
+
+def force_refresh() -> dict:
+    return _store.force_refresh()

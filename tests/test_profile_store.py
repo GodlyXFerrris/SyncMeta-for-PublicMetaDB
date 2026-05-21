@@ -137,6 +137,19 @@ class ProfileStoreTests(unittest.TestCase):
             MIN_RESUME_SYNC_INTERVAL_SECONDS,
         )
 
+    def test_schedule_jitter_is_deterministic_and_mode_specific(self) -> None:
+        profile_id = "00000000-0000-4000-8000-000000000001"
+
+        list_jitter = ProfileStore._schedule_jitter_seconds(profile_id, "lists", 900)
+        history_jitter = ProfileStore._schedule_jitter_seconds(profile_id, "history", 900)
+        resume_jitter = ProfileStore._schedule_jitter_seconds(profile_id, "resume", 900)
+
+        self.assertEqual(list_jitter, ProfileStore._schedule_jitter_seconds(profile_id, "lists", 900))
+        self.assertTrue(0 <= list_jitter <= 900)
+        self.assertTrue(0 <= history_jitter <= 900)
+        self.assertTrue(0 <= resume_jitter <= 900)
+        self.assertGreater(len({list_jitter, history_jitter, resume_jitter}), 1)
+
     def test_existing_profiles_migrate_resume_to_manual_and_disable_auto_activity(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {
             **self.options,
@@ -583,7 +596,7 @@ class ProfileStoreTests(unittest.TestCase):
         next_resume = datetime.fromisoformat(updated["next_resume_sync_at"])
         delta_seconds = (next_resume - datetime.now(timezone.utc)).total_seconds()
         self.assertGreater(delta_seconds, 86000)
-        self.assertLess(delta_seconds, 86600)
+        self.assertLess(delta_seconds, 86400 + 901)
 
     def test_activity_only_sync_keeps_existing_last_list_results(self) -> None:
         created = self.store.create_profile("secret", self.credentials, {

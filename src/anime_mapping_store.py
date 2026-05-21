@@ -192,7 +192,98 @@ class AnimeMappingStore:
         self._ensure_xml_loaded()
         return list(self._xml_by_tvdb.get(int(tvdb_id)) or [])
 
-    def _ensure_fribb_loaded(self) -> None:
+    def cache_metadata(self) -> dict:
+        """Return local cache status without doing network work."""
+        with self._lock:
+            return {
+                "refresh_interval_seconds": int(_REFRESH_INTERVAL_SECONDS),
+                "fribb": self._cache_file_metadata(
+                    loaded=self._fribb_loaded,
+                    last_checked=self._fribb_last_checked,
+                    entries=len(self._fribb_by_anilist) if self._fribb_loaded else 0,
+                    cache_path=_FRIBB_CACHE_PATH,
+                    meta_path=_FRIBB_META_PATH,
+                    source_url=FRIBB_URL,
+                ),
+                "anime_lists_xml": self._cache_file_metadata(
+                    loaded=self._xml_loaded,
+                    last_checked=self._xml_last_checked,
+                    entries=len(self._xml_by_anidb) if self._xml_loaded else 0,
+                    cache_path=_XML_CACHE_PATH,
+                    meta_path=_XML_META_PATH,
+                    source_url=ANIME_LISTS_XML_URL,
+                ),
+                "season_group_cache": len(self._same_season_group_cache),
+                "mapping_string_cache": len(self._mapping_string_cache),
+            }
+
+    def force_refresh(self) -> dict:
+        """Force an ETag-aware upstream re-check while preserving good cached data."""
+        started = time.monotonic()
+        results: list[dict] = []
+        for source_name, loader in (
+            ("fribb", lambda: self._ensure_fribb_loaded(force=True)),
+            ("anime_lists_xml", lambda: self._ensure_xml_loaded(force=True)),
+        ):
+            source_started = time.monotonic()
+            try:
+                loader()
+                results.append({
+                    "source": source_name,
+                    "ok": True,
+                    "duration_ms": int((time.monotonic() - source_started) * 1000),
+                })
+            except Exception as exc:
+                results.append({
+                    "source": source_name,
+                    "ok": False,
+                    "error": str(exc),
+                    "duration_ms": int((time.monotonic() - source_started) * 1000),
+                })
+        return {
+            "ok": all(item.get("ok") for item in results),
+            "duration_ms": int((time.monotonic() - started) * 1000),
+            "results": results,
+            "metadata": self.cache_metadata(),
+        }
+
+    @staticmethod
+    def _cache_file_metadata(
+        *,
+        loaded: bool,
+        last_checked: float,
+        entries: int,
+        cache_path: Path,
+        meta_path: Path,
+        source_url: str,
+    ) -> dict:
+        meta: dict = {}
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        cache_mtime = 0.0
+        cache_size = 0
+        if cache_path.exists():
+            try:
+                stat = cache_path.stat()
+                cache_mtime = stat.st_mtime
+                cache_size = stat.st_size
+            except Exception:
+                pass
+        return {
+            "loaded": bool(loaded),
+            "entries": int(entries or 0),
+            "source_url": str(meta.get("source_url") or source_url),
+            "etag": str(meta.get("etag") or ""),
+            "last_modified": str(meta.get("last_modified") or ""),
+            "last_checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(last_checked)) if last_checked else "",
+            "cache_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(cache_mtime)) if cache_mtime else "",
+            "cache_size_bytes": int(cache_size or 0),
+        }
+
+    def _ensure_fribb_loaded(self, force: bool = False) -> None:
         """Load (or refresh) the Fribb mapping data.
 
         First call downloads and parses the full JSON.  Subsequent calls are
@@ -203,11 +294,11 @@ class AnimeMappingStore:
         """
         now = time.time()
         # Fast path: data loaded and not yet due for a refresh check.
-        if self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
+        if not force and self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
             return
         with self._lock:
             now = time.time()
-            if self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
+            if not force and self._fribb_loaded and (now - self._fribb_last_checked) < _REFRESH_INTERVAL_SECONDS:
                 return
             changed, data = self._load_or_download_json_with_change(
                 FRIBB_URL, _FRIBB_CACHE_PATH, _FRIBB_META_PATH,
@@ -249,14 +340,14 @@ class AnimeMappingStore:
                     self._fribb_by_imdb.setdefault(imdb_id, []).append(entry)
             self._fribb_loaded = True
 
-    def _ensure_xml_loaded(self) -> None:
+    def _ensure_xml_loaded(self, force: bool = False) -> None:
         """Load (or refresh) the Anime-Lists XML mapping data."""
         now = time.time()
-        if self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
+        if not force and self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
             return
         with self._lock:
             now = time.time()
-            if self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
+            if not force and self._xml_loaded and (now - self._xml_last_checked) < _REFRESH_INTERVAL_SECONDS:
                 return
             changed, xml_text = self._load_or_download_text_with_change(
                 ANIME_LISTS_XML_URL, _XML_CACHE_PATH, _XML_META_PATH,
@@ -456,6 +547,14 @@ def lookup_fribb(**kwargs) -> dict | None:
 
 def validate_tmdb(entry: dict | None, tmdb_id: int | None) -> bool:
     return _STORE.validate_tmdb(entry, tmdb_id)
+
+
+def cache_metadata() -> dict:
+    return _STORE.cache_metadata()
+
+
+def force_refresh() -> dict:
+    return _STORE.force_refresh()
 
 
 def resolve_tvdb_episode_from_anidb_episode(
