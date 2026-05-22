@@ -678,7 +678,7 @@
                 <div class="form-row" style="margin-top:12px">
                   <label>Auto-Sync Every (Seconds)</label>
                   <input type="number" id="opt-history-interval-seconds" min="120" step="1" value="120" onblur="if(parseInt(this.value)<120||!this.value)this.value=120">
-                  <div class="hint">Minimum 120 s (24 h). Only affects automatic history sync.</div>
+                  <div class="hint">Minimum 120 s (2 m). Only affects automatic history sync.</div>
                 </div>
                 <div class="toggle-row hidden" id="opt-simkl-history-anime-only-row" style="margin-bottom:0"><label class="toggle"><input type="checkbox" id="opt-simkl-history-anime-only"><span class="slider"></span></label><label>Only import SIMKL anime watch history</label></div>
               </div>
@@ -696,7 +696,7 @@
                 <div class="form-row" style="margin-bottom:0">
                   <label>Auto-Sync Every (Seconds)</label>
                   <input type="number" id="opt-resume-interval-seconds" min="120" step="1" value="120" onblur="if(parseInt(this.value)<120||!this.value)this.value=120">
-                  <div class="hint">Minimum 120 s (24 h). Only affects automatic resume sync.</div>
+                  <div class="hint">Minimum 120 s (2 m). Only affects automatic resume sync.</div>
                 </div>
               </div>
               <div class="settings-group form-section">
@@ -1638,8 +1638,8 @@
       const delta = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
       if (delta < 60) return 'Just now';
       if (delta < 3600) return Math.floor(delta / 60) + 'm ago';
-      if (delta < 120) return Math.floor(delta / 3600) + 'h ago';
-      return Math.floor(delta / 120) + 'd ago';
+      if (delta < 86400) return Math.floor(delta / 3600) + 'h ago';
+      return Math.floor(delta / 86400) + 'd ago';
     }
 
     function timeUntil(iso) {
@@ -1647,8 +1647,8 @@
       const delta = Math.max(0, Math.floor((new Date(iso).getTime() - Date.now()) / 1000));
       if (delta < 60) return 'in under a minute';
       if (delta < 3600) return 'in ' + Math.floor(delta / 60) + 'm';
-      if (delta < 120) return 'in ' + Math.floor(delta / 3600) + 'h';
-      return 'in ' + Math.floor(delta / 120) + 'd';
+      if (delta < 86400) return 'in ' + Math.floor(delta / 3600) + 'h';
+      return 'in ' + Math.floor(delta / 86400) + 'd';
     }
 
     function esc(value) {
